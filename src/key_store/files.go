@@ -33,7 +33,7 @@ const (
 	DEFAULT_PERMISSIONS = R_USER | W_USER | R_GROUP | R_OTHER
 )
 
-// this stores an entire file locally
+// this stores arbitrary data as a file locally
 func (ks *KeyStore) StoreFileLocal(name string, fileData []byte) (*File, error) {
 	// prepare metadata
 	metadata, err := PrepareMetaData(name, fileData)
@@ -143,6 +143,10 @@ func (ks *KeyStore) StoreFileLocal(name string, fileData []byte) (*File, error) 
 	return file, nil
 }
 
+// this stores arbitrary data as a file remotely
+// NOTE: NOTE IMPLEMENTED (this is a direct copy of StoreFileLocal)
+//
+// NOTE: this is how data is passed to the network
 func (ks *KeyStore) StoreFileRemote(name string, fileData []byte) (*File, error) {
 	// prepare metadata
 	metadata, err := PrepareMetaData(name, fileData)
@@ -252,6 +256,7 @@ func (ks *KeyStore) StoreFileRemote(name string, fileData []byte) (*File, error)
 	return file, nil
 }
 
+// Reassemble a file and return its data as bytes
 func (ks *KeyStore) ReassembleFileToBytes(key [HashSize]byte) ([]byte, error) {
 	// get the complete file record
 	file, err := ks.fileFromMemory(key)
@@ -315,6 +320,7 @@ func (ks *KeyStore) ReassembleFileToBytes(key [HashSize]byte) ([]byte, error) {
 	return fileData, nil
 }
 
+// Reassemble a file and save it locally
 func (ks *KeyStore) ReassembleFileToPath(key [HashSize]byte, outputPath string) error {
 	// get the complete file record
 	file, err := ks.fileFromMemory(key)
@@ -411,6 +417,8 @@ func (ks *KeyStore) ReassembleFileToPath(key [HashSize]byte, outputPath string) 
 	return nil
 }
 
+// Upload a file from your local file system and save the entire file to local storage
+// NOTE: prepare a document for ethe kdht but store the file in blocks locally
 func (ks *KeyStore) LoadAndStoreFileLocal(localFilePath string) (*File, error) {
 	// open the file
 	f, err := os.Open(localFilePath)
@@ -578,6 +586,10 @@ func (ks *KeyStore) LoadAndStoreFileLocal(localFilePath string) (*File, error) {
 	return file, nil
 }
 
+// Upload a file from your local file system and pass it to a RemoteHandler to process the
+// data elsewhere
+//
+// NOTE: this is how data is passed to the network
 func (ks *KeyStore) LoadAndStoreFileRemote(localFilePath string, handler RemoteHandler) (*File, error) {
 	// open the file
 	f, err := os.Open(localFilePath)
@@ -693,6 +705,15 @@ func (ks *KeyStore) LoadAndStoreFileRemote(localFilePath string, handler RemoteH
 				n)
 		}
 	}
-
+	// store the complete file metadata
+	if err := ks.fileToMemory(file); err != nil {
+		// cleanup on failure
+		for _, ref := range file.References {
+			if ref != nil {
+				ks.DeleteFileReference(ref.Key)
+			}
+		}
+		return nil, fmt.Errorf("failed to store file: %w", err)
+	}
 	return file, nil
 }

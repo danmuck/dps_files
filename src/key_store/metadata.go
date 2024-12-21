@@ -55,7 +55,10 @@ func PrepareMetaData(name string, data []byte) (metadata MetaData, e error) {
 	return metadata, nil
 }
 
-func (ks *KeyStore) SaveMetadata() error {
+func (ks *KeyStore) UpdateLocalMetaData() error {
+	ks.lock.RLock()
+	defer ks.lock.RUnlock()
+
 	metadataDir := filepath.Join(ks.storageDir, "metadata")
 	if err := os.MkdirAll(metadataDir, 0755); err != nil {
 		return fmt.Errorf("failed to create metadata directory: %w", err)
@@ -84,19 +87,27 @@ func (ks *KeyStore) SaveMetadata() error {
 	return nil
 }
 
-func (ks *KeyStore) LoadFileMetadata(key [HashSize]byte) (*File, error) {
+func (ks *KeyStore) LoadLocalFileToMemory(key [HashSize]byte) (*File, error) {
 	metadataDir := filepath.Join(ks.storageDir, "metadata")
 	filepath := filepath.Join(metadataDir, fmt.Sprintf("%x.toml", key))
 
-	var file *File
+	var file *File = &File{}
 	if _, err := toml.DecodeFile(filepath, file); err != nil {
 		return nil, fmt.Errorf("failed to decode metadata file: %w", err)
 	}
 
+	for _, ref := range file.References {
+		if ref != nil && ref.Location == "" {
+			ref = nil
+		}
+	}
 	return file, nil
 }
 
-func (ks *KeyStore) LoadAllFileMetadata() error {
+func (ks *KeyStore) LoadAllLocalFilesToMemory() error {
+	ks.lock.Lock()
+	defer ks.lock.Unlock()
+
 	metadataDir := filepath.Join(ks.storageDir, "metadata")
 
 	// create directory if it doesn't exist
@@ -123,7 +134,7 @@ func (ks *KeyStore) LoadAllFileMetadata() error {
 			copy(fileHash[:], hashBytes)
 
 			// load file metadata
-			file, err := ks.LoadFileMetadata(fileHash)
+			file, err := ks.LoadLocalFileToMemory(fileHash)
 			if err != nil {
 				return fmt.Errorf("failed to load metadata for %s: %w", entry.Name(), err)
 			}
@@ -131,7 +142,7 @@ func (ks *KeyStore) LoadAllFileMetadata() error {
 			// add to in-memory maps
 			ks.files[fileHash] = file // store the complete file struct
 			for _, ref := range file.References {
-				if ref != nil {
+				if ref != nil && ref.Location != "" {
 					ks.references[ref.Key] = *ref
 				}
 			}

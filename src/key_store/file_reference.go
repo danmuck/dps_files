@@ -20,7 +20,7 @@ type FileReference struct {
 	// MetaData  *MetaData      `toml:"metadata,omitempty"`
 }
 
-func (ks *KeyStore) blockPath(id [KeySize]byte) string {
+func (ks *KeyStore) GetLocalBlockLocation(id [KeySize]byte) string {
 	return filepath.Join(ks.storageDir, fmt.Sprintf("%x%s", id, FileExtension))
 }
 
@@ -47,7 +47,7 @@ func (ks *KeyStore) StoreFileReference(ref *FileReference, data []byte) error {
 	// ref.DataHash = sha256.Sum256(data)
 
 	// create block file
-	blockPath := ks.blockPath(ref.Key)
+	blockPath := ks.GetLocalBlockLocation(ref.Key)
 	if err := os.WriteFile(blockPath, data, 0644); err != nil {
 		return fmt.Errorf("failed to write block file: %w", err)
 	}

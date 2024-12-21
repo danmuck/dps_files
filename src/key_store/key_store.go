@@ -12,11 +12,11 @@ import (
 )
 
 type KeyStore struct {
+	storageDir string
 	lock       sync.RWMutex
+
 	references map[[KeySize]byte]FileReference
 	files      map[[HashSize]byte]*File
-	md         []*File
-	storageDir string
 }
 
 func InitKeyStore(storageDir string) (*KeyStore, error) {
@@ -263,7 +263,7 @@ func (ks *KeyStore) verifyFileReferences() error {
 
 	// first pass: identify orphaned metadata files
 	for key := range ks.references {
-		blockPath := ks.blockPath(key)
+		blockPath := ks.GetLocalBlockLocation(key)
 		if _, err := os.Stat(blockPath); os.IsNotExist(err) {
 			// find the metadata file containing this chunk reference
 			metadataDir := filepath.Join(ks.storageDir, "metadata")

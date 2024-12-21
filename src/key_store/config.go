@@ -25,21 +25,25 @@ const (
 	VERIFY        = false
 )
 
+// this reciever must be implemented on the server side
+// it needs to implement a channel that will first be initialized
+// with a MetaData{}, followed by all FileReference{} for the file.
+//
+// each FileReference{} is passed just before it's []byte{} data
+//
+// these need to be processed and stored across the dht
+// and removed from memory as the files are stored remotely
 type RemoteHandler interface {
-	// this reciever must be implemented on the server side
-	// it needs to implement a channel that will first recieve
-	// a MetaData{}, followed by all FileReference{} for the file.
-	//
-	// these need to be processed and stored across the dht
-	// and removed from memory as the files are stored remotely
-	//
+
 	// StartReceiver() takes a File MetaData and prepares to process
 	// the file as it is passed block by block
 	StartReceiver(md *MetaData)
 	// PassFileReference() takes a FileReference pointer which acts
 	// as a header for the data that will follow it
 	PassFileReference(fr *FileReference, d []byte)
-
+	// Receive() will need to be implemented in place of the current
+	// default go-routine inside StartReceiver()
+	// NOTE: it takes the place of make(chan interface{}) in a real impl
 	Receive() <-chan interface{}
 }
 
@@ -49,11 +53,14 @@ type DefaultRemoteHandler struct {
 }
 
 func (h *DefaultRemoteHandler) Receive() <-chan interface{} {
+	if h.stream == nil {
+		h.stream = make(chan interface{})
+	}
 	return h.stream
 }
 
 func (h *DefaultRemoteHandler) StartReceiver(md *MetaData) {
-	h.stream = make(chan interface{})
+	ch := h.Receive()
 
 	// This Needs to be implemented to actually process the data
 	// currently this serves as a placeholder than prints output
@@ -63,7 +70,7 @@ func (h *DefaultRemoteHandler) StartReceiver(md *MetaData) {
 		var index uint32 = 0
 		for {
 			select {
-			case data, ok := <-h.stream:
+			case data, ok := <-ch:
 				if !ok {
 					fmt.Println("Channel Closed")
 					return

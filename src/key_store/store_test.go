@@ -218,7 +218,7 @@ func TestKeyStorePersistence(t *testing.T) {
 	originalHash := file.MetaData.FileHash
 
 	// save metadata state
-	if err := ks1.SaveMetadata(); err != nil {
+	if err := ks1.UpdateLocalMetaData(); err != nil {
 		t.Fatalf("Failed to save metadata: %v", err)
 	}
 
