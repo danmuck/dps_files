@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -28,12 +29,14 @@ const (
 	R_OTHER = 0004 // read permission for others
 	W_OTHER = 0002 // write permission for others
 	X_OTHER = 0001 // execute permission for others
+
+	DEFAULT_PERMISSIONS = R_USER | W_USER | R_GROUP | R_OTHER
 )
 
 // this stores an entire file locally
-func (ks *KeyStore) StoreFileLocal(name string, fileData []byte, permissions int) (*File, error) {
+func (ks *KeyStore) StoreFileLocal(name string, fileData []byte) (*File, error) {
 	// prepare metadata
-	metadata, err := PrepareMetaData(name, fileData, permissions)
+	metadata, err := PrepareMetaData(name, fileData)
 	if err != nil {
 		return nil, err
 	}
@@ -140,9 +143,9 @@ func (ks *KeyStore) StoreFileLocal(name string, fileData []byte, permissions int
 	return file, nil
 }
 
-func (ks *KeyStore) StoreFileRemote(name string, fileData []byte, permissions int) (*File, error) {
+func (ks *KeyStore) StoreFileRemote(name string, fileData []byte) (*File, error) {
 	// prepare metadata
-	metadata, err := PrepareMetaData(name, fileData, permissions)
+	metadata, err := PrepareMetaData(name, fileData)
 	if err != nil {
 		return nil, err
 	}
@@ -320,7 +323,7 @@ func (ks *KeyStore) ReassembleFileToPath(key [HashSize]byte, outputPath string) 
 	}
 
 	// create output file
-	f, err := os.OpenFile(outputPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	f, err := os.OpenFile(outputPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, fs.FileMode(file.MetaData.Permissions))
 	if err != nil {
 		return fmt.Errorf("failed to create output file: %w", err)
 	}
@@ -408,7 +411,7 @@ func (ks *KeyStore) ReassembleFileToPath(key [HashSize]byte, outputPath string) 
 	return nil
 }
 
-func (ks *KeyStore) LoadAndStoreFile(localFilePath string) (*File, error) {
+func (ks *KeyStore) LoadAndStoreFileLocal(localFilePath string) (*File, error) {
 	// open the file
 	f, err := os.Open(localFilePath)
 	if err != nil {
@@ -570,6 +573,125 @@ func (ks *KeyStore) LoadAndStoreFile(localFilePath string) (*File, error) {
 			}
 		}
 		return nil, fmt.Errorf("failed to store file: %w", err)
+	}
+
+	return file, nil
+}
+
+func (ks *KeyStore) LoadAndStoreFileRemote(localFilePath string, handler RemoteHandler) (*File, error) {
+	// open the file
+	f, err := os.Open(localFilePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open local file: %w", err)
+	}
+	defer f.Close()
+
+	// get file info for size
+	fileInfo, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get file info: %w", err)
+	}
+
+	// calculate file hash using streaming
+	hash := sha256.New()
+	if _, err := io.Copy(hash, f); err != nil {
+		return nil, fmt.Errorf("failed to calculate file hash: %w", err)
+	}
+
+	// reset file pointer
+	if _, err := f.Seek(0, 0); err != nil {
+		return nil, fmt.Errorf("failed to reset file position: %w", err)
+	}
+
+	// prepare metadata
+	fileName := filepath.Base(localFilePath)
+	metadata := MetaData{
+		FileName:    fileName,
+		TotalSize:   uint64(fileInfo.Size()),
+		Modified:    time.Now().UnixNano(),
+		Permissions: uint32(fileInfo.Mode().Perm()),
+		BlockSize:   CalculateBlockSize(uint64(fileInfo.Size())),
+	}
+	var fileHash [HashSize]byte
+	copy(fileHash[:], hash.Sum(nil))
+	metadata.FileHash = fileHash
+	// copy(metadata.filehash[:], hash.sum(nil))
+	metadata.TotalBlocks = uint32((metadata.TotalSize + uint64(metadata.BlockSize) - 1) / uint64(metadata.BlockSize))
+
+	// Start receiver
+	go handler.StartReceiver(&metadata)
+
+	// create file object
+	file := &File{
+		MetaData:   metadata,
+		References: make([]*FileReference, metadata.TotalBlocks),
+	}
+
+	fmt.Printf("Starting chunking process:\n")
+	fmt.Printf("Total size: %d bytes\n", metadata.TotalSize)
+	fmt.Printf("Block size: %d bytes\n", metadata.BlockSize)
+	fmt.Printf("Expected blocks: %d\n", metadata.TotalBlocks)
+
+	// process file in chunks
+	buffer := make([]byte, metadata.BlockSize)
+	var totalBytesRead uint64 = 0
+
+	for i := uint32(0); i < metadata.TotalBlocks; i++ {
+		// calculate expected block size
+		var bytesToRead uint32 = metadata.BlockSize
+		if i == metadata.TotalBlocks-1 {
+			// for the last block, calculate remaining bytes
+			remainingBytes := metadata.TotalSize - totalBytesRead
+			bytesToRead = uint32(remainingBytes)
+			fmt.Printf("Last block %d: Reading remaining %d bytes\n", i, bytesToRead)
+		}
+
+		// read block
+		n, err := io.ReadFull(f, buffer[:bytesToRead])
+		if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+			return nil, fmt.Errorf("failed to read block %d: %w", i, err)
+		}
+
+		if n == 0 {
+			return nil, fmt.Errorf("unexpected end of file at block %d", i)
+		}
+
+		if i%100 == 0 || i == metadata.TotalBlocks-1 {
+			fmt.Printf("Block %d: Read %d bytes (total: %d/%d)\n",
+				i, n, totalBytesRead+uint64(n), metadata.TotalSize)
+		}
+		blockData := buffer[:n]
+
+		// create filereference for this block
+		block := FileReference{
+			FileName:  metadata.FileName,
+			Parent:    metadata.FileHash,
+			Size:      uint32(n),
+			FileIndex: i,
+			Protocol:  "file",
+			DataHash:  sha256.Sum256(blockData),
+		}
+
+		// calculate chunk's dht routing id
+		blockIDtmp := append(metadata.FileHash[:], make([]byte, 8)...)
+		binary.LittleEndian.PutUint64(blockIDtmp[len(metadata.FileHash):], uint64(i))
+		blockID := sha1.Sum(blockIDtmp)
+		block.Key = blockID
+
+		go handler.PassFileReference(&block, blockData)
+
+		file.References[i] = &block
+
+		totalBytesRead += uint64(n)
+
+		// progress reporting
+		if i%100 == 0 || i == metadata.TotalBlocks-1 {
+			PrintMemUsage()
+			fmt.Printf("Stored block %d/%d (%.1f%%) - size: %d bytes\n",
+				i+1, metadata.TotalBlocks,
+				float64(i+1)/float64(metadata.TotalBlocks)*100,
+				n)
+		}
 	}
 
 	return file, nil

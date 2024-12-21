@@ -22,7 +22,7 @@ const RUN_ALL = false
 //	}
 
 var TEST_FILES, err = getFilesInDirectory(DATA_DIRECTORY)
-var FILE = TEST_FILES[1]
+var FILE = TEST_FILES[0]
 
 func getFilesInDirectory(dirPath string) ([]string, error) {
 	var files []string
@@ -129,8 +129,8 @@ func cleanupCopyFiles(dir string) error {
 }
 
 func main() {
-	if len(os.Args) < 2 || os.Args[1] != "run" {
-		fmt.Println("Usage: go run main.go run")
+	if len(os.Args) < 2 {
+		fmt.Println("Usage: go run main.go [run|remote]")
 		fmt.Println("\nBefore running, please configure TEST_FILES in the source code:")
 		fmt.Println("\nvar TEST_FILES = map[int]string{")
 		fmt.Println("    0: \"your_file.ext\",")
@@ -192,9 +192,20 @@ func main() {
 		fmt.Printf("Original file hash: %x\n\n", originalHash)
 
 		// store the file
-		file, err := keystore.LoadAndStoreFile(filename)
-		if err != nil {
-			log.Fatalf("Failed to store file: %v", err)
+		var file *key_store.File
+		if os.Args[1] == "run" {
+			file, err = keystore.LoadAndStoreFileLocal(filename)
+			if err != nil {
+				log.Fatalf("Failed to store file: %v", err)
+			}
+		}
+		if os.Args[1] == "remote" {
+			rh := key_store.DefaultRemoteHandler{}
+			file, err = keystore.LoadAndStoreFileRemote(filename, &rh)
+			if err != nil {
+				log.Fatalf("Failed to store file: %v", err)
+			}
+
 		}
 
 		fmt.Printf("\nFile details:\n")
@@ -205,42 +216,45 @@ func main() {
 			file.MetaData.TotalSize-uint64(file.MetaData.BlockSize*(file.MetaData.TotalBlocks-1)))
 		// fmt.Printf("\nFile:: %v \n", file.String())
 
-		// verify chunks
-		if err := verifyChunks(keystore, file); err != nil {
-			log.Fatalf("Chunk verification failed: %v", err)
+		if os.Args[1] == "run" {
+
+			// verify chunks
+			if err := verifyChunks(keystore, file); err != nil {
+				log.Fatalf("Chunk verification failed: %v", err)
+			}
+
+			// calculate last chunk size
+			lastChunkSize := file.MetaData.TotalSize % uint64(file.MetaData.BlockSize)
+			if lastChunkSize == 0 {
+				lastChunkSize = uint64(file.MetaData.BlockSize)
+			}
+			fmt.Printf("Expected last chunk size: %d\n", lastChunkSize)
+
+			// reassemble the file
+			realPath := DATA_DIRECTORY + "copy." + FILE_test
+
+			fmt.Printf("\nReassembling file to: %s\n", realPath)
+			if err := keystore.ReassembleFileToPath(file.MetaData.FileHash, realPath); err != nil {
+				log.Fatalf("Failed to reassemble file: %v", err)
+			}
+
+			reassembledHash, length, err := key_store.HashFile(realPath)
+			if err != nil {
+				log.Fatalf("Failed to verify reassembled file: %v", err)
+			}
+
+			fmt.Printf("\nReassembly complete:\n")
+			fmt.Printf("Original size: %d bytes\n", file.MetaData.TotalSize)
+			fmt.Printf("Original hash: %x\n", file.MetaData.FileHash)
+			fmt.Printf("Reassembled size: %d bytes\n", length)
+			fmt.Printf("Reassembled hash: %x\n", reassembledHash)
+
+			if file.MetaData.FileHash != reassembledHash {
+				log.Fatalf("Hash mismatch after reassembly!\nOriginal: %x\nReassembled: %x",
+					file.MetaData.FileHash, reassembledHash)
+			}
+
+			fmt.Printf("Successfully reassembled file to: %s\n", realPath)
 		}
-
-		// calculate last chunk size
-		lastChunkSize := file.MetaData.TotalSize % uint64(file.MetaData.BlockSize)
-		if lastChunkSize == 0 {
-			lastChunkSize = uint64(file.MetaData.BlockSize)
-		}
-		fmt.Printf("Expected last chunk size: %d\n", lastChunkSize)
-
-		// reassemble the file
-		realPath := DATA_DIRECTORY + "copy." + FILE_test
-
-		fmt.Printf("\nReassembling file to: %s\n", realPath)
-		if err := keystore.ReassembleFileToPath(file.MetaData.FileHash, realPath); err != nil {
-			log.Fatalf("Failed to reassemble file: %v", err)
-		}
-
-		reassembledHash, length, err := key_store.HashFile(realPath)
-		if err != nil {
-			log.Fatalf("Failed to verify reassembled file: %v", err)
-		}
-
-		fmt.Printf("\nReassembly complete:\n")
-		fmt.Printf("Original size: %d bytes\n", file.MetaData.TotalSize)
-		fmt.Printf("Original hash: %x\n", file.MetaData.FileHash)
-		fmt.Printf("Reassembled size: %d bytes\n", length)
-		fmt.Printf("Reassembled hash: %x\n", reassembledHash)
-
-		if file.MetaData.FileHash != reassembledHash {
-			log.Fatalf("Hash mismatch after reassembly!\nOriginal: %x\nReassembled: %x",
-				file.MetaData.FileHash, reassembledHash)
-		}
-
-		fmt.Printf("Successfully reassembled file to: %s\n", realPath)
 	}
 }

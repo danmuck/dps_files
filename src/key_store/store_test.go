@@ -45,7 +45,7 @@ func TestLargeFileChunking(t *testing.T) {
 	t.Logf("Original file hash: %x", originalHash)
 
 	// store the file
-	file, err := keystore.LoadAndStoreFile(filename)
+	file, err := keystore.LoadAndStoreFileLocal(filename)
 	if err != nil {
 		t.Fatalf("Failed to store file: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestSmallFileChunking(t *testing.T) {
 			originalHash := sha256.Sum256(originalData)
 
 			// store and verify
-			file, err := keystore.LoadAndStoreFile(filename)
+			file, err := keystore.LoadAndStoreFileLocal(filename)
 			if err != nil {
 				t.Fatalf("Failed to store file: %v", err)
 			}
@@ -210,7 +210,7 @@ func TestKeyStorePersistence(t *testing.T) {
 	}
 
 	// store the file
-	file, err := ks1.LoadAndStoreFile(testFile)
+	file, err := ks1.LoadAndStoreFileLocal(testFile)
 	if err != nil {
 		t.Fatalf("Failed to store file: %v", err)
 	}

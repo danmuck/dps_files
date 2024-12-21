@@ -24,16 +24,13 @@ type MetaData struct {
 	TotalBlocks uint32           `toml:"total_chunks"`
 }
 
-func PrepareMetaDataSecure(name string, data []byte, permissions int, signature [CryptoSize]byte) (metadata MetaData, e error) {
-	if permissions == 0 {
-		metadata.Permissions = R_USER | W_USER | R_GROUP | R_OTHER // default
-	} else {
-		metadata.Permissions = uint32(permissions)
-	}
+func PrepareMetaDataSecure(name string, data []byte, signature [CryptoSize]byte) (metadata MetaData, e error) {
+
 	metadata.TotalSize = uint64(len(data))
 	metadata.TTL = 24 * 60 * 60 // 24 hrs in seconds
 	metadata.FileName = name
 	metadata.Modified = time.Now().UnixNano()
+	metadata.Permissions = DEFAULT_PERMISSIONS
 	// metadata.MimeType = "Not Implemented"
 	metadata.Signature = signature
 	metadata.BlockSize = CalculateBlockSize(metadata.TotalSize)
@@ -42,17 +39,13 @@ func PrepareMetaDataSecure(name string, data []byte, permissions int, signature 
 	return metadata, nil
 }
 
-func PrepareMetaData(name string, data []byte, permissions int) (metadata MetaData, e error) {
-	if permissions == 0 {
-		metadata.Permissions = R_USER | W_USER | R_GROUP | R_OTHER // default
-	} else {
-		metadata.Permissions = uint32(permissions)
-	}
+func PrepareMetaData(name string, data []byte) (metadata MetaData, e error) {
 
 	metadata.TotalSize = uint64(len(data))
 	metadata.TTL = 24 * 60 * 60
 	metadata.FileName = name
 	metadata.Modified = time.Now().UnixNano()
+	metadata.Permissions = DEFAULT_PERMISSIONS
 	// metadata.MimeType = "Not Implemented"
 	metadata.BlockSize = CalculateBlockSize(metadata.TotalSize)
 

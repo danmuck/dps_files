@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 )
 
 const (
@@ -23,6 +24,82 @@ const (
 	PRINT_BLOCKS  = 500
 	VERIFY        = false
 )
+
+type RemoteHandler interface {
+	// this reciever must be implemented on the server side
+	// it needs to implement a channel that will first recieve
+	// a MetaData{}, followed by all FileReference{} for the file.
+	//
+	// these need to be processed and stored across the dht
+	// and removed from memory as the files are stored remotely
+	//
+	// StartReceiver() takes a File MetaData and prepares to process
+	// the file as it is passed block by block
+	StartReceiver(md *MetaData)
+	// PassFileReference() takes a FileReference pointer which acts
+	// as a header for the data that will follow it
+	PassFileReference(fr *FileReference, d []byte)
+
+	Receive() <-chan interface{}
+}
+
+type DefaultRemoteHandler struct {
+	stream chan interface{}
+	mu     sync.Mutex
+}
+
+func (h *DefaultRemoteHandler) Receive() <-chan interface{} {
+	return h.stream
+}
+
+func (h *DefaultRemoteHandler) StartReceiver(md *MetaData) {
+	h.stream = make(chan interface{})
+
+	// This Needs to be implemented to actually process the data
+	// currently this serves as a placeholder than prints output
+	// for testing purposes
+	go func() {
+		blocks := md.TotalBlocks
+		var index uint32 = 0
+		for {
+			select {
+			case data, ok := <-h.stream:
+				if !ok {
+					fmt.Println("Channel Closed")
+					return
+				}
+				switch tmp := data.(type) {
+
+				case []byte:
+					fmt.Printf("Data Received ... \n")
+					tmp = nil
+					if index == blocks {
+						fmt.Printf("Final Block Data Received: %d/%d \n", index, blocks)
+						close(h.stream)
+						return
+					}
+
+				case *MetaData:
+					fmt.Printf("MetaData: %+v \n", tmp)
+
+				case *FileReference:
+					index++
+					fmt.Printf("FileReference: %+v \n", tmp)
+
+				default:
+					fmt.Printf("Hit Default Case??: %+v \n", tmp)
+				}
+			}
+		}
+	}()
+}
+
+func (h *DefaultRemoteHandler) PassFileReference(fr *FileReference, d []byte) {
+	h.mu.Lock()
+	h.stream <- fr
+	h.stream <- d
+	h.mu.Unlock()
+}
 
 func PrintMemUsage() {
 	var m runtime.MemStats
