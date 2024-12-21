@@ -70,6 +70,7 @@ func (b *Block) Print() {
 
 // Encrypted Mirrors
 
+// Init new block with encryption
 func NewBlockEncrypt(index uint64, data []byte, prev []byte, key []byte) *Block {
 	nonce, err := secureNonce64()
 	if err != nil {

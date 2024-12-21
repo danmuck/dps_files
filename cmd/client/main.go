@@ -1,0 +1,74 @@
+package main
+
+import (
+	"bufio"
+	"encoding/binary"
+	"fmt"
+	"net"
+	"os"
+	"time"
+
+	"github.com/danmuck/dps_files/src/api/transport"
+
+	"google.golang.org/protobuf/proto"
+)
+
+func main() {
+	address := "localhost:3000" // Replace with your server address
+	fmt.Printf("Connecting to server at %s...\n", address)
+
+	conn, err := net.Dial("tcp", address)
+	if err != nil {
+		fmt.Printf("Failed to connect to server: %v\n", err)
+		return
+	}
+	defer conn.Close()
+
+	fmt.Println("Connected. Type your message and press Enter to send. Type 'exit' to quit.")
+
+	scanner := bufio.NewScanner(os.Stdin)
+	for {
+		fmt.Print("> ")
+		scanner.Scan()
+		input := scanner.Text()
+
+		if input == "exit" {
+			fmt.Println("Exiting...")
+			break
+		}
+
+		// Create a Protobuf message
+		msg := &transport.RPC{
+			Meta: &transport.RPCT{
+				Command:  transport.Command_PING,
+				Protocol: transport.Protocol_Kademlia,
+			},
+			Sender: &transport.NodeInfo{
+				Address: conn.LocalAddr().String(),
+				Id:      []byte{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14},
+				Time:    time.Now().UnixNano(),
+			},
+			Payload: []byte(input),
+		}
+
+		// Serialize the Protobuf message
+		data, err := proto.Marshal(msg)
+		if err != nil {
+			fmt.Printf("Failed to serialize message: %v\n", err)
+			continue
+		}
+
+		hdr := make([]byte, 2)
+		binary.BigEndian.PutUint16(hdr, uint16(len(data)))
+		data = append(hdr, data...)
+
+		// Write the serialized data to the connection
+		_, err = conn.Write(data)
+		if err != nil {
+			fmt.Printf("Failed to send message: %v\n", err)
+			break
+		}
+
+		fmt.Printf("Message sent. Length: %v \n", len(data))
+	}
+}

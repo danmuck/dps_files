@@ -65,7 +65,7 @@ func CalculateHash(any interface{}, size int) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		// hash := sha256.Sum256(buf.Bytes())
+
 		hash := ComputeShaHash(buf.Bytes(), size)
 		return hash, nil
 	}
@@ -78,9 +78,8 @@ func CalculateHash(any interface{}, size int) ([]byte, error) {
 		return nil, err
 	}
 
-	// Compute the hash
 	hash := ComputeShaHash(buf.Bytes(), size)
-	return hash[:], nil
+	return hash, nil
 }
 
 // Validate the hash of a Block by rehashing it

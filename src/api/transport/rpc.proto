@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+option go_package = "github.com/danmuck/dps_files/src/api/transport";
+
+package transport;
+
+enum Protocol {
+    Raft = 0;
+    Kademlia = 1;
+}
+
+enum Command {
+    PING = 0;
+    STORE = 1;
+    GET = 2;
+    FIND_NODE = 3;
+    FIND_VALUE = 4;
+    ACK = 5;
+    NODES = 6;
+    VALUE = 7;
+}
+
+message NodeInfo {
+    string address = 1;
+    bytes id = 2;
+    int64 time = 3;
+}
+
+message RPC_t {
+    Command Command = 1;
+	Protocol Protocol = 2;
+}
+
+message RPC {
+    RPC_t Meta = 1;
+    NodeInfo Sender = 2;
+    bytes Payload = 3;
+
+    bytes Key = 4;               // kdht key
+    bytes Value = 5;             // kdht value
+    repeated NodeInfo Nodes = 6; // k closest nodes field
+
+}

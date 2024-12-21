@@ -1,69 +1,53 @@
-package server
+package main
 
-// import (
-// 	"github.com/coreos/etcd/raft"
-// 	"github.com/danmuck/dps_files/operations"
-// )
+import (
+	"fmt"
+	"time"
 
-// type Node struct {
-// 	ID         uint64
-// 	Node       raft.Node
-// 	Storage    *raft.MemoryStorage
-// 	LogManager operations.CandidateLogManager
-// 	Metadata   operations.MetadataStore
-// 	Transport  operations.Transport
-// 	Snapshots  operations.SnapshotManager
-// }
+	"math/rand"
 
-// func (n *Node) Start(peers []raft.Peer) error {
-// 	config := &raft.Config{
-// 		ID:              n.ID,
-// 		ElectionTick:    10,
-// 		HeartbeatTick:   1,
-// 		Storage:         n.Storage,
-// 		MaxSizePerMsg:   4096,
-// 		MaxInflightMsgs: 256,
-// 	}
+	"github.com/danmuck/dps_files/src/api/nodes"
+	"github.com/danmuck/dps_files/src/api/transport"
+)
 
-// 	n.Node = raft.StartNode(config, peers)
-// 	go n.processRaftEvents()
-// 	return nil
-// }
+func handleInbound(h transport.TCPHandler) {
+	for {
+		rpc := <-h.ProcessRPC()
+		// ch <- rpc
+		if rpc != nil {
+			fmt.Printf("handleInbound(%s) \n", rpc.Sender.Address)
+			continue
+		}
+		fmt.Printf("handleInbound(): exiting \n")
+		break
+	}
+}
 
-// func (n *Node) processRaftEvents() {
-// 	for rd := range n.Node.Ready() {
-// 		// Apply log entries
-// 		for _, entry := range rd.CommittedEntries {
-// 			n.LogManager.Append(operations.LogEntry{
-// 				Index:   entry.Index,
-// 				Term:    entry.Term,
-// 				Command: entry.Data,
-// 			})
-// 		}
+func GenerateKey() []byte {
+	i := 20
+	b := make([]byte, 0, i)
+	for i > 0 {
+		i--
+		r := rand.Intn(256)
+		b = append(b, byte(r))
+	}
 
-// 		// Persist snapshot
-// 		if !raft.IsEmptySnap(rd.Snapshot) {
-// 			snapshot := operations.Snapshot{
-// 				Term:  rd.Snapshot.Metadata.Term,
-// 				Index: rd.Snapshot.Metadata.Index,
-// 				Data:  rd.Snapshot.Data,
-// 				Metadata: map[string]string{
-// 					"blockchain_hash": operations.computeBlockchainHash(rd.Snapshot.Data),
-// 				},
-// 			}
-// 			n.Snapshots.PersistSnapshot(snapshot)
-// 		}
+	return b
+}
+func main() {
+	n, err := nodes.NewDefaultNode(GenerateKey(), "localhost:3000", 5, 5)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	r := n.Router
+	fmt.Printf("Router: %+v \n", r)
 
-// 		// Send messages
-// 		for _, msg := range rd.Messages {
-// 			n.Transport.Send(operations.Message{
-// 				From:    msg.From,
-// 				To:      msg.To,
-// 				Type:    msg.Type.String(),
-// 				Payload: msg.Entries,
-// 			})
-// 		}
+	go n.Start()
 
-// 		n.Node.Advance()
-// 	}
-// }
+	time.Sleep(20 * time.Second)
+
+	err = n.Shutdown()
+	fmt.Println(err)
+
+}
