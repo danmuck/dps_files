@@ -1,6 +1,8 @@
 package nodes
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -24,28 +26,67 @@ type KademliaRouting interface {
 	Size() int  // returns the number of non-empty buckets
 }
 
+////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////
+
 type DefaultRouter struct {
 	localhost string
-	nodes     map[string]transport.NodeInfo
+	nodes     map[string]*transport.NodeInfo
 	mu        sync.Mutex
 }
 
 func NewDefaultRouter(node *transport.NodeInfo) (*DefaultRouter, error) {
 	return &DefaultRouter{
 		localhost: node.Address,
-		nodes:     make(map[string]transport.NodeInfo),
+		nodes:     make(map[string]*transport.NodeInfo),
 	}, nil
 }
 
 func (r *DefaultRouter) InsertNode(node Node) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, exists := r.nodes[node.Address()]; exists {
+		return errors.New("node already exists")
+	}
+
+	r.nodes[node.Address()] = &transport.NodeInfo{
+		Id:      node.ID(),
+		Address: node.Address(),
+	}
 	return nil
 }
+
 func (r *DefaultRouter) RemoveNode(node Node) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, exists := r.nodes[node.Address()]; !exists {
+		return errors.New("node not found")
+	}
+
+	delete(r.nodes, node.Address())
 	return nil
 }
-func (r *DefaultRouter) Lookup(id []byte) (*Node, error) {
-	return nil, nil
+
+func (r *DefaultRouter) Lookup(id []byte) (*transport.NodeInfo, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for _, info := range r.nodes {
+		if bytes.Equal(info.GetId(), id) {
+			return info, nil
+		}
+	}
+	return nil, errors.New("node not found")
 }
+
+////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////
 
 type KademliaRouter struct {
 	id        []byte
@@ -75,24 +116,31 @@ func NewKademliaRouter(node *transport.NodeInfo, k int) (*KademliaRouter, error)
 func (r *KademliaRouter) InsertNode(node Node) error {
 	return nil
 }
+
 func (r *KademliaRouter) RemoveNode(node Node) error {
 	return nil
 }
+
 func (r *KademliaRouter) Lookup(id []byte) (*Node, error) {
 	return nil, nil
 }
+
 func (r *KademliaRouter) K() int {
 	return -1
 }
+
 func (r *KademliaRouter) A() int {
 	return -1
 }
+
 func (r *KademliaRouter) GetBucket(index int) []*Node {
 	return nil
 }
+
 func (r *KademliaRouter) ClosestK(key []byte) []*Node {
 	return nil
 }
+
 func (r *KademliaRouter) Size() int {
 	return -1
 }

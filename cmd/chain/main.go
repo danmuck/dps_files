@@ -93,7 +93,8 @@ func InitializeBlockchain(encryptionKey []byte) *Blockchain {
 func main() {
 	// Initialize the blockchain
 	encryptionKey := []byte("examplekey123456")
-	// encryptionKey := []byte("some random data for my super secure key but it needs to be long enough for this to actually be a thing so i am adding random data to it until it is the correct size which should be 256 bytes and we will definitely get there eventually just some more .....") // Replace with secure key generation
+	// encryptionKey := []byte("some random data for my super secure key but it needs to be long enough
+	// for this to actually be a thing so i am adding random data to it until it is the correct size which should be 256 bytes)
 	bc := InitializeBlockchain(encryptionKey)
 	bc.PrintChain()
 

@@ -8,8 +8,8 @@ import (
 )
 
 type DefaultNode struct {
-	id         []byte
 	address    string
+	pubKey     []byte
 	Router     RoutingTable
 	TCPHandler *transport.TCPHandler
 	exit       chan interface{}
@@ -31,7 +31,7 @@ func NewDefaultNode(id []byte, address string, k int, a int) (DefaultNode, error
 
 	exit := make(chan interface{})
 	client := &DefaultNode{
-		id:         id,
+		pubKey:     id,
 		address:    address,
 		Router:     rt,
 		TCPHandler: transport.NewTCPHandler(address, exit),
@@ -43,7 +43,7 @@ func NewDefaultNode(id []byte, address string, k int, a int) (DefaultNode, error
 
 func (n *DefaultNode) NodeInfo() transport.NodeInfo {
 	return transport.NodeInfo{
-		Id:      n.id,
+		Id:      n.pubKey,
 		Address: n.address,
 		Time:    time.Now().UnixNano(),
 	}
@@ -53,8 +53,8 @@ func (n *DefaultNode) Address() string {
 	return n.address
 }
 
-func (n *DefaultNode) ID() []byte {
-	return n.id
+func (n *DefaultNode) PubKey() []byte {
+	return n.pubKey
 }
 
 func (n *DefaultNode) Start() error {

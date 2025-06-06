@@ -32,3 +32,6 @@ chain:
 # Tidy up dependencies
 tidy:
 	go mod tidy
+
+build-protobuf:
+	protoc --go_out=. --go_opt=paths=source_relative src/api/transport/rpc.proto
