@@ -1,0 +1,25 @@
+sequenceDiagram
+  participant CN as "ClientNode"
+  participant TR as "TransportHandler (TCP/UDP)"
+  participant RT as "KademliaRouting"
+  participant SN as "Storage Node"
+  participant KS as "KeyStore"
+  participant ML as "MetadataStore (future)"
+  participant RA as "Raft Cluster (future)"
+  participant BL as "BackupLedger (future)"
+
+  CN->>TR: "RPC{Command: STORE, Protocol: Kademlia, Key, Value, request_id, trace_id}"
+  TR->>SN: "Deliver STORE RPC"
+  SN->>KS: "StoreFileReference(key, value)"
+  KS-->>SN: "stored / error"
+  SN-->>CN: "RPC{Command: ACK, request_id, trace_id}"
+
+  CN->>TR: "RPC{Command: FIND_VALUE, Key, request_id, trace_id}"
+  TR->>SN: "Deliver FIND_VALUE RPC"
+  SN->>RT: "ClosestK(key) if value not local"
+  RT-->>SN: "candidate peers"
+  SN-->>CN: "RPC{Command: VALUE} or RPC{Command: NODES}"
+
+  KS->>ML: "UpsertFile(file_id, chunk_ids) (future)"
+  ML->>RA: "Replicate metadata changes (future)"
+  RA->>BL: "Snapshot + append backup block (future)"

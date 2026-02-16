@@ -1,0 +1,101 @@
+[meta]
+name = "metadata_ledgers"
+version = "v1"
+status = "draft"
+owner = "dps_files"
+
+[scope]
+purpose = "Defines metadata and file-ledger contracts that bridge KeyStore data-plane behavior to replicated control-plane metadata."
+in_scope = "MetadataStore, FileLedger contracts, ID typing, local-vs-cluster visibility semantics, adapter requirements."
+out_of_scope = "Raft replication internals and blockchain chain mechanics."
+
+[entities]
+primary = "MetadataStore"
+related = ["FileLedger", "KeyStore", "MetaData", "FileReference"]
+
+[identity]
+file_id_type = "[32]byte (SHA-256)"
+chunk_id_type = "[20]byte (SHA-1 from computeChunkKey)"
+node_identity_fields = ["node_id", "service_id", "instance_id"]
+observability_fields = ["component", "message", "peer", "request_id", "trace_id"]
+
+[lifecycle]
+create = "Add or upsert metadata records for file_id and associated chunk_ids."
+update = "Update chunk placement and file state atomically where possible."
+delete = "Delete metadata mapping for file_id and mark underlying chunk references as tombstoned."
+status = "Expose presence and placement state for local_only/cluster_only/hybrid retrieval."
+health = "Report metadata consistency and unresolved placement references."
+config = "Backed by control-plane store (in-memory, raft-replicated KV, or equivalent)."
+
+[contracts]
+inputs = ["file_id ([32]byte)", "chunk_id list ([][20]byte)", "placement metadata", "request_id/trace_id for mutating operations"]
+outputs = ["typed file/chunk mappings", "placement state for retrieval policy"]
+errors = ["All mutating and lookup operations return explicit error values with context."]
+
+[reliability]
+timeouts = "Metadata RPC/IO operations must use bounded timeouts."
+retries = "Retry only idempotent operations (upsert/get/list) with bounded backoff."
+idempotency = "Upsert operations keyed by file_id are idempotent if chunk list and version unchanged."
+
+[observability]
+required_fields = ["component", "message", "peer", "request_id", "trace_id"]
+recommended_fields = ["file_id", "chunk_id", "storage_mode", "node_id", "service_id", "instance_id"]
+notes = "Contracts require correlation fields even if current code does not yet emit them."
+
+[[interfaces]]
+id = "MetadataStore"
+package = "ledgers"
+methods = [
+    { name = "UpsertFile", signature = "(fileID [32]byte, chunks [][20]byte) error" },
+    { name = "GetFile", signature = "(fileID [32]byte) ([][20]byte, error)" },
+    { name = "DeleteFile", signature = "(fileID [32]byte) error" },
+    { name = "ListFiles", signature = "() ([][32]byte, error)" },
+]
+notes = "Typed-ID contract target for LAN and cloud stages. Avoid stringly-typed IDs internally."
+
+[[interfaces]]
+id = "FileLedger"
+package = "ledgers"
+methods = [
+    { name = "VerifyReferences", signature = "() error", notes = "Validate references under active storage mode semantics." },
+    { name = "StoreFileLocal", signature = "(name string, fileData []byte) (*key_store.File, error)" },
+    { name = "LoadAndStoreFileLocal", signature = "(localFilePath string) (*key_store.File, error)" },
+    { name = "LoadAndStoreFileRemote", signature = "(localFilePath string, handler key_store.RemoteHandler) (*key_store.File, error)" },
+    { name = "ReassembleFileToBytes", signature = "(key [32]byte) ([]byte, error)" },
+    { name = "ReassembleFileToPath", signature = "(key [32]byte, outputPath string) error" },
+    { name = "ListStoredFileReferences", signature = "() []key_store.FileReference" },
+    { name = "ListKnownFiles", signature = "() []key_store.MetaData" },
+    { name = "Cleanup", signature = "() error" },
+]
+notes = "C-style explicit signatures aligned with current KeyStore behavior and future distributed evolution."
+
+[binding_plan]
+description = "Bridge current code and target contracts without breaking working key_store behavior."
+steps = [
+    "Introduce typed-ID adapter layer for current string-based MetadataStore usage.",
+    "Promote KeyStore verification methods to satisfy FileLedger contract explicitly.",
+    "Keep existing key_store methods as source-of-truth until refactor lands behind tests.",
+]
+
+[compatibility]
+current_code_mismatch = [
+    "src/api/ledgers.MetadataStore currently uses string IDs.",
+    "src/api/ledgers.FileLedger methods currently have no params/returns.",
+]
+migration_policy = [
+    "Do not remove old interfaces until typed adapters compile and tests pass.",
+    "Preserve key_store local behavior as compatibility baseline.",
+]
+
+[implementation_status]
+functional = []
+scaffolding = []
+interfaces_only = [
+    "MetadataStore (typed target contract)",
+    "FileLedger (explicit typed signatures)",
+]
+known_issues = [
+    "Code interfaces do not yet match this target contract.",
+    "KeyStore does not yet explicitly implement FileLedger interface.",
+    "Placement metadata model for cluster_only/hybrid still needs concrete schema.",
+]

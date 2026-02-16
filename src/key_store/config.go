@@ -44,68 +44,65 @@ type RemoteHandler interface {
 	// Receive() will need to be implemented in place of the current
 	// default go-routine inside StartReceiver()
 	// NOTE: it takes the place of make(chan interface{}) in a real impl
-	Receive() <-chan interface{}
+	Receive() <-chan any
 }
 
 type DefaultRemoteHandler struct {
-	stream chan interface{}
+	stream chan any
+	ready  chan struct{} // signals receiver goroutine is ready
 	mu     sync.Mutex
 }
 
-func (h *DefaultRemoteHandler) Receive() <-chan interface{} {
+func (h *DefaultRemoteHandler) Receive() <-chan any {
 	if h.stream == nil {
-		h.stream = make(chan interface{})
+		h.stream = make(chan any)
 	}
 	return h.stream
 }
 
 func (h *DefaultRemoteHandler) StartReceiver(md *MetaData) {
 	ch := h.Receive()
+	h.ready = make(chan struct{})
 
-	// This Needs to be implemented to actually process the data
-	// currently this serves as a placeholder than prints output
-	// for testing purposes
+	// This needs to be implemented to actually process the data.
+	// Currently this serves as a placeholder that prints output
+	// for testing purposes.
 	go func() {
 		blocks := md.TotalBlocks
 		var index uint32 = 0
-		for {
-			select {
-			case data, ok := <-ch:
-				if !ok {
-					fmt.Println("Channel Closed")
+		close(h.ready) // signal that receiver is listening
+		for data := range ch {
+			switch tmp := data.(type) {
+			case []byte:
+				_ = tmp
+				index++
+				if index == blocks {
+					fmt.Printf("Final Block Data Received: %d/%d \n", index, blocks)
 					return
 				}
-				switch tmp := data.(type) {
 
-				case []byte:
-					fmt.Printf("Data Received ... \n")
-					tmp = nil
-					if index == blocks {
-						fmt.Printf("Final Block Data Received: %d/%d \n", index, blocks)
-						close(h.stream)
-						return
-					}
+			case *MetaData:
+				fmt.Printf("MetaData: %+v \n", tmp)
 
-				case *MetaData:
-					fmt.Printf("MetaData: %+v \n", tmp)
+			case *FileReference:
+				// FileReference is a header; the next message will be []byte data
+				fmt.Printf("FileReference: %d/%d \n", tmp.FileIndex+1, blocks)
 
-				case *FileReference:
-					index++
-					fmt.Printf("FileReference: %+v \n", tmp)
-
-				default:
-					fmt.Printf("Hit Default Case??: %+v \n", tmp)
-				}
+			default:
+				fmt.Printf("Hit Default Case??: %+v \n", tmp)
 			}
 		}
 	}()
+
+	// Wait for receiver goroutine to be ready before returning
+	<-h.ready
 }
 
 func (h *DefaultRemoteHandler) PassFileReference(fr *FileReference, d []byte) {
 	h.mu.Lock()
+	defer h.mu.Unlock()
 	h.stream <- fr
 	h.stream <- d
-	h.mu.Unlock()
 }
 
 func PrintMemUsage() {
@@ -119,7 +116,11 @@ func PrintMemUsage() {
 
 // calculate optimal block size based on file size
 func CalculateBlockSize(fileSize uint64) uint32 {
-	// for small files, use minimum chunk size
+	if fileSize == 0 {
+		return 0
+	}
+
+	// for small files, use the file size as the block size (single chunk)
 	if fileSize < uint64(MinBlockSize) {
 		return uint32(fileSize)
 	}

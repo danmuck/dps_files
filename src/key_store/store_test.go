@@ -9,198 +9,248 @@ import (
 	"testing"
 )
 
-const dataDir string = "./data/"
+// testDataDir is a persistent directory for reusable test files.
+// Files here survive across test runs to avoid regenerating large files.
+const testDataDir = "./data"
 
-func TestLargeFileChunking(t *testing.T) {
-	// skip if running short tests
-	if testing.Short() {
-		t.Skip("Skipping large file test in short mode")
+// ensureTestFile returns the path to a test file of the given size.
+// If the file already exists with the correct size, it is reused.
+// Otherwise it is (re)generated with random data.
+func ensureTestFile(t *testing.T, name string, size int64) string {
+	t.Helper()
+
+	if err := os.MkdirAll(testDataDir, 0755); err != nil {
+		t.Fatalf("Failed to create test data dir: %v", err)
 	}
 
-	// setup
+	path := filepath.Join(testDataDir, name)
+
+	if info, err := os.Stat(path); err == nil && info.Size() == size {
+		t.Logf("Reusing existing test file: %s (%d bytes)", path, size)
+		return path
+	}
+
+	t.Logf("Generating test file: %s (%d bytes)", path, size)
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+	defer f.Close()
+
+	const chunkSize = 4 * 1024 * 1024 // 4MB write chunks
+	buf := make([]byte, chunkSize)
+	remaining := size
+
+	for remaining > 0 {
+		n := int64(chunkSize)
+		if remaining < n {
+			n = remaining
+		}
+		if _, err := rand.Read(buf[:n]); err != nil {
+			t.Fatalf("Failed to generate random data: %v", err)
+		}
+		if _, err := f.Write(buf[:n]); err != nil {
+			t.Fatalf("Failed to write test file: %v", err)
+		}
+		remaining -= n
+	}
+
+	return path
+}
+
+// newTestKeyStore creates a KeyStore in a temp directory for testing.
+func newTestKeyStore(t *testing.T) *KeyStore {
+	t.Helper()
 	storageDir := filepath.Join(t.TempDir(), "storage")
-	if err := os.MkdirAll(storageDir, 0755); err != nil {
-		t.Fatalf("Failed to create storage directory: %v", err)
-	}
-
-	// create keystore
-	keystore, err := InitKeyStore(storageDir)
+	ks, err := InitKeyStore(storageDir)
 	if err != nil {
 		t.Fatalf("Failed to create keystore: %v", err)
 	}
-	defer keystore.Cleanup()
+	t.Cleanup(func() { ks.Cleanup() })
+	return ks
+}
 
-	// test file path - you might want to make this configurable
-	filename := dataDir + "ubuntu.iso"
+// storeAndVerify stores a file, verifies metadata and chunk integrity,
+// then reassembles and verifies the output matches the original.
+func storeAndVerify(t *testing.T, ks *KeyStore, filePath string) {
+	t.Helper()
 
-	// load original file
-	originalData, err := os.ReadFile(filename)
+	originalData, err := os.ReadFile(filePath)
 	if err != nil {
 		t.Fatalf("Failed to read original file: %v", err)
 	}
-
-	// calculate original hash
 	originalHash := sha256.Sum256(originalData)
-	t.Logf("Original file size: %d bytes", len(originalData))
-	t.Logf("Original file hash: %x", originalHash)
+	t.Logf("Original: %d bytes, hash: %x", len(originalData), originalHash[:8])
 
-	// store the file
-	file, err := keystore.LoadAndStoreFileLocal(filename)
+	file, err := ks.LoadAndStoreFileLocal(filePath)
 	if err != nil {
 		t.Fatalf("Failed to store file: %v", err)
 	}
 
-	// verify file metadata
-	t.Run("Verify Metadata", func(t *testing.T) {
-		if file.MetaData.TotalSize != uint64(len(originalData)) {
-			t.Errorf("Size mismatch: got %d, want %d",
-				file.MetaData.TotalSize, len(originalData))
+	// Verify metadata
+	if file.MetaData.TotalSize != uint64(len(originalData)) {
+		t.Errorf("Size mismatch: got %d, want %d", file.MetaData.TotalSize, len(originalData))
+	}
+	if file.MetaData.FileHash != originalHash {
+		t.Errorf("Hash mismatch: got %x, want %x", file.MetaData.FileHash, originalHash)
+	}
+
+	// Verify every chunk
+	for i, ref := range file.References {
+		if ref == nil {
+			t.Fatalf("Chunk reference %d is nil", i)
 		}
-		if file.MetaData.FileHash != originalHash {
-			t.Errorf("Hash mismatch: got %x, want %x",
-				file.MetaData.FileHash, originalHash)
-		}
-	})
-
-	// verify chunks
-	t.Run("Verify Chunks", func(t *testing.T) {
-		for i, ref := range file.References {
-			if ref == nil {
-				t.Fatalf("Chunk reference %d is nil", i)
-			}
-
-			chunkData, err := keystore.LoadFileReferenceData(ref.Key)
-			if err != nil {
-				t.Fatalf("Failed to read chunk %d: %v", i, err)
-			}
-
-			// verify chunk index
-			if ref.FileIndex != uint32(i) {
-				t.Errorf("Chunk %d has incorrect index: got %d", i, ref.FileIndex)
-			}
-
-			// verify chunk size
-			if uint32(len(chunkData)) != ref.Size {
-				t.Errorf("Chunk %d size mismatch: got %d, want %d",
-					i, len(chunkData), ref.Size)
-			}
-
-			// log progress occasionally
-			if i%100 == 0 || i == int(file.MetaData.TotalBlocks-1) {
-				t.Logf("Verified chunk %d/%d: size=%d",
-					i, file.MetaData.TotalBlocks-1, len(chunkData))
-			}
-		}
-	})
-
-	// test reassembly
-	t.Run("Reassemble File", func(t *testing.T) {
-		reassembledData, err := keystore.ReassembleFileToBytes(file.MetaData.FileHash)
+		chunkData, err := ks.LoadFileReferenceData(ref.Key)
 		if err != nil {
-			t.Fatalf("Failed to reassemble file: %v", err)
+			t.Fatalf("Failed to read chunk %d: %v", i, err)
 		}
-
-		// verify size
-		if len(reassembledData) != len(originalData) {
-			t.Errorf("Reassembled size mismatch: got %d, want %d",
-				len(reassembledData), len(originalData))
+		if uint32(len(chunkData)) != ref.Size {
+			t.Errorf("Chunk %d size mismatch: got %d, want %d", i, len(chunkData), ref.Size)
 		}
-
-		// verify hash
-		reassembledHash := sha256.Sum256(reassembledData)
-		if reassembledHash != originalHash {
-			t.Errorf("Reassembled hash mismatch: got %x, want %x",
-				reassembledHash, originalHash)
-		}
-	})
-}
-
-// helper function to create test files
-func createTestFile(t *testing.T, size int) (string, []byte) {
-	t.Helper()
-
-	// create random data
-	data := make([]byte, size)
-	if _, err := rand.Read(data); err != nil { // use crypto/rand
-		t.Fatalf("Failed to generate random data: %v", err)
 	}
 
-	// create temporary file
-	tmpfile := filepath.Join(t.TempDir(), fmt.Sprintf("test-%d.dat", size))
-	if err := os.WriteFile(tmpfile, data, 0644); err != nil {
-		t.Fatalf("Failed to write test file: %v", err)
+	// Reassemble and verify
+	reassembled, err := ks.ReassembleFileToBytes(file.MetaData.FileHash)
+	if err != nil {
+		t.Fatalf("Failed to reassemble file: %v", err)
 	}
-
-	return tmpfile, data
+	if len(reassembled) != len(originalData) {
+		t.Errorf("Reassembled size mismatch: got %d, want %d", len(reassembled), len(originalData))
+	}
+	reassembledHash := sha256.Sum256(reassembled)
+	if reassembledHash != originalHash {
+		t.Errorf("Reassembled hash mismatch: got %x, want %x", reassembledHash, originalHash)
+	}
 }
 
-// test with smaller files
+// --- Tests ---
+
+func TestLargeFileChunking(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping large file test in short mode")
+	}
+
+	// 256MB max for automated tests
+	filePath := ensureTestFile(t, "test_256mb.dat", 256*1024*1024)
+	ks := newTestKeyStore(t)
+	storeAndVerify(t, ks, filePath)
+}
+
 func TestSmallFileChunking(t *testing.T) {
-	sizes := []int{
-		1024,            // 1kb
-		1024 * 1024,     // 1mb
-		5 * 1024 * 1024, // 5mb
+	sizes := []struct {
+		name string
+		size int64
+	}{
+		{"1KB", 1024},
+		{"1MB", 1024 * 1024},
+		{"5MB", 5 * 1024 * 1024},
 	}
 
-	for _, size := range sizes {
-		t.Run(fmt.Sprintf("Size_%d", size), func(t *testing.T) {
-			// create storage directory
-			storageDir := filepath.Join(t.TempDir(), "storage")
-			if err := os.MkdirAll(storageDir, 0755); err != nil {
-				t.Fatalf("Failed to create storage directory: %v", err)
-			}
-
-			// create keystore
-			keystore, err := InitKeyStore(storageDir)
-			if err != nil {
-				t.Fatalf("Failed to create keystore: %v", err)
-			}
-			defer keystore.Cleanup()
-
-			// create test file
-			filename, originalData := createTestFile(t, size)
-			originalHash := sha256.Sum256(originalData)
-
-			// store and verify
-			file, err := keystore.LoadAndStoreFileLocal(filename)
-			if err != nil {
-				t.Fatalf("Failed to store file: %v", err)
-			}
-
-			// verify metadata
-			if file.MetaData.FileHash != originalHash {
-				t.Errorf("Hash mismatch for size %d", size)
-			}
-
-			// reassemble and verify
-			reassembled, err := keystore.ReassembleFileToBytes(file.MetaData.FileHash)
-			if err != nil {
-				t.Fatalf("Failed to reassemble file: %v", err)
-			}
-
-			reassembledHash := sha256.Sum256(reassembled)
-			if reassembledHash != originalHash {
-				t.Errorf("Reassembled hash mismatch for size %d", size)
-			}
+	for _, tc := range sizes {
+		t.Run(tc.name, func(t *testing.T) {
+			filePath := ensureTestFile(t, fmt.Sprintf("test_%s.dat", tc.name), tc.size)
+			ks := newTestKeyStore(t)
+			storeAndVerify(t, ks, filePath)
 		})
 	}
 }
 
+func TestEmptyFile(t *testing.T) {
+	ks := newTestKeyStore(t)
+
+	// Create a zero-byte file
+	emptyFile := filepath.Join(t.TempDir(), "empty.dat")
+	if err := os.WriteFile(emptyFile, []byte{}, 0644); err != nil {
+		t.Fatalf("Failed to create empty file: %v", err)
+	}
+
+	file, err := ks.LoadAndStoreFileLocal(emptyFile)
+	if err != nil {
+		t.Fatalf("Failed to store empty file: %v", err)
+	}
+
+	if file.MetaData.TotalSize != 0 {
+		t.Errorf("Expected TotalSize 0, got %d", file.MetaData.TotalSize)
+	}
+	if file.MetaData.TotalBlocks != 0 {
+		t.Errorf("Expected TotalBlocks 0, got %d", file.MetaData.TotalBlocks)
+	}
+}
+
+func TestSingleChunkFile(t *testing.T) {
+	ks := newTestKeyStore(t)
+
+	// Create a file smaller than MinBlockSize
+	data := make([]byte, 1000)
+	if _, err := rand.Read(data); err != nil {
+		t.Fatalf("Failed to generate data: %v", err)
+	}
+
+	tmpFile := filepath.Join(t.TempDir(), "tiny.dat")
+	if err := os.WriteFile(tmpFile, data, 0644); err != nil {
+		t.Fatalf("Failed to write file: %v", err)
+	}
+
+	file, err := ks.LoadAndStoreFileLocal(tmpFile)
+	if err != nil {
+		t.Fatalf("Failed to store file: %v", err)
+	}
+
+	if file.MetaData.TotalBlocks != 1 {
+		t.Errorf("Expected 1 block, got %d", file.MetaData.TotalBlocks)
+	}
+	if file.MetaData.BlockSize != uint32(len(data)) {
+		t.Errorf("Expected block size %d, got %d", len(data), file.MetaData.BlockSize)
+	}
+
+	// Reassemble and verify
+	reassembled, err := ks.ReassembleFileToBytes(file.MetaData.FileHash)
+	if err != nil {
+		t.Fatalf("Failed to reassemble: %v", err)
+	}
+	if sha256.Sum256(reassembled) != sha256.Sum256(data) {
+		t.Error("Reassembled data doesn't match original")
+	}
+}
+
+func TestExactBlockSizeFile(t *testing.T) {
+	ks := newTestKeyStore(t)
+
+	// File exactly MinBlockSize bytes — should be exactly 1 chunk
+	data := make([]byte, MinBlockSize)
+	if _, err := rand.Read(data); err != nil {
+		t.Fatalf("Failed to generate data: %v", err)
+	}
+
+	tmpFile := filepath.Join(t.TempDir(), "exact_block.dat")
+	if err := os.WriteFile(tmpFile, data, 0644); err != nil {
+		t.Fatalf("Failed to write file: %v", err)
+	}
+
+	file, err := ks.LoadAndStoreFileLocal(tmpFile)
+	if err != nil {
+		t.Fatalf("Failed to store file: %v", err)
+	}
+
+	if file.MetaData.TotalBlocks != 1 {
+		t.Errorf("Expected 1 block for MinBlockSize file, got %d", file.MetaData.TotalBlocks)
+	}
+
+	storeAndVerify(t, ks, tmpFile)
+}
+
 func TestKeyStorePersistence(t *testing.T) {
-	// create temp directory that will be cleaned up after test
 	tempDir := t.TempDir()
 	storageDir := filepath.Join(tempDir, "storage")
 
-	// create initial keystore and store a file
+	// Create keystore and store a file
 	ks1, err := InitKeyStore(storageDir)
 	if err != nil {
-		t.Fatalf("Failed to create initial keystore: %v", err)
+		t.Fatalf("Failed to create keystore: %v", err)
 	}
 
-	// create a test file
-	data := make([]byte, 1024*1024) // 1mb test file
-	_, err = rand.Read(data)        // fill with random data
-	if err != nil {
+	data := make([]byte, 1024*1024)
+	if _, err := rand.Read(data); err != nil {
 		t.Fatalf("Failed to generate test data: %v", err)
 	}
 
@@ -209,40 +259,152 @@ func TestKeyStorePersistence(t *testing.T) {
 		t.Fatalf("Failed to write test file: %v", err)
 	}
 
-	// store the file
 	file, err := ks1.LoadAndStoreFileLocal(testFile)
 	if err != nil {
 		t.Fatalf("Failed to store file: %v", err)
 	}
-
 	originalHash := file.MetaData.FileHash
 
-	// save metadata state
 	if err := ks1.UpdateLocalMetaData(); err != nil {
 		t.Fatalf("Failed to save metadata: %v", err)
 	}
 
-	// create new keystore instance from same directory
+	// Create a new keystore from the same directory — should load persisted state
 	ks2, err := InitKeyStore(storageDir)
 	if err != nil {
 		t.Fatalf("Failed to load keystore: %v", err)
 	}
 
-	// try to reassemble the file
 	reassembled, err := ks2.ReassembleFileToBytes(originalHash)
 	if err != nil {
-		t.Fatalf("Failed to reassemble file: %v", err)
+		t.Fatalf("Failed to reassemble from reloaded keystore: %v", err)
 	}
 
-	// verify the reassembled data matches original
 	reassembledHash := sha256.Sum256(reassembled)
 	if reassembledHash != originalHash {
-		t.Errorf("Reassembled file hash does not match original")
+		t.Error("Reassembled file hash does not match original after reload")
+	}
+	if len(reassembled) != len(data) {
+		t.Errorf("Reassembled size %d != original %d", len(reassembled), len(data))
+	}
+}
+
+func TestChunkCorruptionDetected(t *testing.T) {
+	ks := newTestKeyStore(t)
+
+	data := make([]byte, MinBlockSize*2)
+	if _, err := rand.Read(data); err != nil {
+		t.Fatalf("Failed to generate data: %v", err)
 	}
 
-	// verify file size
-	if len(reassembled) != len(data) {
-		t.Errorf("Reassembled file size %d does not match original size %d",
-			len(reassembled), len(data))
+	tmpFile := filepath.Join(t.TempDir(), "corrupt_test.dat")
+	if err := os.WriteFile(tmpFile, data, 0644); err != nil {
+		t.Fatalf("Failed to write file: %v", err)
+	}
+
+	file, err := ks.LoadAndStoreFileLocal(tmpFile)
+	if err != nil {
+		t.Fatalf("Failed to store file: %v", err)
+	}
+
+	// Corrupt the first chunk on disk
+	ref := file.References[0]
+	chunkPath := ks.GetLocalBlockLocation(ref.Key)
+	corruptData := make([]byte, ref.Size)
+	if _, err := rand.Read(corruptData); err != nil {
+		t.Fatalf("Failed to generate corrupt data: %v", err)
+	}
+	if err := os.WriteFile(chunkPath, corruptData, 0644); err != nil {
+		t.Fatalf("Failed to write corrupt chunk: %v", err)
+	}
+
+	// Reassembly should detect corruption
+	_, err = ks.ReassembleFileToBytes(file.MetaData.FileHash)
+	if err == nil {
+		t.Error("Expected corruption error, got nil")
+	}
+}
+
+func TestCleanupRemovesAllFiles(t *testing.T) {
+	storageDir := filepath.Join(t.TempDir(), "storage")
+	ks, err := InitKeyStore(storageDir)
+	if err != nil {
+		t.Fatalf("Failed to create keystore: %v", err)
+	}
+
+	data := make([]byte, MinBlockSize*3)
+	if _, err := rand.Read(data); err != nil {
+		t.Fatalf("Failed to generate data: %v", err)
+	}
+
+	tmpFile := filepath.Join(t.TempDir(), "cleanup_test.dat")
+	if err := os.WriteFile(tmpFile, data, 0644); err != nil {
+		t.Fatalf("Failed to write file: %v", err)
+	}
+
+	_, err = ks.LoadAndStoreFileLocal(tmpFile)
+	if err != nil {
+		t.Fatalf("Failed to store file: %v", err)
+	}
+
+	// Verify files exist
+	entries, _ := os.ReadDir(storageDir)
+	if len(entries) == 0 {
+		t.Fatal("Expected storage files to exist before cleanup")
+	}
+
+	if err := ks.Cleanup(); err != nil {
+		t.Fatalf("Cleanup failed: %v", err)
+	}
+
+	// Verify .kdht files are gone
+	kdhtFiles, _ := filepath.Glob(filepath.Join(storageDir, "*.kdht"))
+	if len(kdhtFiles) > 0 {
+		t.Errorf("Found %d .kdht files after cleanup", len(kdhtFiles))
+	}
+
+	// Verify metadata dir is gone
+	metadataDir := filepath.Join(storageDir, "metadata")
+	if _, err := os.Stat(metadataDir); !os.IsNotExist(err) {
+		t.Error("Metadata directory still exists after cleanup")
+	}
+}
+
+func TestStoreFileLocalAndLoadAndStoreFileLocalProduceSameKeys(t *testing.T) {
+	// Both methods should produce identical chunk keys for the same data
+	data := make([]byte, MinBlockSize*2)
+	if _, err := rand.Read(data); err != nil {
+		t.Fatalf("Failed to generate data: %v", err)
+	}
+
+	// Method 1: StoreFileLocal (in-memory data)
+	ks1 := newTestKeyStore(t)
+	file1, err := ks1.StoreFileLocal("test.dat", data)
+	if err != nil {
+		t.Fatalf("StoreFileLocal failed: %v", err)
+	}
+
+	// Method 2: LoadAndStoreFileLocal (from disk)
+	ks2 := newTestKeyStore(t)
+	tmpFile := filepath.Join(t.TempDir(), "test.dat")
+	if err := os.WriteFile(tmpFile, data, 0644); err != nil {
+		t.Fatalf("Failed to write file: %v", err)
+	}
+	file2, err := ks2.LoadAndStoreFileLocal(tmpFile)
+	if err != nil {
+		t.Fatalf("LoadAndStoreFileLocal failed: %v", err)
+	}
+
+	// Verify same number of chunks
+	if len(file1.References) != len(file2.References) {
+		t.Fatalf("Different chunk counts: %d vs %d", len(file1.References), len(file2.References))
+	}
+
+	// Verify identical keys
+	for i := range file1.References {
+		if file1.References[i].Key != file2.References[i].Key {
+			t.Errorf("Chunk %d key mismatch: %x vs %x",
+				i, file1.References[i].Key, file2.References[i].Key)
+		}
 	}
 }

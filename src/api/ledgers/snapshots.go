@@ -19,7 +19,7 @@ type SnapshotManager interface {
 }
 
 // Entry represents a block in the blockchain
-type BackupEntry interface{}
+type BackupEntry any
 
 // The Ledger represents the blockchain backup system
 // it is meant to be generic to use a non blockchain impl

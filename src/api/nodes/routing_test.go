@@ -1,33 +1,79 @@
 package nodes
 
 import (
-	"fmt"
+	"math/rand"
 	"testing"
 	"time"
-
-	"math/rand"
 )
 
-func GenerateKey() []byte {
-	i := 20
-	b := make([]byte, 0, i)
-	for i > 0 {
-		i--
-		r := rand.Intn(256)
-		b = append(b, byte(r))
+func generateTestKey() []byte {
+	b := make([]byte, 20)
+	for i := range b {
+		b[i] = byte(rand.Intn(256))
 	}
-
 	return b
 }
-func TestNewRouter(t *testing.T) {
-	n, err := NewDefaultNode(GenerateKey(), "localhost:3000", 5, 5)
+
+func TestNewDefaultNode(t *testing.T) {
+	node, err := NewDefaultNode(generateTestKey(), "localhost:0", 5, 3)
 	if err != nil {
-		t.Error(err)
+		t.Fatalf("NewDefaultNode failed: %v", err)
 	}
-	r := n.Router
-	fmt.Printf("Router: %+v \n", r)
 
-	go n.Start()
+	if node.Address() != "localhost:0" {
+		t.Errorf("Expected address localhost:0, got %s", node.Address())
+	}
+	if len(node.ID()) != 20 {
+		t.Errorf("Expected 20-byte ID, got %d bytes", len(node.ID()))
+	}
+	if node.Router == nil {
+		t.Error("Router is nil")
+	}
+	if node.TCPHandler == nil {
+		t.Error("TCPHandler is nil")
+	}
+}
 
-	time.Sleep(30 * time.Second)
+func TestNewDefaultNodeBadID(t *testing.T) {
+	_, err := NewDefaultNode([]byte{1, 2, 3}, "localhost:0", 5, 3)
+	if err == nil {
+		t.Error("Expected error for bad node ID, got nil")
+	}
+}
+
+func TestDefaultNodeStartShutdown(t *testing.T) {
+	node, err := NewDefaultNode(generateTestKey(), "localhost:0", 5, 3)
+	if err != nil {
+		t.Fatalf("NewDefaultNode failed: %v", err)
+	}
+
+	if err := node.Start(); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	// Let it run briefly
+	time.Sleep(100 * time.Millisecond)
+
+	if err := node.Shutdown(); err != nil {
+		t.Fatalf("Shutdown failed: %v", err)
+	}
+}
+
+func TestKademliaRouterCreation(t *testing.T) {
+	node, err := NewDefaultNode(generateTestKey(), "localhost:0", 20, 3)
+	if err != nil {
+		t.Fatalf("NewDefaultNode failed: %v", err)
+	}
+
+	router, ok := node.Router.(*KademliaRouter)
+	if !ok {
+		t.Fatal("Router is not a KademliaRouter")
+	}
+
+	if router.k != 20 {
+		t.Errorf("Expected k=20, got %d", router.k)
+	}
+	if router.a != 3 {
+		t.Errorf("Expected a=3, got %d", router.a)
+	}
 }

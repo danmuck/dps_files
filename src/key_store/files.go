@@ -12,6 +12,17 @@ import (
 	"time"
 )
 
+// computeChunkKey produces a deterministic 20-byte DHT routing key for a chunk.
+// It appends the chunk index as a little-endian uint64 to the file hash,
+// then takes SHA-1 of the result. This is the canonical key derivation used
+// everywhere chunks are created or looked up.
+func computeChunkKey(fileHash [HashSize]byte, chunkIndex uint32) [KeySize]byte {
+	buf := make([]byte, HashSize+8)
+	copy(buf[:HashSize], fileHash[:])
+	binary.LittleEndian.PutUint64(buf[HashSize:], uint64(chunkIndex))
+	return sha1.Sum(buf)
+}
+
 type File struct {
 	MetaData   MetaData         `toml:"metadata"`
 	References []*FileReference `toml:"references,omitempty"`
@@ -55,10 +66,7 @@ func (ks *KeyStore) StoreFileLocal(name string, fileData []byte) (*File, error) 
 	for i := uint32(0); i < metadata.TotalBlocks; i++ {
 		// calculate chunk boundaries
 		startIdx := uint64(i) * uint64(metadata.BlockSize)
-		endIdx := startIdx + uint64(metadata.BlockSize)
-		if endIdx > metadata.TotalSize {
-			endIdx = metadata.TotalSize
-		}
+		endIdx := min(startIdx+uint64(metadata.BlockSize), metadata.TotalSize)
 
 		blockData := fileData[startIdx:endIdx]
 		blockSize := uint32(len(blockData))
@@ -73,10 +81,8 @@ func (ks *KeyStore) StoreFileLocal(name string, fileData []byte) (*File, error) 
 			DataHash:  sha256.Sum256(blockData),
 		}
 
-		// calculate block dht routing id
-		blockIDtmp := append(metadata.FileHash[:], byte(i))
-		blockID := sha1.Sum(blockIDtmp)
-		block.Key = blockID
+		// calculate block dht routing key
+		block.Key = computeChunkKey(metadata.FileHash, i)
 
 		// store the block
 		if err := ks.StoreFileReference(&block, blockData); err != nil {
@@ -93,12 +99,9 @@ func (ks *KeyStore) StoreFileLocal(name string, fileData []byte) (*File, error) 
 		blockRef := block // make a copy
 		file.References[i] = &blockRef
 
-		// debug print after storing each chunk reference
-		fmt.Printf("Added block reference %d: Key=%x, Size=%d\n", i, blockRef.Key, blockRef.Size)
-
 		totalBytesProcessed += uint64(blockSize)
 
-		// debug output for progress
+		// progress output
 		if i%PRINT_BLOCKS == 0 || i == metadata.TotalBlocks-1 {
 			fmt.Printf("Stored block %d/%d (%.1f%%)\n",
 				i+1, metadata.TotalBlocks, float64(i+1)/float64(metadata.TotalBlocks)*100)
@@ -117,131 +120,6 @@ func (ks *KeyStore) StoreFileLocal(name string, fileData []byte) (*File, error) 
 			totalBytesProcessed, metadata.TotalSize)
 	}
 
-	fmt.Printf("\nValidating file before storage:\n")
-	fmt.Printf("File name: %s\n", file.MetaData.FileName)
-	fmt.Printf("Total blocks: %d\n", file.MetaData.TotalBlocks)
-	fmt.Printf("References count: %d\n", len(file.References))
-
-	for i, ref := range file.References {
-		if ref == nil {
-			fmt.Printf("Warning: Reference %d is nil\n", i)
-		} else if i%PRINT_BLOCKS == 0 || i == len(file.References)-1 {
-			fmt.Printf("Reference %d: Key=%x, Size=%d\n", i, ref.Key, ref.Size)
-		}
-	}
-	// store the complete file with metadata and references
-	if err := ks.fileToMemory(file); err != nil {
-		// cleanup all chunks on failure
-		for _, ref := range file.References {
-			if ref != nil {
-				ks.DeleteFileReference(ref.Key)
-			}
-		}
-		return nil, fmt.Errorf("failed to store file metadata: %w", err)
-	}
-
-	return file, nil
-}
-
-// this stores arbitrary data as a file remotely
-// NOTE: NOTE IMPLEMENTED (this is a direct copy of StoreFileLocal)
-//
-// NOTE: this is how data is passed to the network
-func (ks *KeyStore) StoreFileRemote(name string, fileData []byte) (*File, error) {
-	// prepare metadata
-	metadata, err := PrepareMetaData(name, fileData)
-	if err != nil {
-		return nil, err
-	}
-
-	// calculate and store file hash
-	metadata.FileHash = sha256.Sum256(fileData)
-
-	// create file object
-	file := &File{
-		MetaData:   metadata,
-		References: make([]*FileReference, metadata.TotalBlocks),
-	}
-
-	// process file data into chunks
-	var totalBytesProcessed uint64 = 0
-	for i := uint32(0); i < metadata.TotalBlocks; i++ {
-		// calculate chunk boundaries
-		startIdx := uint64(i) * uint64(metadata.BlockSize)
-		endIdx := startIdx + uint64(metadata.BlockSize)
-		if endIdx > metadata.TotalSize {
-			endIdx = metadata.TotalSize
-		}
-
-		blockData := fileData[startIdx:endIdx]
-		blockSize := uint32(len(blockData))
-
-		// create filereference for this block
-		block := FileReference{
-			FileName:  metadata.FileName,
-			Parent:    metadata.FileHash,
-			Size:      blockSize,
-			FileIndex: i,
-			Protocol:  "file",
-			DataHash:  sha256.Sum256(blockData),
-		}
-
-		// calculate block dht routing id
-		blockIDtmp := append(metadata.FileHash[:], byte(i))
-		blockID := sha1.Sum(blockIDtmp)
-		block.Key = blockID
-
-		// store the block
-		if err := ks.StoreFileReference(&block, blockData); err != nil {
-			// cleanup any chunks we've already stored
-			for j := uint32(0); j < i; j++ {
-				if file.References[j] != nil {
-					ks.DeleteFileReference(file.References[j].Key)
-				}
-			}
-			return nil, fmt.Errorf("failed to store block %d: %w", i, err)
-		}
-
-		// store reference in file
-		blockRef := block // make a copy
-		file.References[i] = &blockRef
-
-		// debug print after storing each chunk reference
-		fmt.Printf("Added block reference %d: Key=%x, Size=%d\n", i, blockRef.Key, blockRef.Size)
-
-		totalBytesProcessed += uint64(blockSize)
-
-		// debug output for progress
-		if i%PRINT_BLOCKS == 0 || i == metadata.TotalBlocks-1 {
-			fmt.Printf("Stored block %d/%d (%.1f%%)\n",
-				i+1, metadata.TotalBlocks, float64(i+1)/float64(metadata.TotalBlocks)*100)
-		}
-	}
-
-	// verify total bytes processed
-	if totalBytesProcessed != metadata.TotalSize {
-		// cleanup all chunks on size mismatch
-		for _, ref := range file.References {
-			if ref != nil {
-				ks.DeleteFileReference(ref.Key)
-			}
-		}
-		return nil, fmt.Errorf("processed bytes (%d) doesn't match file size (%d)",
-			totalBytesProcessed, metadata.TotalSize)
-	}
-
-	fmt.Printf("\nValidating file before storage:\n")
-	fmt.Printf("File name: %s\n", file.MetaData.FileName)
-	fmt.Printf("Total blocks: %d\n", file.MetaData.TotalBlocks)
-	fmt.Printf("References count: %d\n", len(file.References))
-
-	for i, ref := range file.References {
-		if ref == nil {
-			fmt.Printf("Warning: Reference %d is nil\n", i)
-		} else if i%PRINT_BLOCKS == 0 || i == len(file.References)-1 {
-			fmt.Printf("Reference %d: Key=%x, Size=%d\n", i, ref.Key, ref.Size)
-		}
-	}
 	// store the complete file with metadata and references
 	if err := ks.fileToMemory(file); err != nil {
 		// cleanup all chunks on failure
@@ -456,8 +334,9 @@ func (ks *KeyStore) LoadAndStoreFileLocal(localFilePath string) (*File, error) {
 	var fileHash [HashSize]byte
 	copy(fileHash[:], hash.Sum(nil))
 	metadata.FileHash = fileHash
-	// copy(metadata.filehash[:], hash.sum(nil))
-	metadata.TotalBlocks = uint32((metadata.TotalSize + uint64(metadata.BlockSize) - 1) / uint64(metadata.BlockSize))
+	if metadata.BlockSize > 0 {
+		metadata.TotalBlocks = uint32((metadata.TotalSize + uint64(metadata.BlockSize) - 1) / uint64(metadata.BlockSize))
+	}
 
 	// create file object
 	file := &File{
@@ -510,11 +389,8 @@ func (ks *KeyStore) LoadAndStoreFileLocal(localFilePath string) (*File, error) {
 			DataHash:  sha256.Sum256(blockData),
 		}
 
-		// calculate chunk's dht routing id
-		blockIDtmp := append(metadata.FileHash[:], make([]byte, 8)...)
-		binary.LittleEndian.PutUint64(blockIDtmp[len(metadata.FileHash):], uint64(i))
-		blockID := sha1.Sum(blockIDtmp)
-		block.Key = blockID
+		// calculate chunk's dht routing key
+		block.Key = computeChunkKey(metadata.FileHash, i)
 
 		// store the block
 		if err := ks.StoreFileReference(&block, blockData); err != nil {
@@ -527,11 +403,9 @@ func (ks *KeyStore) LoadAndStoreFileLocal(localFilePath string) (*File, error) {
 			return nil, fmt.Errorf("failed to store block %d: %w", i, err)
 		}
 
-		// block doesnt have a local address block.Location at this point
-		// it is assigned one inside StoreFileReference but that value is not
-		// reflected to this point
-		// store reference in file
-		blockRef := block // make a copy
+		// StoreFileReference sets block.Location, but block is a local copy.
+		// Copy after store so the reference has the location set.
+		blockRef := block
 		file.References[i] = &blockRef
 
 		totalBytesRead += uint64(n)
@@ -627,11 +501,12 @@ func (ks *KeyStore) LoadAndStoreFileRemote(localFilePath string, handler RemoteH
 	var fileHash [HashSize]byte
 	copy(fileHash[:], hash.Sum(nil))
 	metadata.FileHash = fileHash
-	// copy(metadata.filehash[:], hash.sum(nil))
-	metadata.TotalBlocks = uint32((metadata.TotalSize + uint64(metadata.BlockSize) - 1) / uint64(metadata.BlockSize))
+	if metadata.BlockSize > 0 {
+		metadata.TotalBlocks = uint32((metadata.TotalSize + uint64(metadata.BlockSize) - 1) / uint64(metadata.BlockSize))
+	}
 
-	// Start receiver
-	go handler.StartReceiver(&metadata)
+	// Start receiver — StartReceiver launches its own goroutine internally
+	handler.StartReceiver(&metadata)
 
 	// create file object
 	file := &File{
@@ -684,13 +559,10 @@ func (ks *KeyStore) LoadAndStoreFileRemote(localFilePath string, handler RemoteH
 			DataHash:  sha256.Sum256(blockData),
 		}
 
-		// calculate chunk's dht routing id
-		blockIDtmp := append(metadata.FileHash[:], make([]byte, 8)...)
-		binary.LittleEndian.PutUint64(blockIDtmp[len(metadata.FileHash):], uint64(i))
-		blockID := sha1.Sum(blockIDtmp)
-		block.Key = blockID
+		// calculate chunk's dht routing key
+		block.Key = computeChunkKey(metadata.FileHash, i)
 
-		go handler.PassFileReference(&block, blockData)
+		handler.PassFileReference(&block, blockData)
 
 		file.References[i] = &block
 

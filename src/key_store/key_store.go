@@ -98,10 +98,10 @@ func (ks *KeyStore) fileToMemory(file *File) error {
 
 	// create metadata file path
 	filename := fmt.Sprintf("%x.toml", file.MetaData.FileHash)
-	filepath := filepath.Join(metadataDir, filename)
+	metadataPath := filepath.Join(metadataDir, filename)
 
 	// open file for writing
-	f, err := os.Create(filepath)
+	f, err := os.Create(metadataPath)
 	if err != nil {
 		return fmt.Errorf("failed to create metadata file: %w", err)
 	}
@@ -170,10 +170,23 @@ func (ks *KeyStore) Cleanup() error {
 	ks.lock.Lock()
 	defer ks.lock.Unlock()
 
-	// clean up chunk files
+	// clean up tracked chunk files
 	for id, block := range ks.references {
-		if err := os.Remove(block.Location); err != nil {
+		if err := os.Remove(block.Location); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("failed to delete chunk %x: %w", id, err)
+		}
+	}
+
+	// clean up any orphaned .kdht files on disk (e.g. from crashed mid-store)
+	entries, err := os.ReadDir(ks.storageDir)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to read storage directory: %w", err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() && filepath.Ext(entry.Name()) == ".kdht" {
+			if err := os.Remove(filepath.Join(ks.storageDir, entry.Name())); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("failed to delete orphaned chunk %s: %w", entry.Name(), err)
+			}
 		}
 	}
 
@@ -258,36 +271,35 @@ func (ks *KeyStore) moveToCache(sourcePath string) error {
 }
 
 func (ks *KeyStore) verifyFileReferences() error {
-	orphanedFiles := make(map[string]bool)
 	fmt.Printf("Verifying file references ... \n")
 
-	// first pass: identify orphaned metadata files
-	for key := range ks.references {
-		blockPath := ks.GetLocalBlockLocation(key)
-		if _, err := os.Stat(blockPath); os.IsNotExist(err) {
-			// find the metadata file containing this chunk reference
-			metadataDir := filepath.Join(ks.storageDir, "metadata")
-			entries, err := os.ReadDir(metadataDir)
-			if err != nil {
-				fmt.Printf("Warning: Failed to read metadata directory: %v\n", err)
+	// Track which files have missing chunks by their hash
+	orphanedFileHashes := make(map[[HashSize]byte]bool)
+
+	// Check each file's references for missing chunk data on disk
+	for fileHash, file := range ks.files {
+		for _, ref := range file.References {
+			if ref == nil {
 				continue
 			}
-
-			for _, entry := range entries {
-				if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".toml") {
-					orphanedFiles[entry.Name()] = true
-				}
+			blockPath := ks.GetLocalBlockLocation(ref.Key)
+			if _, err := os.Stat(blockPath); os.IsNotExist(err) {
+				orphanedFileHashes[fileHash] = true
+				// Remove this reference from the in-memory map
+				delete(ks.references, ref.Key)
 			}
-
-			// remove this reference from the in-memory map
-			delete(ks.references, key)
 		}
 	}
 
-	// second pass: move orphaned files to cache
-	if len(orphanedFiles) > 0 {
+	// Move only the affected metadata files to cache
+	if len(orphanedFileHashes) > 0 {
 		metadataDir := filepath.Join(ks.storageDir, "metadata")
-		for fileName := range orphanedFiles {
+		for fileHash := range orphanedFileHashes {
+			// Remove the file from in-memory map
+			delete(ks.files, fileHash)
+
+			// Move its metadata file to cache
+			fileName := fmt.Sprintf("%x.toml", fileHash)
 			sourcePath := filepath.Join(metadataDir, fileName)
 			if err := ks.moveToCache(sourcePath); err != nil {
 				fmt.Printf("Warning: %v\n", err)

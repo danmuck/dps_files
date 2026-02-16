@@ -39,11 +39,11 @@ type ServerNode interface {
 // KademliaNode interface for managing the Kademlia node lifecycle
 type ClientNode interface {
 	Node
-	Send(addr string, message_t int, key []byte, value []byte, nodes []*transport.NodeInfo)
-	Ping(id []byte, message []byte) // Ping a client
-	Store(value []byte)             // Store a value in the ledger
-	FindNode(id []byte)             // Find node by ID
-	FindValue(id []byte)            // Find value from ledger by key
+	Send(addr string, messageType int, key []byte, value []byte, nodes []*transport.NodeInfo) error
+	Ping(id []byte, message []byte) error                       // Ping a client
+	Store(value []byte) error                                   // Store a value in the ledger
+	FindNode(id []byte) ([]*transport.NodeInfo, error)          // Find node by ID
+	FindValue(id []byte) ([]byte, []*transport.NodeInfo, error) // Find value from ledger by key
 }
 
 type MasterNode interface {

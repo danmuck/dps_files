@@ -25,32 +25,32 @@ type MetaData struct {
 }
 
 func PrepareMetaDataSecure(name string, data []byte, signature [CryptoSize]byte) (metadata MetaData, e error) {
-
 	metadata.TotalSize = uint64(len(data))
 	metadata.TTL = 24 * 60 * 60 // 24 hrs in seconds
 	metadata.FileName = name
 	metadata.Modified = time.Now().UnixNano()
 	metadata.Permissions = DEFAULT_PERMISSIONS
-	// metadata.MimeType = "Not Implemented"
 	metadata.Signature = signature
 	metadata.BlockSize = CalculateBlockSize(metadata.TotalSize)
-	metadata.TotalBlocks = uint32((metadata.TotalSize + uint64(metadata.BlockSize) - 1) / uint64(metadata.BlockSize))
+	if metadata.BlockSize > 0 {
+		metadata.TotalBlocks = uint32((metadata.TotalSize + uint64(metadata.BlockSize) - 1) / uint64(metadata.BlockSize))
+	}
 
 	return metadata, nil
 }
 
 func PrepareMetaData(name string, data []byte) (metadata MetaData, e error) {
-
 	metadata.TotalSize = uint64(len(data))
 	metadata.TTL = 24 * 60 * 60
 	metadata.FileName = name
 	metadata.Modified = time.Now().UnixNano()
 	metadata.Permissions = DEFAULT_PERMISSIONS
-	// metadata.MimeType = "Not Implemented"
 	metadata.BlockSize = CalculateBlockSize(metadata.TotalSize)
 
 	// calculate total chunks with proper rounding up
-	metadata.TotalBlocks = uint32((metadata.TotalSize + uint64(metadata.BlockSize) - 1) / uint64(metadata.BlockSize))
+	if metadata.BlockSize > 0 {
+		metadata.TotalBlocks = uint32((metadata.TotalSize + uint64(metadata.BlockSize) - 1) / uint64(metadata.BlockSize))
+	}
 
 	return metadata, nil
 }
@@ -89,19 +89,20 @@ func (ks *KeyStore) UpdateLocalMetaData() error {
 
 func (ks *KeyStore) LoadLocalFileToMemory(key [HashSize]byte) (*File, error) {
 	metadataDir := filepath.Join(ks.storageDir, "metadata")
-	filepath := filepath.Join(metadataDir, fmt.Sprintf("%x.toml", key))
+	metadataPath := filepath.Join(metadataDir, fmt.Sprintf("%x.toml", key))
 
-	var file *File = &File{}
-	if _, err := toml.DecodeFile(filepath, file); err != nil {
+	var file File
+	if _, err := toml.DecodeFile(metadataPath, &file); err != nil {
 		return nil, fmt.Errorf("failed to decode metadata file: %w", err)
 	}
 
-	for _, ref := range file.References {
+	// Filter out references with no location (not stored locally)
+	for i, ref := range file.References {
 		if ref != nil && ref.Location == "" {
-			ref = nil
+			file.References[i] = nil
 		}
 	}
-	return file, nil
+	return &file, nil
 }
 
 func (ks *KeyStore) LoadAllLocalFilesToMemory() error {

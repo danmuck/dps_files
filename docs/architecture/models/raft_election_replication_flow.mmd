@@ -1,0 +1,37 @@
+sequenceDiagram
+  participant F1 as "Follower 1"
+  participant F2 as "Follower 2"
+  participant C as "Candidate"
+  participant L as "Leader"
+  participant S as "SnapshotManager"
+
+  Note over F1,F2: "Initial state: followers with randomized election timers"
+
+  C->>F1: "RequestVote(term, request_id, trace_id)"
+  C->>F2: "RequestVote(term, request_id, trace_id)"
+  F1-->>C: "vote_granted"
+  F2-->>C: "vote_granted"
+  C-->>L: "majority reached -> become leader"
+
+  loop "heartbeat interval"
+    L->>F1: "AppendEntries(term, prev_log, commit_index)"
+    L->>F2: "AppendEntries(term, prev_log, commit_index)"
+    F1-->>L: "ack"
+    F2-->>L: "ack"
+  end
+
+  L->>F1: "AppendEntries(with new log entry)"
+  L->>F2: "AppendEntries(with new log entry)"
+  F1-->>L: "ack(index)"
+  F2-->>L: "ack(index)"
+  L-->>L: "commit on quorum; apply in-order"
+
+  alt "follower lagging too far behind"
+    L->>S: "CreateSnapshot()"
+    S-->>L: "Snapshot(term,index,data)"
+    L->>F2: "InstallSnapshot(snapshot, request_id, trace_id)"
+    F2-->>L: "snapshot_applied"
+  else "conflicting higher term observed"
+    F1-->>L: "reject(term higher)"
+    L-->>F1: "step down to follower"
+  end

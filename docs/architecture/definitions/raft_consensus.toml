@@ -1,0 +1,159 @@
+[meta]
+name = "raft_consensus"
+version = "v1"
+status = "draft"
+owner = "dps_files"
+
+[scope]
+purpose = "Defines consensus contracts for authoritative metadata replication from LAN cluster bootstrap to cloud-scale control plane."
+in_scope = "LogManager, SnapshotManager, leader election semantics, replication invariants, failure behavior, observability."
+out_of_scope = "DHT routing internals, chunk data-plane storage internals, blockchain block encoding internals."
+
+[entities]
+primary = "LogManager"
+related = ["SnapshotManager", "LogEntry", "Snapshot", "ServerNode", "MetadataStore"]
+
+[identity]
+cluster_identity_fields = ["node_id", "service_id", "instance_id"]
+observability_fields = ["component", "message", "peer", "request_id", "trace_id"]
+metadata_identity = ["file_id ([32]byte)", "chunk_id ([20]byte)"]
+
+[entities.LogEntry]
+package = "ledgers"
+fields = [
+    { name = "Index", type = "uint64", notes = "monotonic log index" },
+    { name = "Term", type = "uint64", notes = "leader term at append time" },
+    { name = "Command", type = "[]byte", notes = "opaque state-machine command payload" },
+]
+
+[entities.Snapshot]
+package = "ledgers"
+fields = [
+    { name = "Term", type = "uint64" },
+    { name = "Index", type = "uint64" },
+    { name = "Data", type = "[]byte", notes = "serialized state machine state" },
+    { name = "Metadata", type = "map[string]string", notes = "snapshot metadata and checksum references" },
+]
+
+[deployment_modes]
+mode_names = ["lan_control_cluster", "cloud_control_cluster"]
+notes = "Consensus semantics remain unchanged across modes; only latency and failure envelopes differ."
+
+[invariants]
+single_leader_per_term = "At most one leader may be elected per term."
+log_matching = "If two logs contain an entry with same index and term, all preceding entries are identical."
+leader_completeness = "A committed entry in term T appears in every future leader log."
+state_machine_safety = "No two nodes apply different commands at same log index."
+monotonic_term = "currentTerm never decreases."
+
+[lifecycle]
+create = "Initialize persistent term/vote state and empty or recovered log."
+update = "Append entries, advance commit index, apply committed entries, create snapshots."
+delete = "Decommission node via membership procedure and safe state handoff."
+status = "Expose follower/candidate/leader state and commit/applied index."
+health = "Report quorum reachability, replication lag, and election stability."
+config = "election timeout range, heartbeat interval, quorum size, snapshot threshold."
+
+[contracts]
+inputs = ["log commands", "peer RPCs", "snapshot data", "membership updates"]
+outputs = ["committed log entries", "snapshot artifacts", "state transitions"]
+errors = [
+    "Append/commit failures return explicit errors with term/index context.",
+    "Snapshot load/verify failures return explicit error with snapshot metadata.",
+]
+
+[reliability]
+timeouts = "Election and replication RPCs must use bounded deadlines with jittered election windows."
+retries = "Leaders retry AppendEntries to lagging followers with bounded backoff."
+idempotency = "AppendEntries and InstallSnapshot handlers must be idempotent by term/index."
+partial_failure = "Cluster must tolerate minority node failures without violating committed-state safety."
+
+[observability]
+required_fields = ["component", "message", "peer", "request_id", "trace_id"]
+recommended_fields = ["term", "commit_index", "last_applied", "leader_id", "quorum_size", "rpc_type"]
+notes = "Consensus logs must support reconstructing election and commit timelines."
+
+[processes.leader_election]
+description = "Election contract."
+steps = [
+    "Follower starts randomized election timer.",
+    "On timeout without valid heartbeat, transition to candidate and increment term.",
+    "Candidate requests votes from peers.",
+    "Candidate becomes leader on majority vote in same term.",
+    "On higher term observed, transition to follower.",
+]
+
+[processes.log_replication]
+description = "Replication contract."
+steps = [
+    "Leader appends command locally as uncommitted entry.",
+    "Leader sends AppendEntries to followers with prev-log checks.",
+    "Followers append on log match; reject otherwise.",
+    "Leader advances commit index when quorum acknowledges.",
+    "Committed entries are applied in index order.",
+]
+
+[processes.snapshotting]
+description = "Snapshot lifecycle contract."
+steps = [
+    "Create snapshot at configured compaction thresholds.",
+    "Persist snapshot and metadata checksum references.",
+    "Install snapshot on lagging followers when log backfill is inefficient.",
+    "Verify snapshot before state-machine load.",
+]
+
+[rpc_contract_target]
+required_rpc_names = ["RequestVote", "AppendEntries", "InstallSnapshot"]
+required_fields = ["term", "leader_id/candidate_id", "prev_log_index", "prev_log_term", "commit_index", "request_id", "trace_id"]
+notes = "Current transport proto does not yet expose dedicated Raft RPC command set; this contract is target-state."
+
+[[interfaces]]
+id = "LogManager"
+package = "ledgers"
+methods = [
+    { name = "Append", signature = "(entry LogEntry) error" },
+    { name = "GetEntry", signature = "(index uint64) (LogEntry, error)" },
+    { name = "LastLogIndex", signature = "() uint64" },
+    { name = "Commit", signature = "(index uint64) error" },
+]
+notes = "Core replicated log contract."
+
+[[interfaces]]
+id = "SnapshotManager"
+package = "ledgers"
+methods = [
+    { name = "CreateSnapshot", signature = "() (Snapshot, error)" },
+    { name = "PersistSnapshot", signature = "(snapshot Snapshot) error" },
+    { name = "LoadSnapshot", signature = "(snapshot Snapshot) error" },
+    { name = "VerifySnapshot", signature = "(hash string) error" },
+]
+notes = "Compaction and recovery contract surface."
+
+[compatibility]
+current_code_mismatch = [
+    "No concrete Raft implementation or RPC command family exists in code.",
+    "Transport protobuf currently contains Kademlia-centric commands only.",
+]
+migration_policy = [
+    "Introduce Raft RPC envelope extensions alongside existing commands.",
+    "Land log/snapshot storage backend before enabling elections in runtime.",
+    "Gate cluster mode by passing consensus contract tests.",
+]
+
+[implementation_status]
+functional = []
+scaffolding = [
+    "Leader election and log replication state machine",
+    "Quorum commit logic and conflict resolution",
+    "Snapshot creation/install workflow",
+]
+interfaces_only = [
+    "LogManager interface",
+    "SnapshotManager interface",
+    "LogEntry and Snapshot structs",
+]
+known_issues = [
+    "No consensus runtime path in current code.",
+    "No durability backend for term/vote/log/snapshot state.",
+    "No consensus-specific observability pipeline.",
+]

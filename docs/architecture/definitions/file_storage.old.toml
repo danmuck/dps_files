@@ -1,0 +1,168 @@
+[meta]
+name = "file_storage"
+version = "v1"
+status = "draft"
+owner = "dps_files"
+
+[scope]
+purpose = "Defines the local file chunking, storage, reassembly, and metadata pipeline"
+in_scope = "KeyStore, File, FileReference, MetaData, RemoteHandler, computeChunkKey, block sizing"
+out_of_scope = "Network distribution (DHT STORE RPCs), Raft metadata replication"
+
+[entities]
+primary = "KeyStore"
+related = ["File", "FileReference", "MetaData", "RemoteHandler", "DefaultRemoteHandler"]
+
+[entities.KeyStore]
+package = "key_store"
+fields = [
+    { name = "storageDir", type = "string", exported = false },
+    { name = "lock", type = "sync.RWMutex", exported = false },
+    { name = "references", type = "map[[20]byte]FileReference", exported = false },
+    { name = "files", type = "map[[32]byte]*File", exported = false },
+]
+methods = [
+    { name = "InitKeyStore", signature = "(storageDir string) (*KeyStore, error)", notes = "Constructor. Creates dirs, loads existing TOML metadata, verifies chunk references on disk." },
+    { name = "StoreFileLocal", signature = "(name string, fileData []byte) (*File, error)", notes = "Chunks in-memory data, stores each chunk as .kdht, persists metadata as TOML. Cleans up on failure." },
+    { name = "LoadAndStoreFileLocal", signature = "(localFilePath string) (*File, error)", notes = "Streams file from disk in chunks. Uses io.ReadFull with reusable buffer." },
+    { name = "LoadAndStoreFileRemote", signature = "(localFilePath string, handler RemoteHandler) (*File, error)", notes = "Like LoadAndStoreFileLocal but passes chunks to RemoteHandler instead of writing .kdht files locally." },
+    { name = "ReassembleFileToBytes", signature = "(key [32]byte) ([]byte, error)", notes = "Reads all chunks by reference, verifies each SHA-256 hash, returns complete file bytes." },
+    { name = "ReassembleFileToPath", signature = "(key [32]byte, outputPath string) error", notes = "Streams reassembly to disk, verifies final hash via HashFile." },
+    { name = "StoreFileReference", signature = "(ref *FileReference, data []byte) error", notes = "Writes chunk data to .kdht file. Verifies data hash before and optionally after write." },
+    { name = "LoadFileReferenceData", signature = "(key [20]byte) ([]byte, error)", notes = "Reads chunk from disk, verifies SHA-256 integrity." },
+    { name = "DeleteFileReference", signature = "(key [20]byte) error", notes = "Removes .kdht file and in-memory reference." },
+    { name = "Cleanup", signature = "() error", notes = "Removes all chunk files and metadata directory." },
+    { name = "ListStoredFileReferences", signature = "() []FileReference", notes = "Returns copies of all in-memory references." },
+    { name = "ListKnownFiles", signature = "() []MetaData", notes = "Returns copies of all file metadata." },
+    { name = "fileToMemory", signature = "(file *File) error", notes = "Stores File in memory map and writes TOML to storage/metadata/." },
+    { name = "fileFromMemory", signature = "(key [32]byte) (*File, error)", notes = "Returns copy of File from memory map." },
+    { name = "verifyFileReferences", signature = "() error", notes = "On init, checks each reference has a .kdht on disk. Moves orphaned metadata to .cache/." },
+]
+
+[entities.File]
+package = "key_store"
+fields = [
+    { name = "MetaData", type = "MetaData", toml = "metadata" },
+    { name = "References", type = "[]*FileReference", toml = "references,omitempty" },
+]
+
+[entities.FileReference]
+package = "key_store"
+fields = [
+    { name = "Key", type = "[20]byte", toml = "key", notes = "DHT routing key, computed via computeChunkKey" },
+    { name = "FileName", type = "string", toml = "file_name" },
+    { name = "Size", type = "uint32", toml = "chunk_size" },
+    { name = "FileIndex", type = "uint32", toml = "chunk_index" },
+    { name = "Location", type = "string", toml = "location", notes = "Local file path to .kdht file" },
+    { name = "Protocol", type = "string", toml = "protocol", notes = "Always 'file' for local storage" },
+    { name = "DataHash", type = "[32]byte", toml = "data_hash", notes = "SHA-256 of chunk data for integrity" },
+    { name = "Parent", type = "[32]byte", toml = "parent", notes = "SHA-256 hash of the parent file" },
+]
+
+[entities.MetaData]
+package = "key_store"
+fields = [
+    { name = "FileHash", type = "[32]byte", toml = "file_hash" },
+    { name = "TotalSize", type = "uint64", toml = "total_size" },
+    { name = "FileName", type = "string", toml = "file_name" },
+    { name = "Modified", type = "int64", toml = "modified", notes = "UnixNano timestamp" },
+    { name = "Permissions", type = "uint32", toml = "permissions" },
+    { name = "Signature", type = "[64]byte", toml = "signature" },
+    { name = "TTL", type = "uint64", toml = "ttl", notes = "Seconds, default 86400 (24h)" },
+    { name = "BlockSize", type = "uint32", toml = "chunk_size" },
+    { name = "TotalBlocks", type = "uint32", toml = "total_chunks" },
+]
+
+[constants]
+KeySize = { value = 20, unit = "bytes", notes = "SHA-1, used for DHT routing keys" }
+HashSize = { value = 32, unit = "bytes", notes = "SHA-256, used for data integrity" }
+CryptoSize = { value = 64, unit = "bytes", notes = "SHA-512, used for signatures/crypto" }
+MinBlockSize = { value = 65536, unit = "bytes", notes = "64KB minimum chunk size" }
+MaxBlockSize = { value = 4194304, unit = "bytes", notes = "4MB maximum chunk size" }
+TargetBlocks = { value = 1000, notes = "Target number of chunks per file" }
+FileExtension = { value = ".kdht", notes = "Chunk data file extension" }
+DEFAULT_PERMISSIONS = { value = "0644", notes = "R_USER|W_USER|R_GROUP|R_OTHER" }
+
+[processes.computeChunkKey]
+description = "Canonical DHT key derivation for a chunk"
+steps = [
+    "Allocate buffer of HashSize+8 bytes",
+    "Copy file SHA-256 hash into first 32 bytes",
+    "Write chunkIndex as little-endian uint64 into remaining 8 bytes",
+    "Return SHA-1 of the buffer (20 bytes)",
+]
+
+[processes.CalculateBlockSize]
+description = "Dynamic block size calculation"
+steps = [
+    "If fileSize == 0, return 0",
+    "If fileSize < MinBlockSize, return fileSize (single chunk)",
+    "Compute fileSize / TargetBlocks",
+    "Round to nearest power of 2",
+    "Clamp between MinBlockSize and MaxBlockSize",
+]
+
+[processes.file_storage_flow]
+description = "End-to-end file storage pipeline"
+steps = [
+    "Open file, compute SHA-256 hash and size",
+    "Prepare MetaData (hash, size, permissions, block size, total blocks)",
+    "For each chunk index 0..TotalBlocks-1:",
+    "  Read chunk bytes from file",
+    "  Create FileReference with computeChunkKey, SHA-256 of chunk data",
+    "  Store chunk as storage/{hex(key)}.kdht via StoreFileReference",
+    "  On failure: clean up all previously stored chunks",
+    "Store complete File struct via fileToMemory (in-memory + TOML)",
+]
+
+[lifecycle]
+create = "InitKeyStore creates storage dirs and loads existing metadata from TOML files"
+update = "StoreFileLocal/LoadAndStoreFileLocal add files; fileToMemory persists metadata"
+delete = "Cleanup removes all chunks and metadata; DeleteFileReference removes individual chunks"
+status = "verifyFileReferences checks chunk existence on startup"
+health = "Not implemented"
+config = "storageDir passed to InitKeyStore"
+
+[contracts]
+inputs = ["file path or raw bytes", "RemoteHandler for remote storage"]
+outputs = ["*File with MetaData and References", ".kdht chunk files", ".toml metadata files"]
+errors = ["Wrapped with fmt.Errorf and %w", "Partial chunk cleanup on any failure"]
+
+[reliability]
+timeouts = "None (local filesystem operations)"
+retries = "None"
+idempotency = "Chunks are content-addressed; re-storing same file produces same keys"
+
+[observability]
+required_fields = ["component", "message"]
+notes = "Currently uses fmt.Printf for all logging"
+
+[[interfaces]]
+id = "RemoteHandler"
+purpose = "Server-side receiver for network chunk distribution"
+methods = [
+    { name = "StartReceiver", signature = "(md *MetaData)", notes = "Prepares to receive chunks for a file" },
+    { name = "PassFileReference", signature = "(fr *FileReference, d []byte)", notes = "Passes chunk header and data" },
+    { name = "Receive", signature = "() <-chan any", notes = "Returns the channel for reading incoming data" },
+]
+notes = "DefaultRemoteHandler is a placeholder that prints to stdout. Not wired to network."
+
+[implementation_status]
+functional = [
+    "KeyStore init, storage, reassembly",
+    "File chunking with dynamic block sizing",
+    "MetaData TOML persistence and loading",
+    "FileReference storage and integrity verification",
+    "computeChunkKey DHT key derivation",
+    "Startup verification and orphan cleanup",
+]
+scaffolding = [
+    "DefaultRemoteHandler (prints to stdout, not network-connected)",
+]
+interfaces_only = []
+known_issues = [
+    "fmt.Printf used for logging everywhere",
+    "VERIFY constant is false by default, skipping post-write verification",
+    "No TLS or encryption for stored chunks",
+    "RemoteHandler channel-based protocol not formalized",
+]

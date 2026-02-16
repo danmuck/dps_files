@@ -12,13 +12,17 @@ test:
 test-coverage:
 	go test -v ./... -cover
 
-# Build the project
+# Build all main packages into .build/<name>/
 build:
-	go build -o bin/project ./...
+	@for dir in cmd/*/; do \
+		name=$$(basename $$dir); \
+		mkdir -p .build/$$name; \
+		go build -o .build/$$name/$$name ./$$dir; \
+	done
 
 # Clean up build artifacts
 clean:
-	rm -rf bin/
+	rm -rf .build/
 
 server:
 	go run cmd/server/main.go
@@ -28,6 +32,10 @@ client:
 
 chain:
 	go run cmd/chain/main.go
+
+# Generate a test file: make gen-file SIZE=256MB FILE=data/test.dat
+gen-file:
+	go run cmd/gen_file/main.go $(SIZE) $(FILE)
 
 # Tidy up dependencies
 tidy:

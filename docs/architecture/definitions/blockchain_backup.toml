@@ -1,0 +1,153 @@
+[meta]
+name = "blockchain_backup"
+version = "v1"
+status = "draft"
+owner = "dps_files"
+
+[scope]
+purpose = "Defines the blockchain block structure, crypto utilities, and backup ledger interface"
+in_scope = "Block, BlockData structs; AES-GCM encryption; hash computation; chain validation; BackupLedger interface"
+out_of_scope = "Raft snapshot scheduling, network sync of backup chain"
+
+[entities]
+primary = "Block"
+related = ["BlockData", "BackupLedger", "BackupEntry"]
+
+[entities.Block]
+package = "impl"
+fields = [
+    { name = "Hash", type = "[]byte", notes = "SHA-256 of gob-encoded block (excluding Hash field itself)" },
+    { name = "PrevHash", type = "[]byte", notes = "Hash of previous block in chain" },
+    { name = "Index", type = "uint64" },
+    { name = "Data", type = "BlockData" },
+    { name = "Time", type = "int64", notes = "UnixNano timestamp" },
+    { name = "Nonce", type = "uint64", notes = "Random 64-bit value from crypto/rand" },
+]
+notes = "All fields are exported for gob encoding. Hash is computed over all fields except Hash itself."
+
+[entities.BlockData]
+package = "impl"
+fields = [
+    { name = "Hash", type = "[]byte", notes = "SHA-1 of data payload (20 bytes)" },
+    { name = "Data", type = "[]byte", notes = "Plaintext or AES-GCM ciphertext" },
+    { name = "IV", type = "[]byte", notes = "12-byte IV for AES-GCM; nil if unencrypted" },
+]
+methods = [
+    { name = "String", signature = "() string" },
+    { name = "StringDecrypt", signature = "(key []byte) string", notes = "Decrypts if IV is present" },
+]
+
+[processes.block_creation]
+description = "Creating a new block"
+steps = [
+    "Generate random 64-bit nonce via crypto/rand",
+    "Set PrevHash, Index, Time (UnixNano)",
+    "Compute SHA-1 of data payload -> BlockData.Hash",
+    "Store data in BlockData.Data (plaintext)",
+    "Set BlockData.IV = nil",
+    "Gob-encode block with Hash=nil",
+    "Compute SHA-256 of gob bytes -> Block.Hash",
+]
+
+[processes.block_creation_encrypted]
+description = "Creating an encrypted block"
+steps = [
+    "Generate random 64-bit nonce via crypto/rand",
+    "Set PrevHash, Index, Time (UnixNano)",
+    "Encrypt data with AES-256-GCM -> ciphertext + 12-byte IV",
+    "Compute SHA-1 of ciphertext -> BlockData.Hash",
+    "Store ciphertext in BlockData.Data, IV in BlockData.IV",
+    "Gob-encode block with Hash=nil",
+    "Compute SHA-256 of gob bytes -> Block.Hash",
+]
+
+[processes.chain_validation]
+description = "Validating a chain of blocks"
+steps = [
+    "For each block: recompute hash via CalculateHash (gob-encode with Hash=nil, SHA-256)",
+    "Compare computed hash to stored Block.Hash",
+    "Verify Block.PrevHash matches previous block's Hash",
+    "Verify Block.Index is sequential",
+]
+
+[processes.aes_gcm_encryption]
+description = "AES-256-GCM encrypt/decrypt"
+encrypt_steps = [
+    "Create AES cipher from 32-byte key",
+    "Generate 12-byte random IV via crypto/rand",
+    "Create GCM from cipher",
+    "Seal plaintext with GCM -> ciphertext (includes auth tag)",
+]
+decrypt_steps = [
+    "Create AES cipher from 32-byte key",
+    "Create GCM from cipher",
+    "Open ciphertext with GCM using stored IV -> plaintext",
+]
+key_size = "32 bytes (AES-256)"
+iv_size = "12 bytes"
+
+[constants]
+hash_sizes = [
+    { name = "SHA-1", size = 20, usage = "Block data hash, DHT keys" },
+    { name = "SHA-256", size = 32, usage = "Block hash, data integrity" },
+    { name = "SHA-512", size = 64, usage = "Crypto/signature operations" },
+]
+
+[lifecycle]
+create = "NewBlock or NewBlockEncrypt"
+update = "Blocks are immutable once created"
+delete = "Not applicable (append-only)"
+status = "ValidateHash checks block integrity"
+health = "Not implemented"
+config = "Encryption key passed to NewBlockEncrypt"
+
+[contracts]
+inputs = ["index uint64", "data []byte", "prevHash []byte", "key []byte (for encrypted)"]
+outputs = ["*Block"]
+errors = ["Encryption/decryption failures", "Nonce generation failures return nil block"]
+
+[reliability]
+timeouts = "None"
+retries = "None"
+idempotency = "Block creation is not idempotent (random nonce and timestamp)"
+
+[observability]
+required_fields = ["component", "message"]
+notes = "Block.Print() and Block.PrintDecrypt() for debug output"
+
+[[interfaces]]
+id = "BackupLedger"
+package = "ledgers"
+methods = [
+    { name = "Append", signature = "(data []byte) error" },
+    { name = "Load", signature = "(path string) error" },
+    { name = "Write", signature = "(path string) error" },
+    { name = "Validate", signature = "() error" },
+    { name = "Sync", signature = "() error", notes = "Sync across Raft cluster" },
+    { name = "Rebuild", signature = "(path string) error", notes = "Rebuild from snapshot" },
+    { name = "ExportSnapshot", signature = "() error" },
+    { name = "Find", signature = "(key []byte) (*BackupEntry, error)", notes = "20-byte key finds FileReference, 32-byte key finds Block by hash" },
+]
+notes = "Interface only. Encoding-scheme independent (TOML, JSON, etc)."
+
+[implementation_status]
+functional = [
+    "Block struct with NewBlock and NewBlockEncrypt",
+    "BlockData with plaintext and encrypted modes",
+    "AES-256-GCM EncryptData/DecryptData",
+    "ComputeShaHash (SHA-1/256/512)",
+    "CalculateHash via gob encoding (handles *Block and Block value types)",
+    "ValidateHash for block integrity checking",
+    "secureNonce64 via crypto/rand",
+]
+scaffolding = []
+interfaces_only = [
+    "BackupLedger interface",
+    "BackupEntry interface (empty)",
+]
+known_issues = [
+    "NewBlock/NewBlockEncrypt return nil on nonce error (no error propagation)",
+    "No chain data structure (blocks are created individually, not managed as a chain)",
+    "cmd/chain/main.go demonstrates chain usage but no reusable Chain type exists",
+    "Block.Print uses fmt.Printf (no structured logging)",
+]

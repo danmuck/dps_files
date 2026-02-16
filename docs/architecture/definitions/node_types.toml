@@ -1,0 +1,147 @@
+[meta]
+name = "node_types"
+version = "v1"
+status = "draft"
+owner = "dps_files"
+
+[scope]
+purpose = "Defines node lifecycle and client/server contracts for storage and consensus participation."
+in_scope = "Node, ServerNode, ClientNode, MasterNode interfaces; DefaultNode lifecycle; error semantics; identity and observability fields."
+out_of_scope = "Concrete Raft implementation details and Kademlia algorithm internals."
+
+[entities]
+primary = "Node"
+related = ["ServerNode", "ClientNode", "MasterNode", "DefaultNode", "NodeState"]
+
+[identity]
+required_fields = ["node_id", "service_id", "instance_id"]
+addressing = "Node address must be resolvable in LAN and cloud deployment contexts."
+observability_fields = ["component", "message", "peer", "request_id", "trace_id"]
+
+[entities.NodeState]
+package = "nodes"
+type = "string"
+values = [
+    { name = "Follower", value = "Follower" },
+    { name = "Candidate", value = "Candidate" },
+    { name = "Leader", value = "Leader" },
+]
+
+[entities.DefaultNode]
+package = "nodes"
+fields = [
+    { name = "address", type = "string", exported = false },
+    { name = "pubKey", type = "[]byte", exported = false, notes = "20-byte node_id for kademlia compatibility" },
+    { name = "Router", type = "RoutingTable", exported = true },
+    { name = "TCPHandler", type = "*transport.TCPHandler", exported = true },
+    { name = "exit", type = "chan any", exported = false },
+]
+constructor = { name = "NewDefaultNode", signature = "(id []byte, address string, k int, a int) (*DefaultNode, error)" }
+
+[lifecycle]
+create = "Validate node_id and initialize transport/routing dependencies."
+update = "N/A for immutable identity fields."
+delete = "Shutdown signals goroutines and closes transport resources."
+status = "GetState for server role; client role status TBD."
+health = "Not implemented; contract target includes health endpoint and dependency status."
+config = "node_id, address, routing parameters (k/a), transport settings."
+
+[lifecycle.start_sequence]
+steps = [
+    "Start transport listener.",
+    "Start RPC processing loop.",
+    "Dispatch messages to role-specific handlers.",
+]
+
+[lifecycle.shutdown_sequence]
+steps = [
+    "Signal stop to all worker loops.",
+    "Drain in-flight operations with bounded timeout.",
+    "Close transport and release resources.",
+]
+
+[contracts]
+inputs = ["node identity", "peer addresses", "RPC payloads"]
+outputs = ["RPC responses", "state transitions", "routing/store side effects"]
+errors = ["All client/server operations return explicit errors."]
+
+[reliability]
+timeouts = "Node operations must use bounded deadlines for network and shutdown paths."
+retries = "Callers control retries; node methods return retryable vs terminal errors."
+idempotency = "Store and lookup flows should be idempotent by request_id + key where applicable."
+
+[observability]
+required_fields = ["component", "message", "peer", "request_id", "trace_id"]
+recommended_fields = ["node_id", "service_id", "instance_id", "command", "protocol"]
+notes = "Current code logs minimally; contract defines target observability bar."
+
+[[interfaces]]
+id = "Node"
+package = "nodes"
+methods = [
+    { name = "NodeInfo", signature = "() transport.NodeInfo" },
+    { name = "Address", signature = "() string" },
+    { name = "ID", signature = "() []byte" },
+    { name = "Start", signature = "() error" },
+    { name = "Shutdown", signature = "() error" },
+    { name = "Peers", signature = "() []*transport.NodeInfo" },
+]
+
+[[interfaces]]
+id = "ServerNode"
+package = "nodes"
+extends = "Node"
+methods = [
+    { name = "ApplyCommand", signature = "(command []byte) error" },
+    { name = "CreateSnapshot", signature = "() error" },
+    { name = "GetState", signature = "() NodeState" },
+    { name = "AddPeer", signature = "(peerID string) error" },
+    { name = "RemovePeer", signature = "(peerID string) error" },
+]
+
+[[interfaces]]
+id = "ClientNode"
+package = "nodes"
+extends = "Node"
+methods = [
+    { name = "Send", signature = "(addr string, messageType int, key []byte, value []byte, nodes []*transport.NodeInfo) error" },
+    { name = "Ping", signature = "(id []byte, message []byte) error" },
+    { name = "Store", signature = "(value []byte) error" },
+    { name = "FindNode", signature = "(id []byte) ([]*transport.NodeInfo, error)" },
+    { name = "FindValue", signature = "(id []byte) ([]byte, []*transport.NodeInfo, error)" },
+]
+notes = "Error-returning signatures are required for refactor-safe behavior and testability."
+
+[[interfaces]]
+id = "MasterNode"
+package = "nodes"
+extends = ["ServerNode", "ClientNode"]
+methods = []
+
+[compatibility]
+current_code_mismatch = [
+    "src/api/nodes.ClientNode methods currently return no errors.",
+    "DefaultNode client methods are stubs and do not satisfy target behavior.",
+]
+migration_policy = [
+    "Introduce error-returning method variants and adapters before removing old signatures.",
+    "Keep existing startup/shutdown behavior working while replacing sleep-based synchronization.",
+]
+
+[implementation_status]
+functional = [
+    "DefaultNode creation and basic start/shutdown lifecycle",
+]
+scaffolding = [
+    "RPC dispatch integration for client/server roles",
+    "Error-returning client operations",
+    "Structured observability fields",
+]
+interfaces_only = [
+    "ServerNode behavior beyond interface",
+    "MasterNode implementation",
+]
+known_issues = [
+    "Current shutdown uses sleep-based sequencing.",
+    "Client operations are stubbed and not externally reliable.",
+]

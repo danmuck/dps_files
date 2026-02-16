@@ -1,0 +1,36 @@
+sequenceDiagram
+  participant C as "ClientNode"
+  participant R as "KademliaRouting"
+  participant T as "TransportHandler"
+  participant P1 as "Peer A"
+  participant P2 as "Peer B"
+  participant P3 as "Peer C"
+
+  C->>R: "ClosestK(target_key)"
+  R-->>C: "seed candidates (k)"
+
+  loop "iterative rounds (alpha parallel)"
+    C->>T: "FIND_NODE/FIND_VALUE(request_id, trace_id) -> Peer A"
+    C->>T: "FIND_NODE/FIND_VALUE(request_id, trace_id) -> Peer B"
+    T->>P1: "RPC query"
+    T->>P2: "RPC query"
+    alt "peer responds"
+      P1-->>T: "NODES/VALUE"
+      P2-->>T: "NODES/VALUE"
+      T-->>C: "responses"
+      C->>R: "merge + dedupe + reorder by XOR distance"
+    else "timeout / failure"
+      T-->>C: "timeout or transport error"
+      C->>R: "mark peer degraded; expand frontier"
+    end
+  end
+
+  alt "value found"
+    C-->>C: "return VALUE + source peer"
+  else "no direct value"
+    C->>R: "final ClosestK set"
+    R-->>C: "closest nodes"
+  end
+
+  C->>T: "optional retry to Peer C with bounded backoff"
+  T->>P3: "query"

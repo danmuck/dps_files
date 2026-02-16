@@ -29,7 +29,7 @@ func (bc *Blockchain) ValidateChain() error {
 		}
 
 		// Verify block hash
-		if !impl.ValidateHash(current, 256) {
+		if !impl.ValidateHash(current, 32) {
 			return fmt.Errorf("block %d invalid: hash verification failed", i)
 		}
 	}
@@ -123,5 +123,9 @@ func main() {
 		// Print the blockchain
 		bc.PrintChainDecrypted(encryptionKey)
 	}
-	fmt.Println(bc.ValidateChain().Error())
+	if err := bc.ValidateChain(); err != nil {
+		fmt.Printf("Chain validation failed: %v\n", err)
+	} else {
+		fmt.Println("Chain validation passed.")
+	}
 }

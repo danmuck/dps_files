@@ -1,0 +1,27 @@
+flowchart TB
+  FS["file_storage.toml"]
+  TR["transport_rpc.toml"]
+  DR["dht_routing.toml"]
+  NT["node_types.toml"]
+  ML["metadata_ledgers.toml"]
+  RC["raft_consensus.toml"]
+  BB["blockchain_backup.toml"]
+
+  FS --> DR
+  FS --> TR
+  FS --> ML
+
+  DR --> NT
+  DR --> TR
+
+  NT --> TR
+  NT --> RC
+
+  ML --> FS
+  ML --> RC
+
+  RC --> TR
+  BB --> RC
+
+  classDef draft fill:#fdf6e3,stroke:#b58900,color:#333,stroke-width:1px;
+  class FS,TR,DR,NT,ML,RC,BB draft;

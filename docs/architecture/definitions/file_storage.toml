@@ -1,0 +1,263 @@
+[meta]
+name = "file_storage"
+version = "v1"
+status = "draft"
+owner = "dps_files"
+
+[scope]
+purpose = "Defines KeyStore chunking, local persistence, distributed placement contracts, and reassembly behavior."
+in_scope = "KeyStore, File, FileReference, MetaData, storage modes, chunk locator semantics, RemoteHandler stream contract, invariants."
+out_of_scope = "Raft consensus internals, blockchain backup internals, orchestration runtime details."
+
+[entities]
+primary = "KeyStore"
+related = ["File", "FileReference", "MetaData", "ChunkLocator", "RemoteHandler", "DefaultRemoteHandler"]
+
+[naming]
+file_id = "file_hash ([32]byte SHA-256)"
+chunk_id = "chunk_key ([20]byte SHA-1 from computeChunkKey)"
+node_identity_fields = ["node_id", "service_id", "instance_id"]
+observability_fields = ["component", "message", "peer", "request_id", "trace_id"]
+mode_names = ["local_only", "cluster_only", "hybrid"]
+notes = "Mode names are deployment-agnostic: local network and cloud clusters both map to cluster_* semantics."
+
+[entities.KeyStore]
+package = "key_store"
+fields = [
+    { name = "storageDir", type = "string", exported = false },
+    { name = "lock", type = "sync.RWMutex", exported = false },
+    { name = "references", type = "map[[20]byte]FileReference", exported = false },
+    { name = "files", type = "map[[32]byte]*File", exported = false },
+]
+methods = [
+    { name = "InitKeyStore", signature = "(storageDir string) (*KeyStore, error)",
+    	notes = "Creates dirs, loads metadata TOML, verifies references under configured storage mode rules."
+    },
+    { name = "StoreFileLocal", signature = "(name string, fileData []byte) (*File, error)",
+    	notes = "Chunks in-memory data and stores on node-local disk."
+    },
+    { name = "LoadAndStoreFileLocal", signature = "(localFilePath string) (*File, error)",
+    	notes = "Streams file from local disk and stores locally."
+    },
+    { name = "LoadAndStoreFileRemote", signature = "(localFilePath string, handler RemoteHandler) (*File, error)",
+    	notes = "Streams file and sends chunks to distributed placement handler."
+    },
+    { name = "ReassembleFileToBytes", signature = "(key [32]byte) ([]byte, error)",
+    	notes = "Reassembles file from available chunk locators based on active mode policy."
+    },
+    { name = "ReassembleFileToPath", signature = "(key [32]byte, outputPath string) error",
+    	notes = "Reassembles to output path with final file hash verification."
+    },
+    { name = "StoreFileReference", signature = "(ref *FileReference, data []byte) error",
+    	notes = "Local chunk write path; verifies data hash."
+    },
+    { name = "LoadFileReferenceData", signature = "(key [20]byte) ([]byte, error)",
+    	notes = "Reads chunk bytes via locator and verifies hash."
+    },
+    { name = "DeleteFileReference", signature = "(key [20]byte) error",
+    	notes = "Deletes local chunk reference and local artifact when present."
+    },
+    { name = "Cleanup", signature = "() error",
+    	notes = "Removes local chunks and metadata according to cleanup scope policy."
+    },
+    { name = "ListStoredFileReferences", signature = "() []FileReference",
+    	notes = "Returns copies of references known in-memory."
+    },
+    { name = "ListKnownFiles", signature = "() []MetaData",
+    	notes = "Returns known file metadata in-memory."
+    },
+]
+
+[entities.File]
+package = "key_store"
+fields = [
+    { name = "MetaData", type = "MetaData", toml = "metadata" },
+    { name = "References", type = "[]*FileReference", toml = "references,omitempty" },
+]
+
+[entities.FileReference]
+package = "key_store"
+fields = [
+    { name = "Key", type = "[20]byte", toml = "key", notes = "chunk_id / DHT routing key from computeChunkKey" },
+    { name = "FileName", type = "string", toml = "file_name" },
+    { name = "Size", type = "uint32", toml = "chunk_size" },
+    { name = "FileIndex", type = "uint32", toml = "chunk_index" },
+    { name = "Location", type = "string", toml = "location", notes = "Current v1 local path compatibility field; may be empty in cluster_only mode." },
+    { name = "Protocol", type = "string", toml = "protocol", notes = "Current v1 compatibility field. Not authoritative for placement semantics." },
+    { name = "DataHash", type = "[32]byte", toml = "data_hash", notes = "SHA-256 for chunk integrity." },
+    { name = "Parent", type = "[32]byte", toml = "parent", notes = "file_id of parent file." },
+]
+notes = "Placement semantics are governed by ChunkLocator contract below. v1 fields remain for compatibility."
+
+[entities.ChunkLocator]
+type = "contract"
+fields = [
+    { name = "mode", type = "string", values = ["local_only", "cluster_only", "hybrid"] },
+    { name = "node_id", type = "string", notes = "Node that currently stores the chunk replica." },
+    { name = "service_id", type = "string", notes = "Storage service identity on node." },
+    { name = "instance_id", type = "string", notes = "Storage service instance identity." },
+    { name = "peer", type = "string", notes = "Addressable peer endpoint for chunk retrieval." },
+    { name = "local_path", type = "string", notes = "Local filesystem path when available. Optional." },
+    { name = "request_id", type = "string", notes = "Correlation id for placement operation." },
+    { name = "trace_id", type = "string", notes = "Trace correlation across multi-node workflows." },
+]
+notes = "ChunkLocator is normative for refactor target; FileReference.Location/Protocol remain backward-compatible fields."
+
+[entities.MetaData]
+package = "key_store"
+fields = [
+    { name = "FileHash", type = "[32]byte", toml = "file_hash" },
+    { name = "TotalSize", type = "uint64", toml = "total_size" },
+    { name = "FileName", type = "string", toml = "file_name" },
+    { name = "Modified", type = "int64", toml = "modified", notes = "UnixNano timestamp" },
+    { name = "Permissions", type = "uint32", toml = "permissions" },
+    { name = "Signature", type = "[64]byte", toml = "signature" },
+    { name = "TTL", type = "uint64", toml = "ttl", notes = "Seconds, default 86400 (24h)" },
+    { name = "BlockSize", type = "uint32", toml = "chunk_size" },
+    { name = "TotalBlocks", type = "uint32", toml = "total_chunks" },
+]
+
+[storage_modes.local_only]
+description = "All writes and reads are node-local."
+write_path = "StoreFileReference writes storage/{chunk_id}.kdht"
+read_path = "LoadFileReferenceData reads local path and verifies DataHash"
+startup_validation = "Missing local chunk for referenced key marks file metadata invalid/orphaned"
+use_case = "Single-node development and local-network bootstrap"
+
+[storage_modes.cluster_only]
+description = "Writes go to distributed placement targets; local chunk presence is optional."
+write_path = "LoadAndStoreFileRemote sends chunk stream to RemoteHandler -> cluster placement"
+read_path = "Reassembly resolves chunk bytes through cluster locator / retrieval path"
+startup_validation = "Do not orphan metadata solely because local .kdht is absent when locator indicates cluster placement"
+use_case = "LAN distributed storage and cloud cluster deployment"
+
+[storage_modes.hybrid]
+description = "Distributed authoritative placement plus optional node-local cache."
+write_path = "Cluster placement required; local write is best-effort cache"
+read_path = "Prefer local cache, fallback to cluster retrieval"
+startup_validation = "Local cache miss is non-fatal if cluster locator exists"
+use_case = "Edge caching with distributed durability"
+
+[constants]
+KeySize = { value = 20, unit = "bytes", notes = "SHA-1, used for chunk_id routing keys" }
+HashSize = { value = 32, unit = "bytes", notes = "SHA-256, used for file/chunk integrity" }
+CryptoSize = { value = 64, unit = "bytes", notes = "SHA-512, used for signatures/crypto helpers" }
+MinBlockSize = { value = 65536, unit = "bytes", notes = "64KiB minimum chunk size" }
+MaxBlockSize = { value = 4194304, unit = "bytes", notes = "4MiB maximum chunk size" }
+TargetBlocks = { value = 1000, notes = "Target number of chunks per file" }
+FileExtension = { value = ".kdht", notes = "Node-local chunk file extension" }
+DEFAULT_PERMISSIONS = { value = "0644", notes = "R_USER|W_USER|R_GROUP|R_OTHER" }
+
+[processes.computeChunkKey]
+description = "Canonical deterministic chunk_id derivation."
+steps = [
+    "Allocate buffer of HashSize+8 bytes.",
+    "Copy file_hash (SHA-256) into first 32 bytes.",
+    "Encode chunk_index as little-endian uint64 in remaining bytes.",
+    "Compute SHA-1 over buffer and return [20]byte key.",
+]
+
+[processes.CalculateBlockSize]
+description = "Dynamic block size selection for bounded chunk counts."
+steps = [
+    "If fileSize == 0, return 0.",
+    "If fileSize < MinBlockSize, return fileSize (single chunk).",
+    "Compute fileSize / TargetBlocks.",
+    "Round to nearest power-of-two.",
+    "Clamp to [MinBlockSize, MaxBlockSize].",
+]
+
+[processes.file_storage_flow]
+description = "Primary write path (local_only baseline)."
+steps = [
+    "Compute file hash and metadata.",
+    "Split bytes into chunk stream by BlockSize.",
+    "For each chunk index, derive chunk_id and DataHash.",
+    "Persist or place chunk according to active storage_mode.",
+    "Persist file metadata + chunk references.",
+]
+
+[processes.startup_reference_validation]
+description = "Init-time reference validation must be mode-aware."
+rules = [
+    "local_only: missing local chunk for a reference is a hard validation failure.",
+    "cluster_only: missing local chunk is allowed when chunk locator indicates remote placement.",
+    "hybrid: local miss is cache miss; only fail when neither local nor cluster locator path is valid.",
+    "Validation outputs must include request_id and trace_id where available.",
+]
+
+[invariants]
+total_blocks_math = "If BlockSize > 0 then TotalBlocks == ceil(TotalSize / BlockSize), else TotalBlocks == 0."
+reference_cardinality = "len(References) == TotalBlocks for persisted File records."
+chunk_index_continuity = "FileReference.FileIndex forms contiguous sequence [0..TotalBlocks-1]."
+chunk_hash_integrity = "SHA-256(chunk_bytes) == FileReference.DataHash."
+file_hash_integrity = "SHA-256(reassembled_file_bytes) == MetaData.FileHash."
+chunk_key_determinism = "FileReference.Key == computeChunkKey(MetaData.FileHash, FileReference.FileIndex)."
+
+[lifecycle]
+create = "InitKeyStore initializes local state and metadata index."
+update = "Store/Load operations append or replace file metadata and chunk references."
+delete = "Cleanup and DeleteFileReference remove artifacts according to mode-aware policies."
+status = "Mode-aware reference validation and integrity verification."
+health = "Not yet implemented as endpoint; contract requires integrity pass/fail summary."
+config = "storageDir + storage_mode (+ cluster locator config in distributed modes)."
+
+[contracts]
+inputs = ["local file path or raw bytes", "RemoteHandler for cluster placement", "storage_mode policy"]
+outputs = ["File metadata and chunk references", "chunk artifacts (local and/or cluster)", "deterministic IDs"]
+errors = [
+    "All public operations return explicit errors with wrapped context.",
+    "Partial-write cleanup is required for local_only and local cache side-effects.",
+    "Cluster placement failures must include per-chunk status and terminal failure reason.",
+]
+
+[reliability]
+timeouts = "cluster_only/hybrid remote placement operations MUST enforce bounded per-chunk and file-level timeouts."
+retries = "cluster_only/hybrid MAY retry idempotent chunk placement with bounded backoff; retries must preserve chunk_id and request_id."
+idempotency = "Chunk placement and local write are idempotent by chunk_id + DataHash; duplicate writes with same IDs are no-ops."
+partial_failure = "Hybrid mode tolerates local cache misses; cluster placement failures are fatal unless policy permits degraded commit."
+
+[observability]
+required_fields = ["component", "message", "peer", "request_id", "trace_id"]
+recommended_fields = ["node_id", "service_id", "instance_id", "file_id", "chunk_id", "chunk_index", "storage_mode"]
+notes = "Current code uses fmt.Printf; contract requires structured fields during refactor."
+
+[[interfaces]]
+id = "RemoteHandler"
+purpose = "Typed chunk stream contract for distributed placement."
+methods = [
+    { name = "StartReceiver", signature = "(md *MetaData)" },
+    { name = "PassFileReference", signature = "(fr *FileReference, d []byte)" },
+    { name = "Receive", signature = "() <-chan any" },
+]
+events = [
+    { name = "MetaStart", direction = "writer->receiver", payload = "MetaData" },
+    { name = "ChunkHeader", direction = "writer->receiver", payload = "FileReference" },
+    { name = "ChunkData", direction = "writer->receiver", payload = "[]byte" },
+    { name = "ChunkAck", direction = "receiver->writer", payload = "chunk_id + status + error" },
+    { name = "FileComplete", direction = "receiver->writer", payload = "file_id + summary" },
+]
+failure_contract = [
+    "NACK must include chunk_id, chunk_index, and explicit error reason.",
+    "Receiver must emit terminal completion event for success/failure.",
+    "Backpressure must be explicit (blocking send or bounded queue policy).",
+]
+notes = "DefaultRemoteHandler remains placeholder; these semantics are normative for refactor target."
+
+[implementation_status]
+functional = [
+    "KeyStore local init/store/reassemble pipeline",
+    "Deterministic computeChunkKey derivation",
+    "Chunk hash verification and file hash verification",
+    "Metadata TOML persistence and reload",
+]
+scaffolding = [
+    "DefaultRemoteHandler placeholder",
+    "Mode-aware locator retrieval path for cluster_only/hybrid",
+]
+interfaces_only = []
+known_issues = [
+    "Current startup validation assumes local chunk presence and is not yet mode-aware.",
+    "Location/Protocol fields are local-centric and need typed locator evolution.",
+    "RemoteHandler stream semantics are not yet enforced in code.",
+]

@@ -13,7 +13,7 @@ type TCPHandler struct {
 	listener net.Listener
 	inbound  chan *RPC
 	coder    Coder
-	exit     chan interface{}
+	exit     chan any
 }
 
 // TCPHandler generator function
@@ -21,7 +21,7 @@ func NewTCPHandler(address string, exit chan any) *TCPHandler {
 	fmt.Printf("NewTCPHandler(%s) \n", address)
 	return &TCPHandler{
 		address: address,
-		inbound: make(chan *RPC, 0),
+		inbound: make(chan *RPC),
 		exit:    exit,
 		coder:   DefaultCoder{},
 	}
@@ -51,10 +51,16 @@ func (h *TCPHandler) ListenAndAccept() error {
 	return nil
 }
 
-// Send an RPC over a connection
+// Send an RPC over a connection using the configured encoder
 func (h *TCPHandler) Send(conn net.Conn, rpc *RPC) error {
-	s := fmt.Sprintf("Send(): %s \n", rpc.Payload)
-	conn.Write([]byte(s))
+	data, err := h.coder.Encode(rpc)
+	if err != nil {
+		return fmt.Errorf("failed to encode RPC: %w", err)
+	}
+	_, err = conn.Write(data)
+	if err != nil {
+		return fmt.Errorf("failed to write RPC: %w", err)
+	}
 	return nil
 }
 

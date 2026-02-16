@@ -54,44 +54,49 @@ func secureNonce64() (uint64, error) {
 //	any: [any type data]
 //
 // size: [20, 32, 64] (length of sha hash in bytes)
-func CalculateHash(any interface{}, size int) ([]byte, error) {
-	tmp := any
-	block, ok := any.(Block)
-	if ok {
-		block.Hash = nil
-		var buf bytes.Buffer
-		encoder := gob.NewEncoder(&buf)
-		err := encoder.Encode(block)
-		if err != nil {
-			return nil, err
-		}
-
-		hash := ComputeShaHash(buf.Bytes(), size)
-		return hash, nil
-	}
-
-	// Serialize the struct
+func CalculateHash(v any, size int) ([]byte, error) {
 	var buf bytes.Buffer
 	encoder := gob.NewEncoder(&buf)
-	err := encoder.Encode(tmp)
-	if err != nil {
-		return nil, err
+
+	// If it's a Block (pointer or value), zero the Hash field before encoding
+	// so the hash covers everything except the hash itself.
+	switch b := v.(type) {
+	case *Block:
+		tmp := *b
+		tmp.Hash = nil
+		if err := encoder.Encode(tmp); err != nil {
+			return nil, err
+		}
+	case Block:
+		b.Hash = nil
+		if err := encoder.Encode(b); err != nil {
+			return nil, err
+		}
+	default:
+		if err := encoder.Encode(v); err != nil {
+			return nil, err
+		}
 	}
 
 	hash := ComputeShaHash(buf.Bytes(), size)
 	return hash, nil
 }
 
-// Validate the hash of a Block by rehashing it
-func ValidateHash(s interface{}, size int) bool {
-	// Compute the expected hash
+// ValidateHash rehashes a Block and compares against its stored hash.
+func ValidateHash(s any, size int) bool {
 	expectedHash, err := CalculateHash(s, size)
-	hash, ok := s.(Block)
-	if !ok || err != nil {
+	if err != nil {
 		return false
 	}
-	// Compare the block's stored hash with the computed hash
-	return bytes.Equal(hash.Hash, expectedHash)
+
+	switch b := s.(type) {
+	case *Block:
+		return bytes.Equal(b.Hash, expectedHash)
+	case Block:
+		return bytes.Equal(b.Hash, expectedHash)
+	default:
+		return false
+	}
 }
 
 // Encrypts data using AES-GCM

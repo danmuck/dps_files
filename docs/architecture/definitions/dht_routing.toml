@@ -1,0 +1,159 @@
+[meta]
+name = "dht_routing"
+version = "v1"
+status = "draft"
+owner = "dps_files"
+
+[scope]
+purpose = "Defines Kademlia routing contracts for chunk discovery and peer lookup across LAN-first and cloud-distributed deployments."
+in_scope = "RoutingTable and KademliaRouting interfaces, router invariants, bucket behavior, lookup workflow contracts, observability."
+out_of_scope = "Transport wire framing internals, key_store chunk persistence internals, Raft consensus internals."
+
+[entities]
+primary = "KademliaRouting"
+related = ["RoutingTable", "DefaultRouter", "KademliaRouter", "NodeInfo", "ClientNode"]
+
+[identity]
+node_id_type = "[20]byte"
+chunk_id_type = "[20]byte"
+observability_fields = ["component", "message", "peer", "request_id", "trace_id"]
+notes = "node_id and chunk_id share key width; semantic domain is distinguished by context."
+
+[entities.DefaultRouter]
+package = "nodes"
+fields = [
+    { name = "localhost", type = "string", exported = false },
+    { name = "nodes", type = "map[string]*transport.NodeInfo", exported = false, notes = "address-keyed map" },
+    { name = "mu", type = "sync.Mutex", exported = false },
+]
+constructor = { name = "NewDefaultRouter", signature = "(node *transport.NodeInfo) (*DefaultRouter, error)" }
+notes = "Compatibility baseline router for development and bootstrap; not distance-aware."
+
+[entities.KademliaRouter]
+package = "nodes"
+fields = [
+    { name = "id", type = "[]byte", exported = false, notes = "must be 20 bytes" },
+    { name = "localhost", type = "string", exported = false },
+    { name = "k", type = "int", exported = false, notes = "replication factor" },
+    { name = "a", type = "int", exported = false, notes = "parallelism (alpha)" },
+    { name = "buckets", type = "[][]*transport.NodeInfo", exported = false, notes = "160 k-buckets for 160-bit ID space" },
+    { name = "mu", type = "sync.Mutex", exported = false },
+]
+constructor = { name = "NewKademliaRouter", signature = "(node *transport.NodeInfo, k int, a int) (*KademliaRouter, error)" }
+notes = "Contract target router for production DHT routing."
+
+[modes]
+bootstrap_mode = ["local_bootstrap", "cluster_bootstrap"]
+lookup_scope = ["lan_cluster", "multi_cluster_cloud"]
+notes = "Routing semantics are stable across modes; only peer population and latency envelopes change."
+
+[invariants]
+id_width = "All routing IDs are 20 bytes."
+parameter_bounds = "k > 0, a > 0, and a <= k."
+bucket_index_bounds = "Bucket index range is [0..159]."
+no_duplicate_contacts = "Same node_id may not appear in more than one active contact record."
+lru_ordering = "Within a bucket, most-recently-seen contact is moved to tail."
+distance_ordering = "ClosestK(key) returns nodes sorted by XOR distance ascending."
+
+[lifecycle]
+create = "Initialize router with local node identity and empty bucket set."
+update = "InsertNode/RemoveNode and contact refresh update bucket state."
+delete = "No explicit teardown; router state released with node shutdown."
+status = "Expose size, bucket occupancy, and recency statistics."
+health = "Route quality checks should report bootstrap reachability and lookup convergence."
+config = "k, a, bootstrap peers, refresh interval, request timeout."
+
+[contracts]
+inputs = ["node identities", "target IDs", "target keys", "bootstrap peers"]
+outputs = ["closest peers", "exact match when present", "routing errors"]
+errors = [
+    "Invalid node_id length must return explicit error.",
+    "Duplicate insert must return explicit error or defined no-op outcome.",
+    "Lookup miss returns not-found with closest candidates where applicable.",
+]
+
+[reliability]
+timeouts = "Lookup RPC rounds must use bounded per-peer and overall lookup timeouts."
+retries = "Iterative lookup may retry alternate peers up to bounded budget."
+idempotency = "Insert/remove are idempotent by node_id under deterministic conflict policy."
+partial_failure = "Peer timeouts are expected; lookup should degrade gracefully by expanding query frontier."
+
+[observability]
+required_fields = ["component", "message", "peer", "request_id", "trace_id"]
+recommended_fields = ["node_id", "target_id", "bucket_index", "k", "a", "round", "timeout_ms"]
+notes = "Routing logs should be trace-correlated with transport RPC logs."
+
+[processes.xor_distance]
+description = "Core routing metric."
+steps = [
+    "Compute XOR(node_id, target_id) over 20 bytes.",
+    "Derive bucket index from highest-order differing bit.",
+    "Use resulting distance ordering for candidate ranking.",
+]
+
+[processes.iterative_lookup]
+description = "Iterative FIND_NODE / FIND_VALUE workflow."
+steps = [
+    "Seed candidate set with locally known closest contacts.",
+    "Query up to alpha peers in parallel per round.",
+    "Merge new contacts, remove duplicates, reorder by distance.",
+    "Stop when convergence criteria met or timeout budget exhausted.",
+]
+
+[processes.bucket_maintenance]
+description = "Bucket liveness and refresh contract."
+steps = [
+    "Refresh stale buckets on interval.",
+    "Ping least-recently-seen contact before eviction.",
+    "Promote responsive contacts and evict unresponsive contacts per policy.",
+]
+
+[[interfaces]]
+id = "RoutingTable"
+package = "nodes"
+methods = [
+    { name = "InsertNode", signature = "(node Node) error" },
+    { name = "RemoveNode", signature = "(node Node) error" },
+    { name = "Lookup", signature = "(id []byte) (*transport.NodeInfo, error)" },
+]
+notes = "Base routing operations, used by both default and kademlia routers."
+
+[[interfaces]]
+id = "KademliaRouting"
+package = "nodes"
+extends = "RoutingTable"
+methods = [
+    { name = "K", signature = "() int" },
+    { name = "A", signature = "() int" },
+    { name = "GetBucket", signature = "(index int) []*transport.NodeInfo" },
+    { name = "ClosestK", signature = "(key []byte) []*transport.NodeInfo" },
+    { name = "Size", signature = "() int" },
+]
+notes = "Kademlia-specific contract surface for distributed lookup behavior."
+
+[compatibility]
+current_code_mismatch = [
+    "KademliaRouter methods are stubs and do not satisfy target invariants.",
+    "DefaultRouter performs linear scan and lacks XOR-distance semantics.",
+]
+migration_policy = [
+    "Keep DefaultRouter as bootstrap fallback while KademliaRouter matures.",
+    "Introduce contract tests for XOR distance, bucket bounds, and ClosestK ordering before enabling by default.",
+]
+
+[implementation_status]
+functional = [
+    "DefaultRouter insert/remove/lookup baseline",
+    "KademliaRouter constructor with node ID validation",
+]
+scaffolding = [
+    "XOR distance and bucket maintenance",
+    "Iterative lookup and convergence logic",
+    "Refresh/eviction workflow",
+]
+interfaces_only = []
+known_issues = [
+    "No distance-aware routing in production path yet.",
+    "No timeout/backoff strategy implemented for lookup RPC rounds.",
+    "No structured routing observability in current code.",
+]

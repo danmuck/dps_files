@@ -18,6 +18,9 @@ enum Command {
     ACK = 5;
     NODES = 6;
     VALUE = 7;
+    REQUEST_VOTE = 8;
+    APPEND_ENTRIES = 9;
+    INSTALL_SNAPSHOT = 10;
 }
 
 message NodeInfo {
@@ -39,5 +42,7 @@ message RPC {
     bytes Key = 4;               // kdht key
     bytes Value = 5;             // kdht value
     repeated NodeInfo Nodes = 6; // k closest nodes field
+    string RequestID = 7;        // request correlation ID
+    string TraceID = 8;          // distributed trace ID
 
 }

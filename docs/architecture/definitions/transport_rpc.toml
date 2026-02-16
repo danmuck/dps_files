@@ -1,0 +1,179 @@
+[meta]
+name = "transport_rpc"
+version = "v1"
+status = "draft"
+owner = "dps_files"
+
+[scope]
+purpose = "Defines transport interfaces, TCP implementation, RPC envelope semantics, and observability/correlation requirements."
+in_scope = "TransportHandler, TCPHandler, Coder, RPC envelope fields, message framing limits, compatibility constraints with key_store."
+out_of_scope = "UDP implementation details, TLS implementation details, application-specific dispatch handlers."
+
+[entities]
+primary = "TransportHandler"
+related = ["TCPHandler", "Coder", "DefaultCoder", "RPC", "RPC_t", "NodeInfo"]
+
+[entities.TCPHandler]
+package = "transport"
+fields = [
+    { name = "address", type = "string", exported = false },
+    { name = "listener", type = "net.Listener", exported = false },
+    { name = "inbound", type = "chan *RPC", exported = false, notes = "Currently unbuffered." },
+    { name = "coder", type = "Coder", exported = false, notes = "DefaultCoder (Protobuf)." },
+    { name = "exit", type = "chan interface{}", exported = false },
+]
+constructor = { name = "NewTCPHandler", signature = "(address string, exit chan any) *TCPHandler" }
+
+[entities.DefaultCoder]
+package = "transport"
+fields = []
+notes = "Current framing uses 2-byte big-endian length prefix + Protobuf payload."
+
+[entities.RPC]
+package = "transport"
+source = "rpc.proto"
+fields = [
+    { name = "Meta", type = "RPC_t", proto_field = 1 },
+    { name = "Sender", type = "NodeInfo", proto_field = 2 },
+    { name = "Payload", type = "bytes", proto_field = 3 },
+    { name = "Key", type = "bytes", proto_field = 4, notes = "chunk_id / lookup key" },
+    { name = "Value", type = "bytes", proto_field = 5, notes = "opaque value/chunk payload" },
+    { name = "Nodes", type = "repeated NodeInfo", proto_field = 6, notes = "k closest nodes response" },
+]
+required_logical_fields = ["request_id", "trace_id", "component", "peer"]
+notes = "request_id/trace_id are logical contract requirements and should be added to protobuf envelope during refactor."
+
+[entities.RPC_t]
+package = "transport"
+source = "rpc.proto"
+fields = [
+    { name = "Command", type = "Command", proto_field = 1 },
+    { name = "Protocol", type = "Protocol", proto_field = 2 },
+]
+
+[entities.NodeInfo]
+package = "transport"
+source = "rpc.proto"
+fields = [
+    { name = "address", type = "string", proto_field = 1 },
+    { name = "id", type = "bytes", proto_field = 2 },
+    { name = "time", type = "int64", proto_field = 3 },
+]
+
+[entities.Protocol]
+package = "transport"
+source = "rpc.proto"
+type = "enum"
+values = [
+    { name = "Raft", number = 0 },
+    { name = "Kademlia", number = 1 },
+]
+
+[entities.Command]
+package = "transport"
+source = "rpc.proto"
+type = "enum"
+values = [
+    { name = "PING", number = 0 },
+    { name = "STORE", number = 1 },
+    { name = "GET", number = 2 },
+    { name = "FIND_NODE", number = 3 },
+    { name = "FIND_VALUE", number = 4 },
+    { name = "ACK", number = 5 },
+    { name = "NODES", number = 6 },
+    { name = "VALUE", number = 7 },
+]
+
+[processes.encoding]
+description = "Current wire framing."
+steps = [
+    "Encode: proto.Marshal(rpc) -> payload bytes.",
+    "Prepend 2-byte big-endian uint16 length header.",
+    "Decode: read 2-byte length then read payload bytes then unmarshal.",
+]
+max_message_size = "65535 bytes (uint16 limit)"
+
+[processes.message_size_compatibility]
+description = "Compatibility constraints between key_store chunks and transport framing."
+constraints = [
+    "key_store MinBlockSize is 65536 bytes, which exceeds current uint16 transport frame limit.",
+    "Direct chunk transfer over current framing is incompatible for default chunk sizes.",
+    "Refactor options: move to uint32 framing, add chunk sub-framing, or stream chunk segments.",
+]
+required_decision = "Before distributed chunk placement is productionized, transport must support chunk payloads above 64KiB."
+
+[processes.tcp_accept_loop]
+description = "Non-blocking TCP accept with exit signal."
+steps = [
+    "Set listener deadline to periodically check exit channel.",
+    "Accept connections and spawn per-connection read loops.",
+    "Decode inbound RPC messages and push to ProcessRPC channel.",
+    "Exit cleanly when shutdown signal observed.",
+]
+
+[lifecycle]
+create = "NewTCPHandler allocates handler with address and exit channel."
+update = "N/A"
+delete = "Close path terminates inbound processing and listener lifecycle."
+status = "Not exposed as explicit status endpoint."
+health = "Not implemented."
+config = "address + codec framing strategy + timeout settings."
+
+[contracts]
+inputs = ["net.Conn", "RPC envelope", "transport protocol selection"]
+outputs = ["decoded RPC stream", "send errors", "connection lifecycle events"]
+errors = ["Encode/decode/write/read errors must be wrapped with endpoint and command context."]
+
+[reliability]
+timeouts = "Accept/read/write operations must be bounded by configured deadlines."
+retries = "Transport layer does not retry automatically; caller controls retries."
+idempotency = "Transport itself is not idempotent; RPC handlers must own idempotent semantics."
+
+[observability]
+required_fields = ["component", "message", "peer", "request_id", "trace_id"]
+recommended_fields = ["command", "protocol", "remote_addr", "bytes_in", "bytes_out"]
+notes = "Current implementation logs via fmt.Printf; refactor target is structured logging with correlation IDs."
+
+[[interfaces]]
+id = "TransportHandler"
+package = "transport"
+methods = [
+    { name = "ListenAndAccept", signature = "() error" },
+    { name = "Send", signature = "(conn net.Conn, rpc *RPC) error" },
+    { name = "ProcessRPC", signature = "() <-chan *RPC" },
+    { name = "Close", signature = "() error" },
+]
+notes = "TCPHandler currently implements this; UDPHandler remains placeholder."
+
+[[interfaces]]
+id = "Coder"
+package = "transport"
+methods = [
+    { name = "Encode", signature = "(*RPC) ([]byte, error)" },
+    { name = "Decode", signature = "(io.Reader) (*RPC, error)" },
+]
+notes = "DefaultCoder uses protobuf with uint16 framing in current implementation."
+
+[compatibility]
+current_wire = "protobuf + uint16 length framing"
+target_wire_direction = "protobuf (or equivalent) + framing that supports key_store chunk payload sizes"
+migration_policy = [
+    "Maintain backward compatibility for control RPCs during transition.",
+    "Gate large chunk transfer path behind upgraded framing/streaming capability.",
+]
+
+[implementation_status]
+functional = [
+    "TCPHandler ListenAndAccept/Send/ProcessRPC/Close baseline",
+    "DefaultCoder encode/decode",
+]
+scaffolding = [
+    "UDP transport implementation",
+    "Correlation fields in RPC schema",
+]
+interfaces_only = []
+known_issues = [
+    "Current framing cannot carry default key_store chunk sizes.",
+    "No TLS and no authenticated transport identity.",
+    "Unbuffered inbound channel can become a bottleneck under load.",
+]

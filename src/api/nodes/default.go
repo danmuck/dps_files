@@ -12,24 +12,21 @@ type DefaultNode struct {
 	pubKey     []byte
 	Router     RoutingTable
 	TCPHandler *transport.TCPHandler
-	exit       chan interface{}
+	exit       chan any
 }
 
-func NewDefaultNode(id []byte, address string, k int, a int) (DefaultNode, error) {
+func NewDefaultNode(id []byte, address string, k int, a int) (*DefaultNode, error) {
 	node := &transport.NodeInfo{
 		Address: address,
 		Id:      id,
 		Time:    time.Now().UnixNano(),
 	}
-	rt, err := NewKademliaRouter(node, k)
+	rt, err := NewKademliaRouter(node, k, a)
 	if err != nil {
-		panic(err)
-	}
-	if a > k {
-		a = k
+		return nil, fmt.Errorf("failed to create router: %w", err)
 	}
 
-	exit := make(chan interface{})
+	exit := make(chan any)
 	client := &DefaultNode{
 		pubKey:     id,
 		address:    address,
@@ -38,7 +35,7 @@ func NewDefaultNode(id []byte, address string, k int, a int) (DefaultNode, error
 		exit:       exit,
 	}
 
-	return *client, nil
+	return client, nil
 }
 
 func (n *DefaultNode) NodeInfo() transport.NodeInfo {
@@ -51,6 +48,10 @@ func (n *DefaultNode) NodeInfo() transport.NodeInfo {
 
 func (n *DefaultNode) Address() string {
 	return n.address
+}
+
+func (n *DefaultNode) ID() []byte {
+	return n.pubKey
 }
 
 func (n *DefaultNode) PubKey() []byte {
@@ -91,22 +92,22 @@ func (n *DefaultNode) Peers() []*transport.NodeInfo {
 	return nil
 }
 
-func (n *DefaultNode) Send(addr string, message_t int, key []byte, value []byte, nodes []*string) {
-
+func (n *DefaultNode) Send(addr string, messageType int, key []byte, value []byte, nodes []*transport.NodeInfo) error {
+	return fmt.Errorf("kademlia Send not implemented")
 }
 
-func (n *DefaultNode) Ping(id []byte, message []byte) {
-
+func (n *DefaultNode) Ping(id []byte, message []byte) error {
+	return fmt.Errorf("kademlia Ping not implemented")
 }
 
-func (n *DefaultNode) Store(value []byte) {
-
+func (n *DefaultNode) Store(value []byte) error {
+	return fmt.Errorf("kademlia Store not implemented")
 }
 
-func (n *DefaultNode) FindNode(id []byte) {
-
+func (n *DefaultNode) FindNode(id []byte) ([]*transport.NodeInfo, error) {
+	return nil, fmt.Errorf("kademlia FindNode not implemented")
 }
 
-func (n *DefaultNode) FindValue(id []byte) {
-
+func (n *DefaultNode) FindValue(id []byte) ([]byte, []*transport.NodeInfo, error) {
+	return nil, nil, fmt.Errorf("kademlia FindValue not implemented")
 }
