@@ -29,7 +29,7 @@ Files are split into chunks, each chunk gets a 20-byte SHA-1 DHT key, chunk payl
 - `src/api/ledgers/`: ledger/snapshot interfaces
 - `src/impl/`: block and crypto primitives
 - `src/key_store/`: local chunking/storage/reassembly pipeline
-- `storage/`: runtime chunk/metadata cache (gitignored)
+- `local/storage/`: runtime chunk/metadata cache (gitignored)
 
 ## Build And Run
 
@@ -87,6 +87,8 @@ These instructions are project-agnostic and are intended to bootstrap documentat
 ## Buildplan Rules (`docs/progress`)
 
 - `docs/progress/` is the active buildplan and execution tracker.
+- After any code or documentation update, review relevant `docs/progress/*` files before ending the pass.
+- In the same pass, update the affected buildplan/checklist entries to reflect current status (do not defer progress tracking).
 - Maintain phase/task files with ordered grouping names:
 - `mvp_p1`, `mvp_p2`, `mvp_p3`, ...
 - or `<subprojectacronym>_phase1`, `<subprojectacronym>_phase2`, ...

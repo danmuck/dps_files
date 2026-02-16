@@ -33,7 +33,7 @@ client:
 chain:
 	go run cmd/chain/main.go
 
-# Generate a test file: make gen-file SIZE=256MB FILE=data/test.dat
+# Generate a test file: make gen-file SIZE=256MB FILE=local/data/test.dat
 gen-file:
 	go run cmd/gen_file/main.go $(SIZE) $(FILE)
 

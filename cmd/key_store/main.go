@@ -12,7 +12,7 @@ import (
 )
 
 const CLEAN = true
-const DATA_DIRECTORY = "./tmp/"
+const DATA_DIRECTORY = "./local/data/"
 const RUN_ALL = false
 
 //	var TEST_FILES = map[int]string{
@@ -146,7 +146,7 @@ func main() {
 	}
 
 	// create storage directory
-	storageDir := filepath.Join(".", "storage")
+	storageDir := filepath.Join(".", "local", "storage")
 	if err := CreateDirPath(storageDir); err != nil {
 		log.Fatal(err)
 	}

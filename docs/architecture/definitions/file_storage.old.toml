@@ -34,7 +34,7 @@ methods = [
     { name = "Cleanup", signature = "() error", notes = "Removes all chunk files and metadata directory." },
     { name = "ListStoredFileReferences", signature = "() []FileReference", notes = "Returns copies of all in-memory references." },
     { name = "ListKnownFiles", signature = "() []MetaData", notes = "Returns copies of all file metadata." },
-    { name = "fileToMemory", signature = "(file *File) error", notes = "Stores File in memory map and writes TOML to storage/metadata/." },
+    { name = "fileToMemory", signature = "(file *File) error", notes = "Stores File in memory map and writes TOML to local/storage/metadata/." },
     { name = "fileFromMemory", signature = "(key [32]byte) (*File, error)", notes = "Returns copy of File from memory map." },
     { name = "verifyFileReferences", signature = "() error", notes = "On init, checks each reference has a .kdht on disk. Moves orphaned metadata to .cache/." },
 ]
@@ -110,13 +110,13 @@ steps = [
     "For each chunk index 0..TotalBlocks-1:",
     "  Read chunk bytes from file",
     "  Create FileReference with computeChunkKey, SHA-256 of chunk data",
-    "  Store chunk as storage/{hex(key)}.kdht via StoreFileReference",
+    "  Store chunk as local/storage/{hex(key)}.kdht via StoreFileReference",
     "  On failure: clean up all previously stored chunks",
     "Store complete File struct via fileToMemory (in-memory + TOML)",
 ]
 
 [lifecycle]
-create = "InitKeyStore creates storage dirs and loads existing metadata from TOML files"
+create = "InitKeyStore creates local/storage dirs and loads existing metadata from TOML files"
 update = "StoreFileLocal/LoadAndStoreFileLocal add files; fileToMemory persists metadata"
 delete = "Cleanup removes all chunks and metadata; DeleteFileReference removes individual chunks"
 status = "verifyFileReferences checks chunk existence on startup"

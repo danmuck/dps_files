@@ -119,7 +119,7 @@ fields = [
 
 [storage_modes.local_only]
 description = "All writes and reads are node-local."
-write_path = "StoreFileReference writes storage/{chunk_id}.kdht"
+write_path = "StoreFileReference writes local/storage/{chunk_id}.kdht"
 read_path = "LoadFileReferenceData reads local path and verifies DataHash"
 startup_validation = "Missing local chunk for referenced key marks file metadata invalid/orphaned"
 use_case = "Single-node development and local-network bootstrap"

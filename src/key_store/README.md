@@ -6,10 +6,10 @@ A test utility for the KDHT (Kademlia DHT) file chunking and reassembly system. 
 
 1. Create required directories:
 ```bash
-mkdir -p public/data
+mkdir -p local/data
 ```
 
-2. Add test files to `public/data/` directory
+2. Add test files to `local/data/` directory
    - Files must match the TEST_FILES configuration in main.go
    - Current configuration:
 ```go
@@ -55,21 +55,21 @@ const FILE = TEST_FILES[0]  // Default file when RUN_ALL is false
 
 ## Output Locations
 
-- Original files: `./public/data/`
-- Chunked storage: `./storage/`
-- Reassembled files: `./public/data/copy.<filename>`
+- Original files: `./local/data/`
+- Chunked storage: `./local/storage/`
+- Reassembled files: `./local/data/copy.<filename>`
 
 ## Example Run
 
 ```bash
 # Add a test file
-cp myimage.jpg public/data/image.jpg
+cp myimage.jpg local/data/image.jpg
 
 # Run the test
 go run main.go run
 
 # Check results
-ls public/data/copy.image.jpg
+ls local/data/copy.image.jpg
 ```
 
 ## Expected Output
@@ -95,12 +95,12 @@ Total chunks: 16
 
 ## Error Handling
 
-- If files don't exist in public/data/, the program will error
+- If files don't exist in local/data/, the program will error
 - Verification failures will stop the process
 - Use CLEAN=true to remove previous test files
 
 ## Notes
 
-- The program requires write permissions in both `public/data/` and `storage/` directories
+- The program requires write permissions in both `local/data/` and `local/storage/` directories
 - Large files will be chunked into approximately 1000 pieces
 - Each chunk is individually verified during storage and reassembly

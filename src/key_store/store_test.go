@@ -11,7 +11,7 @@ import (
 
 // testDataDir is a persistent directory for reusable test files.
 // Files here survive across test runs to avoid regenerating large files.
-const testDataDir = "./data"
+var testDataDir = filepath.Join("..", "..", "local", "data")
 
 // ensureTestFile returns the path to a test file of the given size.
 // If the file already exists with the correct size, it is reused.

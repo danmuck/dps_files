@@ -28,6 +28,7 @@
 - [x] Fix `fileToMemory` variable shadowing — renamed to `metadataPath`
 - [x] Fix `LoadLocalFileToMemory` variable shadowing and ineffective `ref = nil` — uses index assignment
 - [x] Fix `CalculateBlockSize` / `PrepareMetaData` divide-by-zero on empty files
+- [x] Migrate runtime/test filesystem paths to local/storage and local/data
 - [ ] Fix `Cleanup` — only removes chunks tracked in memory; if the process crashed mid-store, orphaned `.kdht` files on disk are never cleaned up
 
 ### Phase 1B: Testing

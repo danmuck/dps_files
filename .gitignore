@@ -23,11 +23,11 @@ go.work.sum
 
 # env file
 .env
-storage/
+local/storage/
 local/
 .build/
 .claude/
-data/
+local/data/
 *tmp/
 *.trash/
 .DS_Store
