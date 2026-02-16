@@ -1,6 +1,7 @@
 package key_store
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"fmt"
@@ -367,6 +368,241 @@ func TestCleanupRemovesAllFiles(t *testing.T) {
 	metadataDir := filepath.Join(storageDir, "metadata")
 	if _, err := os.Stat(metadataDir); !os.IsNotExist(err) {
 		t.Error("Metadata directory still exists after cleanup")
+	}
+}
+
+func TestStreamFile(t *testing.T) {
+	ks := newTestKeyStore(t)
+
+	data := make([]byte, MinBlockSize*3+500) // 3 full chunks + partial
+	if _, err := rand.Read(data); err != nil {
+		t.Fatalf("Failed to generate data: %v", err)
+	}
+
+	file, err := ks.StoreFileLocal("stream_test.dat", data)
+	if err != nil {
+		t.Fatalf("Failed to store file: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err := ks.StreamFile(file.MetaData.FileHash, &buf); err != nil {
+		t.Fatalf("StreamFile failed: %v", err)
+	}
+
+	if buf.Len() != len(data) {
+		t.Errorf("Streamed size %d != original %d", buf.Len(), len(data))
+	}
+	if sha256.Sum256(buf.Bytes()) != sha256.Sum256(data) {
+		t.Error("Streamed data hash does not match original")
+	}
+}
+
+func TestStreamFileByName(t *testing.T) {
+	ks := newTestKeyStore(t)
+
+	data := make([]byte, MinBlockSize*2)
+	if _, err := rand.Read(data); err != nil {
+		t.Fatalf("Failed to generate data: %v", err)
+	}
+
+	_, err := ks.StoreFileLocal("byname_test.dat", data)
+	if err != nil {
+		t.Fatalf("Failed to store file: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err := ks.StreamFileByName("byname_test.dat", &buf); err != nil {
+		t.Fatalf("StreamFileByName failed: %v", err)
+	}
+
+	if sha256.Sum256(buf.Bytes()) != sha256.Sum256(data) {
+		t.Error("Streamed data does not match original")
+	}
+
+	// Non-existent name should error
+	if err := ks.StreamFileByName("nope.dat", &buf); err == nil {
+		t.Error("Expected error for non-existent filename")
+	}
+}
+
+func TestGetFileByName(t *testing.T) {
+	ks := newTestKeyStore(t)
+
+	data := make([]byte, 1024)
+	if _, err := rand.Read(data); err != nil {
+		t.Fatalf("Failed to generate data: %v", err)
+	}
+
+	stored, err := ks.StoreFileLocal("lookup_test.dat", data)
+	if err != nil {
+		t.Fatalf("Failed to store file: %v", err)
+	}
+
+	// Lookup by name
+	found, err := ks.GetFileByName("lookup_test.dat")
+	if err != nil {
+		t.Fatalf("GetFileByName failed: %v", err)
+	}
+	if found.MetaData.FileHash != stored.MetaData.FileHash {
+		t.Error("Found file hash does not match stored file hash")
+	}
+
+	// Non-existent name
+	if _, err := ks.GetFileByName("missing.dat"); err == nil {
+		t.Error("Expected error for non-existent filename")
+	}
+}
+
+func TestGetFileByNamePersistence(t *testing.T) {
+	tempDir := t.TempDir()
+	storageDir := filepath.Join(tempDir, "storage")
+
+	// Store a file
+	ks1, err := InitKeyStore(storageDir)
+	if err != nil {
+		t.Fatalf("Failed to create keystore: %v", err)
+	}
+
+	data := make([]byte, 2048)
+	if _, err := rand.Read(data); err != nil {
+		t.Fatalf("Failed to generate data: %v", err)
+	}
+
+	stored, err := ks1.StoreFileLocal("persist_name.dat", data)
+	if err != nil {
+		t.Fatalf("Failed to store file: %v", err)
+	}
+
+	// Reload from disk — name index should be rebuilt
+	ks2, err := InitKeyStore(storageDir)
+	if err != nil {
+		t.Fatalf("Failed to reload keystore: %v", err)
+	}
+
+	found, err := ks2.GetFileByName("persist_name.dat")
+	if err != nil {
+		t.Fatalf("GetFileByName after reload failed: %v", err)
+	}
+	if found.MetaData.FileHash != stored.MetaData.FileHash {
+		t.Error("File hash mismatch after reload")
+	}
+}
+
+func TestStreamChunkRange(t *testing.T) {
+	ks := newTestKeyStore(t)
+
+	// 4 chunks exactly
+	data := make([]byte, MinBlockSize*4)
+	if _, err := rand.Read(data); err != nil {
+		t.Fatalf("Failed to generate data: %v", err)
+	}
+
+	file, err := ks.StoreFileLocal("range_test.dat", data)
+	if err != nil {
+		t.Fatalf("Failed to store file: %v", err)
+	}
+	hash := file.MetaData.FileHash
+	blockSize := int(file.MetaData.BlockSize)
+
+	// Stream chunks [1, 3) — should be chunks 1 and 2
+	var buf bytes.Buffer
+	n, err := ks.StreamChunkRange(hash, 1, 3, &buf)
+	if err != nil {
+		t.Fatalf("StreamChunkRange failed: %v", err)
+	}
+
+	expectedBytes := uint64(blockSize * 2)
+	if n != expectedBytes {
+		t.Errorf("Bytes written %d != expected %d", n, expectedBytes)
+	}
+	// Verify content matches the original slice
+	expectedData := data[blockSize : blockSize*3]
+	if !bytes.Equal(buf.Bytes(), expectedData) {
+		t.Error("Chunk range data does not match original slice")
+	}
+
+	// end=0 means stream to end
+	buf.Reset()
+	n, err = ks.StreamChunkRange(hash, 2, 0, &buf)
+	if err != nil {
+		t.Fatalf("StreamChunkRange (end=0) failed: %v", err)
+	}
+	expectedData = data[blockSize*2:]
+	if !bytes.Equal(buf.Bytes(), expectedData) {
+		t.Error("Chunk range (to end) data does not match")
+	}
+
+	// Invalid range
+	_, err = ks.StreamChunkRange(hash, 3, 2, &buf)
+	if err == nil {
+		t.Error("Expected error for invalid range start >= end")
+	}
+
+	// start == end
+	_, err = ks.StreamChunkRange(hash, 2, 2, &buf)
+	if err == nil {
+		t.Error("Expected error for empty range")
+	}
+}
+
+func TestStreamFileDetectsCorruption(t *testing.T) {
+	ks := newTestKeyStore(t)
+
+	data := make([]byte, MinBlockSize*2)
+	if _, err := rand.Read(data); err != nil {
+		t.Fatalf("Failed to generate data: %v", err)
+	}
+
+	file, err := ks.StoreFileLocal("corrupt_stream.dat", data)
+	if err != nil {
+		t.Fatalf("Failed to store file: %v", err)
+	}
+
+	// Corrupt chunk 0
+	ref := file.References[0]
+	chunkPath := ks.GetLocalBlockLocation(ref.Key)
+	corrupt := make([]byte, ref.Size)
+	if _, err := rand.Read(corrupt); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(chunkPath, corrupt, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	if err := ks.StreamFile(file.MetaData.FileHash, &buf); err == nil {
+		t.Error("Expected StreamFile to detect corruption")
+	}
+}
+
+func TestFileByNameOverwrite(t *testing.T) {
+	ks := newTestKeyStore(t)
+
+	// Store two different files with the same name — latest wins
+	data1 := make([]byte, 512)
+	data2 := make([]byte, 1024)
+	if _, err := rand.Read(data1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rand.Read(data2); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := ks.StoreFileLocal("same.dat", data1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file2, err := ks.StoreFileLocal("same.dat", data2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	found, err := ks.GetFileByName("same.dat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found.MetaData.FileHash != file2.MetaData.FileHash {
+		t.Error("Expected name index to point to latest stored file")
 	}
 }
 

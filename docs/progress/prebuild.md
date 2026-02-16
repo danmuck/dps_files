@@ -1,0 +1,42 @@
+# KeyStore Storage Engine — Prebuild Task List
+
+> Goal: Bulletproof local storage engine that stands alone, connects over direct TCP, and later plugs into DHT with backups/replication.
+
+## Phase 1: Streaming & Lookup (Current)
+
+- [x] **1.1 StreamFile** — `StreamFile(key, io.Writer) error` streams chunks directly to any writer (HTTP response, TCP conn) without buffering the full file. Replaces need for ReassembleFileToBytes in serving paths.
+- [x] **1.2 Filename index** — `filesByName map[string][HashSize]byte` populated on init/store, enables `GetFileByName(name) (*File, error)` lookup. File server can't work with hash-only access.
+- [x] **1.3 StreamChunkRange** — `StreamChunkRange(key, start, end, io.Writer) error` serves a range of chunks. Enables HTTP Range requests and resumable transfers.
+
+## Phase 2: Efficiency & Robustness
+
+- [ ] **2.1 Eliminate dual-map redundancy** — Replace `references map[[KeySize]byte]FileReference` with a lightweight `chunkIndex map[[KeySize]byte]chunkLoc` where `chunkLoc` is `{fileHash, chunkIndex}`. Lookup chunk data through `files` map. Cuts metadata memory ~40%.
+- [ ] **2.2 Runtime config** — Replace compile-time `VERIFY` and `PRINT_BLOCKS` constants with `KeyStoreConfig` struct passed to `InitKeyStore`. Enables verify-on-write, quiet mode, custom block sizes per instance.
+- [ ] **2.3 Small file passthrough** — Files under MinBlockSize skip chunk key derivation overhead. Store with file hash as key directly, single .kdht file, minimal metadata.
+- [ ] **2.4 TTL enforcement** — Background goroutine or lazy check on access. Metadata already has the field, just not enforced.
+
+## Phase 3: Serving Layer
+
+- [ ] **3.1 TCP file server** — Minimal TCP server in `cmd/fileserver/` that uses KeyStore directly. Upload files, download by name or hash, list files. Length-prefixed binary protocol.
+- [ ] **3.2 HTTP file server** — Optional HTTP wrapper for browser/curl access. GET/PUT by name, Range header support via StreamChunkRange, JSON file listing.
+- [ ] **3.3 Upload streaming** — `StoreFromReader(name string, r io.Reader, size uint64) (*File, error)` — accepts data from a connection without requiring a local file path first.
+
+## Phase 4: Hardening
+
+- [ ] **4.1 Concurrent access testing** — Stress test parallel reads/writes to same KeyStore. Verify lock correctness under contention.
+- [ ] **4.2 Crash recovery** — Partial writes leave orphaned chunks. Add write-ahead intent file so recovery can complete or rollback interrupted stores.
+- [ ] **4.3 Integrity scan** — `VerifyAll() []error` reads and re-hashes every chunk on disk. Detects bit rot, returns list of corrupted chunks.
+
+## Phase 5: Network Integration (Future)
+
+- [ ] **5.1 RemoteHandler real impl** — Wire RemoteHandler to TCP transport. Stream chunks to remote KeyStore instances.
+- [ ] **5.2 Replication** — Store chunks on N peers via DHT STORE. Read from closest peer with fallback.
+- [ ] **5.3 Raft metadata** — Root cluster maintains authoritative file metadata. KeyStore becomes the local storage backend.
+- [ ] **5.4 Blockchain snapshots** — Periodic Raft state sealed into append-only chain.
+
+## Issues to Address Along the Way
+
+- `fmt.Printf` everywhere — swap to `log.Logger` or structured logger when adding TCP server
+- `fileFromMemory` prints on every call — noisy for a server, gate behind verbosity config
+- `LoadFileReferenceData` hashes on every read — consider optional skip for trusted-local reads
+- TOML hex encoding doubles hash storage — acceptable for now, revisit if metadata size matters

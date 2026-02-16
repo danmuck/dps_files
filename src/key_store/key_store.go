@@ -1,8 +1,10 @@
 package key_store
 
 import (
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,15 +17,17 @@ type KeyStore struct {
 	storageDir string
 	lock       sync.RWMutex
 
-	references map[[KeySize]byte]FileReference
-	files      map[[HashSize]byte]*File
+	references  map[[KeySize]byte]FileReference
+	files       map[[HashSize]byte]*File
+	filesByName map[string][HashSize]byte // filename → file hash
 }
 
 func InitKeyStore(storageDir string) (*KeyStore, error) {
 	ks := &KeyStore{
-		references: make(map[[KeySize]byte]FileReference),
-		files:      make(map[[HashSize]byte]*File),
-		storageDir: storageDir,
+		references:  make(map[[KeySize]byte]FileReference),
+		files:       make(map[[HashSize]byte]*File),
+		filesByName: make(map[string][HashSize]byte),
+		storageDir:  storageDir,
 	}
 
 	// create directories if they don't exist
@@ -63,6 +67,7 @@ func InitKeyStore(storageDir string) (*KeyStore, error) {
 
 			// store file in memory
 			ks.files[fileHash] = &file
+			ks.filesByName[file.MetaData.FileName] = fileHash
 
 			// also store file references
 			for _, ref := range file.References {
@@ -89,6 +94,7 @@ func (ks *KeyStore) fileToMemory(file *File) error {
 
 	// store in memory
 	ks.files[file.MetaData.FileHash] = file
+	ks.filesByName[file.MetaData.FileName] = file.MetaData.FileHash
 
 	// create metadata directory if it doesn't exist
 	metadataDir := filepath.Join(ks.storageDir, "metadata")
@@ -166,6 +172,131 @@ func (ks *KeyStore) ListKnownFiles() []MetaData {
 	return entries
 }
 
+// GetFileByName returns a file by its original filename.
+func (ks *KeyStore) GetFileByName(name string) (*File, error) {
+	ks.lock.RLock()
+	hash, exists := ks.filesByName[name]
+	ks.lock.RUnlock()
+	if !exists {
+		return nil, fmt.Errorf("file not found: %s", name)
+	}
+	return ks.fileFromMemory(hash)
+}
+
+// StreamFile streams a file's chunks directly to w without buffering the
+// entire file in memory. Each chunk is verified before writing.
+// Memory usage is O(blockSize) regardless of file size.
+func (ks *KeyStore) StreamFile(key [HashSize]byte, w io.Writer) error {
+	file, err := ks.fileFromMemory(key)
+	if err != nil {
+		return fmt.Errorf("failed to get file metadata: %w", err)
+	}
+
+	hasher := sha256.New()
+	var bytesWritten uint64
+
+	for i, ref := range file.References {
+		if ref == nil {
+			return fmt.Errorf("missing block reference at index %d", i)
+		}
+
+		blockData, err := ks.LoadFileReferenceData(ref.Key)
+		if err != nil {
+			return fmt.Errorf("failed to read block %d: %w", i, err)
+		}
+
+		if uint32(len(blockData)) != ref.Size {
+			return fmt.Errorf("block %d size mismatch: got %d, expected %d",
+				i, len(blockData), ref.Size)
+		}
+
+		dataHash := sha256.Sum256(blockData)
+		if dataHash != ref.DataHash {
+			return fmt.Errorf("block %d data corruption detected", i)
+		}
+
+		n, err := w.Write(blockData)
+		if err != nil {
+			return fmt.Errorf("failed to write block %d: %w", i, err)
+		}
+		hasher.Write(blockData)
+		bytesWritten += uint64(n)
+	}
+
+	if bytesWritten != file.MetaData.TotalSize {
+		return fmt.Errorf("size mismatch: wrote %d bytes, expected %d",
+			bytesWritten, file.MetaData.TotalSize)
+	}
+
+	var finalHash [HashSize]byte
+	copy(finalHash[:], hasher.Sum(nil))
+	if finalHash != file.MetaData.FileHash {
+		return fmt.Errorf("streamed file hash mismatch")
+	}
+
+	return nil
+}
+
+// StreamFileByName streams a file by its original filename.
+func (ks *KeyStore) StreamFileByName(name string, w io.Writer) error {
+	ks.lock.RLock()
+	hash, exists := ks.filesByName[name]
+	ks.lock.RUnlock()
+	if !exists {
+		return fmt.Errorf("file not found: %s", name)
+	}
+	return ks.StreamFile(hash, w)
+}
+
+// StreamChunkRange streams chunks [start, end) from a file to w.
+// Useful for resumable transfers and HTTP Range requests.
+// start is inclusive, end is exclusive. end=0 means stream to the last chunk.
+func (ks *KeyStore) StreamChunkRange(key [HashSize]byte, start, end uint32, w io.Writer) (uint64, error) {
+	file, err := ks.fileFromMemory(key)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get file metadata: %w", err)
+	}
+
+	totalChunks := uint32(len(file.References))
+	if end == 0 || end > totalChunks {
+		end = totalChunks
+	}
+	if start >= end {
+		return 0, fmt.Errorf("invalid chunk range: [%d, %d)", start, end)
+	}
+
+	var bytesWritten uint64
+	for i := start; i < end; i++ {
+		ref := file.References[i]
+		if ref == nil {
+			return bytesWritten, fmt.Errorf("missing block reference at index %d", i)
+		}
+
+		blockData, err := ks.LoadFileReferenceData(ref.Key)
+		if err != nil {
+			return bytesWritten, fmt.Errorf("failed to read block %d: %w", i, err)
+		}
+
+		if uint32(len(blockData)) != ref.Size {
+			return bytesWritten, fmt.Errorf("block %d size mismatch: got %d, expected %d",
+				i, len(blockData), ref.Size)
+		}
+
+		dataHash := sha256.Sum256(blockData)
+		if dataHash != ref.DataHash {
+			return bytesWritten, fmt.Errorf("block %d data corruption detected", i)
+		}
+
+		n, err := w.Write(blockData)
+		if err != nil {
+			return bytesWritten, fmt.Errorf("failed to write block %d: %w", i, err)
+		}
+		bytesWritten += uint64(n)
+	}
+
+	return bytesWritten, nil
+}
+
 func (ks *KeyStore) Cleanup() error {
 	ks.lock.Lock()
 	defer ks.lock.Unlock()
@@ -198,7 +329,8 @@ func (ks *KeyStore) Cleanup() error {
 
 	// reset the maps
 	ks.references = make(map[[KeySize]byte]FileReference)
-	ks.files = make(map[[HashSize]byte]*File) // changed to *file
+	ks.files = make(map[[HashSize]byte]*File)
+	ks.filesByName = make(map[string][HashSize]byte) // changed to *file
 	return nil
 }
 
@@ -247,6 +379,7 @@ func (ks *KeyStore) CleanupExtensions(extensions ...string) error {
 	// reset the maps
 	ks.references = make(map[[KeySize]byte]FileReference)
 	ks.files = make(map[[HashSize]byte]*File)
+	ks.filesByName = make(map[string][HashSize]byte)
 	return nil
 }
 
@@ -295,6 +428,10 @@ func (ks *KeyStore) verifyFileReferences() error {
 	if len(orphanedFileHashes) > 0 {
 		metadataDir := filepath.Join(ks.storageDir, "metadata")
 		for fileHash := range orphanedFileHashes {
+			// Remove from name index
+			if file, ok := ks.files[fileHash]; ok {
+				delete(ks.filesByName, file.MetaData.FileName)
+			}
 			// Remove the file from in-memory map
 			delete(ks.files, fileHash)
 
