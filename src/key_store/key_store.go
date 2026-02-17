@@ -9,34 +9,43 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
 
 type KeyStore struct {
 	storageDir string
+	config     KeyStoreConfig
 	lock       sync.RWMutex
 
-	references  map[[KeySize]byte]FileReference
+	chunkIndex  map[[KeySize]byte]chunkLoc
 	files       map[[HashSize]byte]*File
 	filesByName map[string][HashSize]byte // filename → file hash
 }
 
+// InitKeyStore creates a KeyStore with default config (verbose, no verify-on-write).
 func InitKeyStore(storageDir string) (*KeyStore, error) {
+	return InitKeyStoreWithConfig(DefaultConfig(storageDir))
+}
+
+// InitKeyStoreWithConfig creates a KeyStore with the given configuration.
+func InitKeyStoreWithConfig(cfg KeyStoreConfig) (*KeyStore, error) {
 	ks := &KeyStore{
-		references:  make(map[[KeySize]byte]FileReference),
+		chunkIndex:  make(map[[KeySize]byte]chunkLoc),
 		files:       make(map[[HashSize]byte]*File),
 		filesByName: make(map[string][HashSize]byte),
-		storageDir:  storageDir,
+		storageDir:  cfg.StorageDir,
+		config:      cfg,
 	}
 
 	// create directories if they don't exist
-	if err := os.MkdirAll(storageDir, 0755); err != nil {
+	if err := os.MkdirAll(cfg.StorageDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create storage directory: %w", err)
 	}
 
 	// load metadata files
-	metadataDir := filepath.Join(storageDir, "metadata")
+	metadataDir := filepath.Join(cfg.StorageDir, "metadata")
 	if err := os.MkdirAll(metadataDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create metadata directory: %w", err)
 	}
@@ -53,7 +62,9 @@ func InitKeyStore(storageDir string) (*KeyStore, error) {
 			var fileHash [HashSize]byte
 			hashBytes, err := hex.DecodeString(hashStr)
 			if err != nil {
-				fmt.Printf("Warning: invalid metadata filename %s: %v\n", entry.Name(), err)
+				if ks.config.Verbose {
+					fmt.Printf("Warning: invalid metadata filename %s: %v\n", entry.Name(), err)
+				}
 				continue
 			}
 			copy(fileHash[:], hashBytes)
@@ -61,7 +72,9 @@ func InitKeyStore(storageDir string) (*KeyStore, error) {
 			// load complete file struct
 			var file File
 			if _, err := toml.DecodeFile(filepath.Join(metadataDir, entry.Name()), &file); err != nil {
-				fmt.Printf("Warning: failed to decode file %s: %v\n", entry.Name(), err)
+				if ks.config.Verbose {
+					fmt.Printf("Warning: failed to decode file %s: %v\n", entry.Name(), err)
+				}
 				continue
 			}
 
@@ -69,10 +82,13 @@ func InitKeyStore(storageDir string) (*KeyStore, error) {
 			ks.files[fileHash] = &file
 			ks.filesByName[file.MetaData.FileName] = fileHash
 
-			// also store file references
-			for _, ref := range file.References {
+			// build chunk index
+			for i, ref := range file.References {
 				if ref != nil {
-					ks.references[ref.Key] = *ref
+					ks.chunkIndex[ref.Key] = chunkLoc{
+						FileHash:   fileHash,
+						ChunkIndex: uint32(i),
+					}
 				}
 			}
 		}
@@ -80,7 +96,9 @@ func InitKeyStore(storageDir string) (*KeyStore, error) {
 
 	// verify chunks and handle orphaned metadata
 	if err := ks.verifyFileReferences(); err != nil {
-		fmt.Printf("Warning: error during chunk verification: %v\n", err)
+		if ks.config.Verbose {
+			fmt.Printf("Warning: error during chunk verification: %v\n", err)
+		}
 	}
 
 	return ks, nil
@@ -95,6 +113,16 @@ func (ks *KeyStore) fileToMemory(file *File) error {
 	// store in memory
 	ks.files[file.MetaData.FileHash] = file
 	ks.filesByName[file.MetaData.FileName] = file.MetaData.FileHash
+
+	// build chunk index entries
+	for i, ref := range file.References {
+		if ref != nil {
+			ks.chunkIndex[ref.Key] = chunkLoc{
+				FileHash:   file.MetaData.FileHash,
+				ChunkIndex: uint32(i),
+			}
+		}
+	}
 
 	// create metadata directory if it doesn't exist
 	metadataDir := filepath.Join(ks.storageDir, "metadata")
@@ -135,12 +163,19 @@ func (ks *KeyStore) fileFromMemory(key [HashSize]byte) (*File, error) {
 	if !exists {
 		return nil, fmt.Errorf("file not found for hash %x", key)
 	}
-	fmt.Printf("Loaded file metadata from %s\n", file.ShortString())
-	fmt.Printf("Number of references: %d\n", len(file.References))
-	for i, ref := range file.References {
-		if ref != nil && (i%PRINT_BLOCKS == 0 || i == len(file.References)-1) {
-			fmt.Printf("Reference %d: Key=%x, DataHash=%x\n",
-				i, ref.Key, ref.DataHash)
+
+	if ks.isExpired(file) {
+		return nil, fmt.Errorf("file expired: %s (TTL=%ds)", file.MetaData.FileName, file.MetaData.TTL)
+	}
+
+	if ks.config.Verbose {
+		fmt.Printf("Loaded file metadata from %s\n", file.ShortString())
+		fmt.Printf("Number of references: %d\n", len(file.References))
+		for i, ref := range file.References {
+			if ref != nil && (i%PRINT_BLOCKS == 0 || i == len(file.References)-1) {
+				fmt.Printf("Reference %d: Key=%x, DataHash=%x\n",
+					i, ref.Key, ref.DataHash)
+			}
 		}
 	}
 	// return a copy to prevent concurrent modification issues
@@ -148,14 +183,30 @@ func (ks *KeyStore) fileFromMemory(key [HashSize]byte) (*File, error) {
 	return &fileCopy, nil
 }
 
+// isExpired returns true if the file's TTL has elapsed since its Modified time.
+// TTL=0 means no expiry.
+func (ks *KeyStore) isExpired(file *File) bool {
+	if file.MetaData.TTL == 0 {
+		return false
+	}
+	modifiedSec := file.MetaData.Modified / 1e9 // nanoseconds → seconds
+	return time.Now().Unix() > modifiedSec+int64(file.MetaData.TTL)
+}
+
 // return copies in slice of all file references
 func (ks *KeyStore) ListStoredFileReferences() []FileReference {
 	ks.lock.RLock()
 	defer ks.lock.RUnlock()
 
-	blocks := make([]FileReference, 0, len(ks.references))
-	for _, block := range ks.references {
-		blocks = append(blocks, block) // copy by value
+	blocks := make([]FileReference, 0, len(ks.chunkIndex))
+	for _, loc := range ks.chunkIndex {
+		file, exists := ks.files[loc.FileHash]
+		if !exists {
+			continue
+		}
+		if int(loc.ChunkIndex) < len(file.References) && file.References[loc.ChunkIndex] != nil {
+			blocks = append(blocks, *file.References[loc.ChunkIndex])
+		}
 	}
 	return blocks
 }
@@ -301,10 +352,17 @@ func (ks *KeyStore) Cleanup() error {
 	ks.lock.Lock()
 	defer ks.lock.Unlock()
 
-	// clean up tracked chunk files
-	for id, block := range ks.references {
-		if err := os.Remove(block.Location); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("failed to delete chunk %x: %w", id, err)
+	// clean up tracked chunk files via chunkIndex → file → reference → location
+	for key, loc := range ks.chunkIndex {
+		file, exists := ks.files[loc.FileHash]
+		if !exists {
+			continue
+		}
+		if int(loc.ChunkIndex) < len(file.References) && file.References[loc.ChunkIndex] != nil {
+			loc := file.References[loc.ChunkIndex].Location
+			if err := os.Remove(loc); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("failed to delete chunk %x: %w", key, err)
+			}
 		}
 	}
 
@@ -328,9 +386,9 @@ func (ks *KeyStore) Cleanup() error {
 	}
 
 	// reset the maps
-	ks.references = make(map[[KeySize]byte]FileReference)
+	ks.chunkIndex = make(map[[KeySize]byte]chunkLoc)
 	ks.files = make(map[[HashSize]byte]*File)
-	ks.filesByName = make(map[string][HashSize]byte) // changed to *file
+	ks.filesByName = make(map[string][HashSize]byte)
 	return nil
 }
 
@@ -354,11 +412,18 @@ func (ks *KeyStore) CleanupExtensions(extensions ...string) error {
 		validExt[ext] = true
 	}
 
-	// clean up chunk files
-	for id, block := range ks.references {
-		if validExt[filepath.Ext(block.Location)] {
-			if err := os.Remove(block.Location); err != nil {
-				return fmt.Errorf("failed to delete chunk %x: %w", id, err)
+	// clean up chunk files via chunkIndex
+	for key, loc := range ks.chunkIndex {
+		file, exists := ks.files[loc.FileHash]
+		if !exists {
+			continue
+		}
+		if int(loc.ChunkIndex) < len(file.References) && file.References[loc.ChunkIndex] != nil {
+			refLoc := file.References[loc.ChunkIndex].Location
+			if validExt[filepath.Ext(refLoc)] {
+				if err := os.Remove(refLoc); err != nil {
+					return fmt.Errorf("failed to delete chunk %x: %w", key, err)
+				}
 			}
 		}
 	}
@@ -377,7 +442,7 @@ func (ks *KeyStore) CleanupExtensions(extensions ...string) error {
 	}
 
 	// reset the maps
-	ks.references = make(map[[KeySize]byte]FileReference)
+	ks.chunkIndex = make(map[[KeySize]byte]chunkLoc)
 	ks.files = make(map[[HashSize]byte]*File)
 	ks.filesByName = make(map[string][HashSize]byte)
 	return nil
@@ -399,12 +464,16 @@ func (ks *KeyStore) moveToCache(sourcePath string) error {
 		return fmt.Errorf("failed to move file to cache: %w", err)
 	}
 
-	fmt.Printf("Moved to cache: %s\n", fileName)
+	if ks.config.Verbose {
+		fmt.Printf("Moved to cache: %s\n", fileName)
+	}
 	return nil
 }
 
 func (ks *KeyStore) verifyFileReferences() error {
-	fmt.Printf("Verifying file references ... \n")
+	if ks.config.Verbose {
+		fmt.Printf("Verifying file references ... \n")
+	}
 
 	// Track which files have missing chunks by their hash
 	orphanedFileHashes := make(map[[HashSize]byte]bool)
@@ -418,8 +487,8 @@ func (ks *KeyStore) verifyFileReferences() error {
 			blockPath := ks.GetLocalBlockLocation(ref.Key)
 			if _, err := os.Stat(blockPath); os.IsNotExist(err) {
 				orphanedFileHashes[fileHash] = true
-				// Remove this reference from the in-memory map
-				delete(ks.references, ref.Key)
+				// Remove this reference from the chunk index
+				delete(ks.chunkIndex, ref.Key)
 			}
 		}
 	}
@@ -439,10 +508,69 @@ func (ks *KeyStore) verifyFileReferences() error {
 			fileName := fmt.Sprintf("%x.toml", fileHash)
 			sourcePath := filepath.Join(metadataDir, fileName)
 			if err := ks.moveToCache(sourcePath); err != nil {
-				fmt.Printf("Warning: %v\n", err)
+				if ks.config.Verbose {
+					fmt.Printf("Warning: %v\n", err)
+				}
 			}
 		}
 	}
 
 	return nil
+}
+
+// DeleteFile removes a file and all its chunks from storage and memory.
+func (ks *KeyStore) DeleteFile(key [HashSize]byte) error {
+	ks.lock.Lock()
+	defer ks.lock.Unlock()
+
+	file, exists := ks.files[key]
+	if !exists {
+		return fmt.Errorf("file not found for hash %x", key)
+	}
+
+	// delete chunk files and index entries
+	for _, ref := range file.References {
+		if ref == nil {
+			continue
+		}
+		if ref.Location != "" {
+			if err := os.Remove(ref.Location); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("failed to delete chunk %x: %w", ref.Key, err)
+			}
+		}
+		delete(ks.chunkIndex, ref.Key)
+	}
+
+	// delete metadata file
+	metadataDir := filepath.Join(ks.storageDir, "metadata")
+	metadataPath := filepath.Join(metadataDir, fmt.Sprintf("%x.toml", key))
+	if err := os.Remove(metadataPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to delete metadata file: %w", err)
+	}
+
+	// remove from memory
+	delete(ks.filesByName, file.MetaData.FileName)
+	delete(ks.files, key)
+
+	return nil
+}
+
+// CleanupExpired removes all expired files and returns the count of files removed.
+func (ks *KeyStore) CleanupExpired() int {
+	ks.lock.RLock()
+	var expiredKeys [][HashSize]byte
+	for key, file := range ks.files {
+		if ks.isExpired(file) {
+			expiredKeys = append(expiredKeys, key)
+		}
+	}
+	ks.lock.RUnlock()
+
+	removed := 0
+	for _, key := range expiredKeys {
+		if err := ks.DeleteFile(key); err == nil {
+			removed++
+		}
+	}
+	return removed
 }

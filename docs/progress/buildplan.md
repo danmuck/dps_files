@@ -43,7 +43,7 @@
 
 ### Phase 1C: Cleanup & Performance
 - [ ] Replace all `fmt.Printf` in key_store with `log/slog` structured logging (file hash, chunk index, operation as context fields)
-- [ ] Make `VERIFY` a runtime field on `KeyStore` instead of a compile-time const
+- [x] Make `VERIFY` a runtime field on `KeyStore` instead of a compile-time const (implemented via `KeyStoreConfig.VerifyOnWrite`)
 - [ ] Make `PRINT_BLOCKS` a runtime field or remove progress printing from library code (move to cmd/)
 - [ ] Extract shared chunking logic from `StoreFileLocal` and `LoadAndStoreFileLocal` into a private helper to eliminate duplication
 - [ ] Add `context.Context` parameter to `StoreFileLocal` and `LoadAndStoreFileLocal` for cancellation support

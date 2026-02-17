@@ -142,9 +142,13 @@ func (ks *KeyStore) LoadAllLocalFilesToMemory() error {
 
 			// add to in-memory maps
 			ks.files[fileHash] = file // store the complete file struct
-			for _, ref := range file.References {
+			ks.filesByName[file.MetaData.FileName] = fileHash
+			for i, ref := range file.References {
 				if ref != nil && ref.Location != "" {
-					ks.references[ref.Key] = *ref
+					ks.chunkIndex[ref.Key] = chunkLoc{
+						FileHash:   fileHash,
+						ChunkIndex: uint32(i),
+					}
 				}
 			}
 		}

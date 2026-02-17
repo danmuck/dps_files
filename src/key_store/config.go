@@ -25,6 +25,29 @@ const (
 	VERIFY        = false
 )
 
+// KeyStoreConfig controls runtime behavior of a KeyStore instance.
+type KeyStoreConfig struct {
+	StorageDir    string // root directory for chunk and metadata storage
+	VerifyOnWrite bool   // when true, read-back and verify chunks immediately after writing
+	Verbose       bool   // when true, emit progress output via fmt.Printf
+}
+
+// DefaultConfig returns a KeyStoreConfig with verbose output enabled
+// and verify-on-write matching the VERIFY constant.
+func DefaultConfig(storageDir string) KeyStoreConfig {
+	return KeyStoreConfig{
+		StorageDir:    storageDir,
+		VerifyOnWrite: VERIFY,
+		Verbose:       true,
+	}
+}
+
+// chunkLoc maps a chunk key to its parent file and index within that file.
+type chunkLoc struct {
+	FileHash   [HashSize]byte
+	ChunkIndex uint32
+}
+
 // this reciever must be implemented on the server side
 // it needs to implement a channel that will first be initialized
 // with a MetaData{}, followed by all FileReference{} for the file.

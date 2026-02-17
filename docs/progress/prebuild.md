@@ -10,10 +10,10 @@
 
 ## Phase 2: Efficiency & Robustness
 
-- [ ] **2.1 Eliminate dual-map redundancy** — Replace `references map[[KeySize]byte]FileReference` with a lightweight `chunkIndex map[[KeySize]byte]chunkLoc` where `chunkLoc` is `{fileHash, chunkIndex}`. Lookup chunk data through `files` map. Cuts metadata memory ~40%.
-- [ ] **2.2 Runtime config** — Replace compile-time `VERIFY` and `PRINT_BLOCKS` constants with `KeyStoreConfig` struct passed to `InitKeyStore`. Enables verify-on-write, quiet mode, custom block sizes per instance.
-- [ ] **2.3 Small file passthrough** — Files under MinBlockSize skip chunk key derivation overhead. Store with file hash as key directly, single .kdht file, minimal metadata.
-- [ ] **2.4 TTL enforcement** — Background goroutine or lazy check on access. Metadata already has the field, just not enforced.
+- [x] **2.1 Eliminate dual-map redundancy** — `references map[[KeySize]byte]FileReference` was replaced with `chunkIndex map[[KeySize]byte]chunkLoc`, and chunk lookups now resolve through `files[fileHash].References[chunkIndex]`.
+- [x] **2.2 Runtime config** — Added `KeyStoreConfig` + `InitKeyStoreWithConfig`; write verification and verbose output are now runtime-configurable per KeyStore instance.
+- [x] **2.3 Small file passthrough (closed as won't-do)** — Kept canonical `computeChunkKey(fileHash, chunkIndex)` for all chunks to preserve consistent DHT addressing and avoid a special-case path.
+- [x] **2.4 TTL enforcement** — Implemented lazy TTL checks on access (`fileFromMemory`) and batch expiration cleanup (`CleanupExpired`), plus explicit file deletion (`DeleteFile`).
 
 ## Phase 3: Serving Layer
 

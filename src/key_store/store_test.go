@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // testDataDir is a persistent directory for reusable test files.
@@ -59,11 +60,14 @@ func ensureTestFile(t *testing.T, name string, size int64) string {
 	return path
 }
 
-// newTestKeyStore creates a KeyStore in a temp directory for testing.
+// newTestKeyStore creates a KeyStore in a temp directory for testing (quiet mode).
 func newTestKeyStore(t *testing.T) *KeyStore {
 	t.Helper()
 	storageDir := filepath.Join(t.TempDir(), "storage")
-	ks, err := InitKeyStore(storageDir)
+	ks, err := InitKeyStoreWithConfig(KeyStoreConfig{
+		StorageDir: storageDir,
+		Verbose:    false,
+	})
 	if err != nil {
 		t.Fatalf("Failed to create keystore: %v", err)
 	}
@@ -603,6 +607,229 @@ func TestFileByNameOverwrite(t *testing.T) {
 	}
 	if found.MetaData.FileHash != file2.MetaData.FileHash {
 		t.Error("Expected name index to point to latest stored file")
+	}
+}
+
+func TestKeyStoreConfig(t *testing.T) {
+	storageDir := filepath.Join(t.TempDir(), "storage")
+
+	// Quiet mode — should not produce output (we just verify it doesn't panic)
+	ks, err := InitKeyStoreWithConfig(KeyStoreConfig{
+		StorageDir: storageDir,
+		Verbose:    false,
+	})
+	if err != nil {
+		t.Fatalf("Failed to create quiet keystore: %v", err)
+	}
+
+	data := make([]byte, 1024)
+	if _, err := rand.Read(data); err != nil {
+		t.Fatal(err)
+	}
+	_, err = ks.StoreFileLocal("quiet.dat", data)
+	if err != nil {
+		t.Fatalf("StoreFileLocal in quiet mode failed: %v", err)
+	}
+	ks.Cleanup()
+
+	// Verify-on-write mode
+	ks2, err := InitKeyStoreWithConfig(KeyStoreConfig{
+		StorageDir:    filepath.Join(t.TempDir(), "storage2"),
+		VerifyOnWrite: true,
+		Verbose:       false,
+	})
+	if err != nil {
+		t.Fatalf("Failed to create verify keystore: %v", err)
+	}
+	_, err = ks2.StoreFileLocal("verify.dat", data)
+	if err != nil {
+		t.Fatalf("StoreFileLocal with verify-on-write failed: %v", err)
+	}
+	ks2.Cleanup()
+
+	// DefaultConfig should be verbose
+	cfg := DefaultConfig(storageDir)
+	if !cfg.Verbose {
+		t.Error("DefaultConfig should have Verbose=true")
+	}
+}
+
+func TestChunkLocResolution(t *testing.T) {
+	ks := newTestKeyStore(t)
+
+	data := make([]byte, MinBlockSize*2)
+	if _, err := rand.Read(data); err != nil {
+		t.Fatal(err)
+	}
+
+	file, err := ks.StoreFileLocal("chunkloc.dat", data)
+	if err != nil {
+		t.Fatalf("StoreFileLocal failed: %v", err)
+	}
+
+	// Verify each chunk can be resolved through the new index
+	for i, ref := range file.References {
+		if ref == nil {
+			t.Fatalf("nil reference at index %d", i)
+		}
+		got, err := ks.GetFileReference(ref.Key)
+		if err != nil {
+			t.Fatalf("GetFileReference failed for chunk %d: %v", i, err)
+		}
+		if got.Key != ref.Key {
+			t.Errorf("chunk %d key mismatch", i)
+		}
+		if got.DataHash != ref.DataHash {
+			t.Errorf("chunk %d hash mismatch", i)
+		}
+	}
+}
+
+func TestTTLExpiry(t *testing.T) {
+	ks := newTestKeyStore(t)
+
+	data := make([]byte, 1024)
+	if _, err := rand.Read(data); err != nil {
+		t.Fatal(err)
+	}
+
+	file, err := ks.StoreFileLocal("ttl.dat", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Set TTL to 1 second (modify directly in memory)
+	ks.lock.Lock()
+	f := ks.files[file.MetaData.FileHash]
+	f.MetaData.TTL = 1
+	f.MetaData.Modified = file.MetaData.Modified // keep original modified time
+	ks.lock.Unlock()
+
+	// Should still be accessible immediately
+	_, err = ks.fileFromMemory(file.MetaData.FileHash)
+	if err != nil {
+		t.Fatalf("File should be accessible before TTL expires: %v", err)
+	}
+
+	// Wait for TTL to expire
+	time.Sleep(2 * time.Second)
+
+	_, err = ks.fileFromMemory(file.MetaData.FileHash)
+	if err == nil {
+		t.Error("Expected error for expired file")
+	}
+}
+
+func TestTTLZeroNeverExpires(t *testing.T) {
+	ks := newTestKeyStore(t)
+
+	data := make([]byte, 1024)
+	if _, err := rand.Read(data); err != nil {
+		t.Fatal(err)
+	}
+
+	file, err := ks.StoreFileLocal("nottl.dat", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Set TTL to 0 (no expiry)
+	ks.lock.Lock()
+	ks.files[file.MetaData.FileHash].MetaData.TTL = 0
+	ks.lock.Unlock()
+
+	// Should always be accessible
+	_, err = ks.fileFromMemory(file.MetaData.FileHash)
+	if err != nil {
+		t.Fatalf("TTL=0 file should never expire: %v", err)
+	}
+}
+
+func TestCleanupExpired(t *testing.T) {
+	ks := newTestKeyStore(t)
+
+	data1 := make([]byte, 1024)
+	data2 := make([]byte, 1024)
+	if _, err := rand.Read(data1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rand.Read(data2); err != nil {
+		t.Fatal(err)
+	}
+
+	file1, err := ks.StoreFileLocal("expire1.dat", data1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file2, err := ks.StoreFileLocal("keep.dat", data2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Set file1 TTL=1s, file2 TTL=0 (no expiry)
+	ks.lock.Lock()
+	ks.files[file1.MetaData.FileHash].MetaData.TTL = 1
+	ks.files[file2.MetaData.FileHash].MetaData.TTL = 0
+	ks.lock.Unlock()
+
+	time.Sleep(2 * time.Second)
+
+	removed := ks.CleanupExpired()
+	if removed != 1 {
+		t.Errorf("Expected 1 expired file removed, got %d", removed)
+	}
+
+	// file2 should still be accessible
+	_, err = ks.fileFromMemory(file2.MetaData.FileHash)
+	if err != nil {
+		t.Fatalf("Non-expired file should still be accessible: %v", err)
+	}
+}
+
+func TestDeleteFile(t *testing.T) {
+	ks := newTestKeyStore(t)
+
+	data := make([]byte, MinBlockSize*2)
+	if _, err := rand.Read(data); err != nil {
+		t.Fatal(err)
+	}
+
+	file, err := ks.StoreFileLocal("delete_me.dat", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hash := file.MetaData.FileHash
+
+	// Verify chunks exist
+	for _, ref := range file.References {
+		if _, err := os.Stat(ref.Location); err != nil {
+			t.Fatalf("Chunk file should exist: %v", err)
+		}
+	}
+
+	// Delete the file
+	if err := ks.DeleteFile(hash); err != nil {
+		t.Fatalf("DeleteFile failed: %v", err)
+	}
+
+	// Verify file is gone from memory
+	_, err = ks.fileFromMemory(hash)
+	if err == nil {
+		t.Error("Expected error after deleting file")
+	}
+
+	// Verify chunks are gone from disk
+	for _, ref := range file.References {
+		if _, err := os.Stat(ref.Location); !os.IsNotExist(err) {
+			t.Error("Chunk file should be deleted")
+		}
+	}
+
+	// Verify name lookup is gone
+	_, err = ks.GetFileByName("delete_me.dat")
+	if err == nil {
+		t.Error("Expected error for deleted file name lookup")
 	}
 }
 

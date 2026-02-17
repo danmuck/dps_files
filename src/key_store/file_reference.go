@@ -29,7 +29,7 @@ func (ks *KeyStore) StoreFileReference(ref *FileReference, data []byte) error {
 	ks.lock.Lock()
 	defer ks.lock.Unlock()
 
-	if ref.FileIndex%PRINT_BLOCKS == 0 {
+	if ks.config.Verbose && ref.FileIndex%PRINT_BLOCKS == 0 {
 		fmt.Printf("Storing block %d: expected size=%d, actual size=%d\n",
 			ref.FileIndex, ref.Size, len(data))
 	}
@@ -44,7 +44,6 @@ func (ks *KeyStore) StoreFileReference(ref *FileReference, data []byte) error {
 		return fmt.Errorf("block %d hash (%s) doesn't match data hash (%s)",
 			ref.FileIndex, ref.DataHash[:], tmpHash[:])
 	}
-	// ref.DataHash = sha256.Sum256(data)
 
 	// create block file
 	blockPath := ks.GetLocalBlockLocation(ref.Key)
@@ -52,7 +51,7 @@ func (ks *KeyStore) StoreFileReference(ref *FileReference, data []byte) error {
 		return fmt.Errorf("failed to write block file: %w", err)
 	}
 
-	if VERIFY {
+	if ks.config.VerifyOnWrite {
 		// verify the written data immediately
 		writtenData, err := os.ReadFile(blockPath)
 		if err != nil {
@@ -75,16 +74,33 @@ func (ks *KeyStore) StoreFileReference(ref *FileReference, data []byte) error {
 	ref.Location = blockPath
 	ref.Protocol = "file"
 
-	// store the reference
-	ks.references[ref.Key] = *ref
-	// update the actual file
-	// fmt.Println(ks.files[ref.Parent])
-	// ks.files[ref.Parent].References[ref.FileIndex].Location = blockPath
+	// store in chunk index
+	ks.chunkIndex[ref.Key] = chunkLoc{
+		FileHash:   ref.Parent,
+		ChunkIndex: ref.FileIndex,
+	}
 
-	if ref.FileIndex%100 == 0 {
+	if ks.config.Verbose && ref.FileIndex%100 == 0 {
 		fmt.Printf("Block %d stored with hash: %x\n", ref.FileIndex, ref.DataHash)
 	}
 	return nil
+}
+
+// resolveChunk looks up a chunk key in the index and returns the FileReference.
+// Caller must hold at least ks.lock.RLock().
+func (ks *KeyStore) resolveChunk(key [KeySize]byte) (*FileReference, error) {
+	loc, exists := ks.chunkIndex[key]
+	if !exists {
+		return nil, fmt.Errorf("block not found for key %x", key)
+	}
+	file, exists := ks.files[loc.FileHash]
+	if !exists {
+		return nil, fmt.Errorf("parent file not found for key %x", key)
+	}
+	if int(loc.ChunkIndex) >= len(file.References) || file.References[loc.ChunkIndex] == nil {
+		return nil, fmt.Errorf("chunk reference missing at index %d for key %x", loc.ChunkIndex, key)
+	}
+	return file.References[loc.ChunkIndex], nil
 }
 
 // return by value
@@ -92,21 +108,21 @@ func (ks *KeyStore) LoadFileReferenceData(key [KeySize]byte) ([]byte, error) {
 	ks.lock.RLock()
 	defer ks.lock.RUnlock()
 
-	block, exists := ks.references[key]
-	if !exists {
-		return nil, fmt.Errorf("block not found for key %x", key)
+	ref, err := ks.resolveChunk(key)
+	if err != nil {
+		return nil, err
 	}
 
-	data, err := os.ReadFile(block.Location)
+	data, err := os.ReadFile(ref.Location)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read block file: %w", err)
 	}
 
 	// verify data integrity
 	dataHash := sha256.Sum256(data)
-	if dataHash != block.DataHash {
+	if dataHash != ref.DataHash {
 		return nil, fmt.Errorf("block data corruption detected:\nstored hash:  %x\ncomputed hash: %x",
-			block.DataHash, dataHash)
+			ref.DataHash, dataHash)
 	}
 
 	return data, nil
@@ -117,11 +133,11 @@ func (ks *KeyStore) GetFileReference(key [KeySize]byte) (FileReference, error) {
 	ks.lock.RLock()
 	defer ks.lock.RUnlock()
 
-	block, exists := ks.references[key]
-	if !exists {
-		return FileReference{}, fmt.Errorf("block not found for key %x", key)
+	ref, err := ks.resolveChunk(key)
+	if err != nil {
+		return FileReference{}, err
 	}
-	return block, nil
+	return *ref, nil
 }
 
 // delete reference by key
@@ -129,15 +145,15 @@ func (ks *KeyStore) DeleteFileReference(key [KeySize]byte) error {
 	ks.lock.Lock()
 	defer ks.lock.Unlock()
 
-	block, exists := ks.references[key]
-	if !exists {
-		return fmt.Errorf("block not found for key %x", key)
+	ref, err := ks.resolveChunk(key)
+	if err != nil {
+		return err
 	}
 
-	if err := os.Remove(block.Location); err != nil {
+	if err := os.Remove(ref.Location); err != nil {
 		return fmt.Errorf("failed to delete block file: %w", err)
 	}
 
-	delete(ks.references, key)
+	delete(ks.chunkIndex, key)
 	return nil
 }

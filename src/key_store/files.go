@@ -102,7 +102,7 @@ func (ks *KeyStore) StoreFileLocal(name string, fileData []byte) (*File, error) 
 		totalBytesProcessed += uint64(blockSize)
 
 		// progress output
-		if i%PRINT_BLOCKS == 0 || i == metadata.TotalBlocks-1 {
+		if ks.config.Verbose && (i%PRINT_BLOCKS == 0 || i == metadata.TotalBlocks-1) {
 			fmt.Printf("Stored block %d/%d (%.1f%%)\n",
 				i+1, metadata.TotalBlocks, float64(i+1)/float64(metadata.TotalBlocks)*100)
 		}
@@ -176,7 +176,7 @@ func (ks *KeyStore) ReassembleFileToBytes(key [HashSize]byte) ([]byte, error) {
 		bytesWritten += uint64(len(blockData))
 
 		// progress reporting
-		if i%100 == 0 || i == int(file.MetaData.TotalBlocks-1) {
+		if ks.config.Verbose && (i%100 == 0 || i == int(file.MetaData.TotalBlocks-1)) {
 			fmt.Printf("Reassembled block %d/%d (%.1f%%)\n",
 				i+1, file.MetaData.TotalBlocks,
 				float64(i+1)/float64(file.MetaData.TotalBlocks)*100)
@@ -254,7 +254,7 @@ func (ks *KeyStore) ReassembleFileToPath(key [HashSize]byte, outputPath string) 
 		bytesWritten += uint64(n)
 
 		// progress reporting
-		if i%100 == 0 || i == int(file.MetaData.TotalBlocks-1) {
+		if ks.config.Verbose && (i%100 == 0 || i == int(file.MetaData.TotalBlocks-1)) {
 			fmt.Printf("Wrote block %d/%d (%.1f%%) - size=%d bytes\n",
 				i+1, file.MetaData.TotalBlocks,
 				float64(i+1)/float64(file.MetaData.TotalBlocks)*100,
@@ -344,10 +344,12 @@ func (ks *KeyStore) LoadAndStoreFileLocal(localFilePath string) (*File, error) {
 		References: make([]*FileReference, metadata.TotalBlocks),
 	}
 
-	fmt.Printf("Starting chunking process:\n")
-	fmt.Printf("Total size: %d bytes\n", metadata.TotalSize)
-	fmt.Printf("Block size: %d bytes\n", metadata.BlockSize)
-	fmt.Printf("Expected blocks: %d\n", metadata.TotalBlocks)
+	if ks.config.Verbose {
+		fmt.Printf("Starting chunking process:\n")
+		fmt.Printf("Total size: %d bytes\n", metadata.TotalSize)
+		fmt.Printf("Block size: %d bytes\n", metadata.BlockSize)
+		fmt.Printf("Expected blocks: %d\n", metadata.TotalBlocks)
+	}
 
 	// process file in chunks
 	buffer := make([]byte, metadata.BlockSize)
@@ -360,7 +362,9 @@ func (ks *KeyStore) LoadAndStoreFileLocal(localFilePath string) (*File, error) {
 			// for the last block, calculate remaining bytes
 			remainingBytes := metadata.TotalSize - totalBytesRead
 			bytesToRead = uint32(remainingBytes)
-			fmt.Printf("Last block %d: Reading remaining %d bytes\n", i, bytesToRead)
+			if ks.config.Verbose {
+				fmt.Printf("Last block %d: Reading remaining %d bytes\n", i, bytesToRead)
+			}
 		}
 
 		// read block
@@ -373,7 +377,7 @@ func (ks *KeyStore) LoadAndStoreFileLocal(localFilePath string) (*File, error) {
 			return nil, fmt.Errorf("unexpected end of file at block %d", i)
 		}
 
-		if i%100 == 0 || i == metadata.TotalBlocks-1 {
+		if ks.config.Verbose && (i%100 == 0 || i == metadata.TotalBlocks-1) {
 			fmt.Printf("Block %d: Read %d bytes (total: %d/%d)\n",
 				i, n, totalBytesRead+uint64(n), metadata.TotalSize)
 		}
@@ -411,7 +415,7 @@ func (ks *KeyStore) LoadAndStoreFileLocal(localFilePath string) (*File, error) {
 		totalBytesRead += uint64(n)
 
 		// progress reporting
-		if i%100 == 0 || i == metadata.TotalBlocks-1 {
+		if ks.config.Verbose && (i%100 == 0 || i == metadata.TotalBlocks-1) {
 			PrintMemUsage()
 			fmt.Printf("Stored block %d/%d (%.1f%%) - size: %d bytes\n",
 				i+1, metadata.TotalBlocks,
@@ -419,7 +423,7 @@ func (ks *KeyStore) LoadAndStoreFileLocal(localFilePath string) (*File, error) {
 				n)
 		}
 	}
-	if VERIFY {
+	if ks.config.VerifyOnWrite {
 		// verify total bytes read
 		if totalBytesRead != metadata.TotalSize {
 			// cleanup on failure
@@ -432,15 +436,17 @@ func (ks *KeyStore) LoadAndStoreFileLocal(localFilePath string) (*File, error) {
 				totalBytesRead, metadata.TotalSize)
 		}
 
-		// final verification
-		fmt.Printf("\n=== Final Verification ===\n")
-		fmt.Printf("Total blocks stored: %d\n", len(file.References))
-		for i, ref := range file.References {
-			if ref == nil {
-				return nil, fmt.Errorf("missing reference for block %d", i)
-			}
-			if i%PRINT_BLOCKS == 0 || i == len(file.References)-1 {
-				fmt.Printf("Block %d: Size=%d, Index=%d\n", i, ref.Size, ref.FileIndex)
+		if ks.config.Verbose {
+			// final verification
+			fmt.Printf("\n=== Final Verification ===\n")
+			fmt.Printf("Total blocks stored: %d\n", len(file.References))
+			for i, ref := range file.References {
+				if ref == nil {
+					return nil, fmt.Errorf("missing reference for block %d", i)
+				}
+				if i%PRINT_BLOCKS == 0 || i == len(file.References)-1 {
+					fmt.Printf("Block %d: Size=%d, Index=%d\n", i, ref.Size, ref.FileIndex)
+				}
 			}
 		}
 	}
@@ -514,10 +520,12 @@ func (ks *KeyStore) LoadAndStoreFileRemote(localFilePath string, handler RemoteH
 		References: make([]*FileReference, metadata.TotalBlocks),
 	}
 
-	fmt.Printf("Starting chunking process:\n")
-	fmt.Printf("Total size: %d bytes\n", metadata.TotalSize)
-	fmt.Printf("Block size: %d bytes\n", metadata.BlockSize)
-	fmt.Printf("Expected blocks: %d\n", metadata.TotalBlocks)
+	if ks.config.Verbose {
+		fmt.Printf("Starting chunking process:\n")
+		fmt.Printf("Total size: %d bytes\n", metadata.TotalSize)
+		fmt.Printf("Block size: %d bytes\n", metadata.BlockSize)
+		fmt.Printf("Expected blocks: %d\n", metadata.TotalBlocks)
+	}
 
 	// process file in chunks
 	buffer := make([]byte, metadata.BlockSize)
@@ -530,7 +538,9 @@ func (ks *KeyStore) LoadAndStoreFileRemote(localFilePath string, handler RemoteH
 			// for the last block, calculate remaining bytes
 			remainingBytes := metadata.TotalSize - totalBytesRead
 			bytesToRead = uint32(remainingBytes)
-			fmt.Printf("Last block %d: Reading remaining %d bytes\n", i, bytesToRead)
+			if ks.config.Verbose {
+				fmt.Printf("Last block %d: Reading remaining %d bytes\n", i, bytesToRead)
+			}
 		}
 
 		// read block
@@ -543,7 +553,7 @@ func (ks *KeyStore) LoadAndStoreFileRemote(localFilePath string, handler RemoteH
 			return nil, fmt.Errorf("unexpected end of file at block %d", i)
 		}
 
-		if i%100 == 0 || i == metadata.TotalBlocks-1 {
+		if ks.config.Verbose && (i%100 == 0 || i == metadata.TotalBlocks-1) {
 			fmt.Printf("Block %d: Read %d bytes (total: %d/%d)\n",
 				i, n, totalBytesRead+uint64(n), metadata.TotalSize)
 		}
@@ -569,7 +579,7 @@ func (ks *KeyStore) LoadAndStoreFileRemote(localFilePath string, handler RemoteH
 		totalBytesRead += uint64(n)
 
 		// progress reporting
-		if i%100 == 0 || i == metadata.TotalBlocks-1 {
+		if ks.config.Verbose && (i%100 == 0 || i == metadata.TotalBlocks-1) {
 			PrintMemUsage()
 			fmt.Printf("Stored block %d/%d (%.1f%%) - size: %d bytes\n",
 				i+1, metadata.TotalBlocks,
