@@ -881,6 +881,63 @@ func TestDeleteFile(t *testing.T) {
 	}
 }
 
+func TestStoreFromReader(t *testing.T) {
+	ks := newTestKeyStore(t)
+
+	data := make([]byte, MinBlockSize*2+999)
+	if _, err := rand.Read(data); err != nil {
+		t.Fatal(err)
+	}
+	originalHash := sha256.Sum256(data)
+
+	r := bytes.NewReader(data)
+	file, err := ks.StoreFromReader("reader_test.dat", r, uint64(len(data)))
+	if err != nil {
+		t.Fatalf("StoreFromReader failed: %v", err)
+	}
+
+	if file.MetaData.FileName != "reader_test.dat" {
+		t.Errorf("Expected filename reader_test.dat, got %s", file.MetaData.FileName)
+	}
+	if file.MetaData.FileHash != originalHash {
+		t.Error("File hash mismatch")
+	}
+
+	// Retrieve via StreamFile and compare
+	var buf bytes.Buffer
+	if err := ks.StreamFile(file.MetaData.FileHash, &buf); err != nil {
+		t.Fatalf("StreamFile failed: %v", err)
+	}
+	if !bytes.Equal(buf.Bytes(), data) {
+		t.Error("Streamed data does not match original")
+	}
+
+	// Verify name lookup works
+	found, err := ks.GetFileByName("reader_test.dat")
+	if err != nil {
+		t.Fatalf("GetFileByName failed: %v", err)
+	}
+	if found.MetaData.FileHash != originalHash {
+		t.Error("Name lookup returned wrong file")
+	}
+}
+
+func TestStoreFromReaderSizeMismatch(t *testing.T) {
+	ks := newTestKeyStore(t)
+
+	data := make([]byte, 1024)
+	if _, err := rand.Read(data); err != nil {
+		t.Fatal(err)
+	}
+
+	// Claim size is larger than actual data
+	r := bytes.NewReader(data)
+	_, err := ks.StoreFromReader("bad.dat", r, 2048)
+	if err == nil {
+		t.Error("Expected error for size mismatch")
+	}
+}
+
 func TestStoreFileLocalAndLoadAndStoreFileLocalProduceSameKeys(t *testing.T) {
 	// Both methods should produce identical chunk keys for the same data
 	data := make([]byte, MinBlockSize*2)

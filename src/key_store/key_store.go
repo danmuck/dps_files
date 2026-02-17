@@ -305,6 +305,11 @@ func (ks *KeyStore) dropFileFromMemory(key [HashSize]byte) {
 	delete(ks.files, key)
 }
 
+// GetFileByHash returns a file by its SHA-256 hash.
+func (ks *KeyStore) GetFileByHash(key [HashSize]byte) (*File, error) {
+	return ks.fileFromMemory(key)
+}
+
 // GetFileByName returns a file by its original filename.
 func (ks *KeyStore) GetFileByName(name string) (*File, error) {
 	ks.lock.RLock()

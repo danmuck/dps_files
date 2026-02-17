@@ -17,9 +17,9 @@
 
 ## Phase 3: Serving Layer
 
-- [ ] **3.1 TCP file server** — Minimal TCP server in `cmd/fileserver/` that uses KeyStore directly. Upload files, download by name or hash, list files. Length-prefixed binary protocol.
-- [ ] **3.2 HTTP file server** — Optional HTTP wrapper for browser/curl access. GET/PUT by name, Range header support via StreamChunkRange, JSON file listing.
-- [ ] **3.3 Upload streaming** — `StoreFromReader(name string, r io.Reader, size uint64) (*File, error)` — accepts data from a connection without requiring a local file path first.
+- [x] **3.1 TCP file server** — Minimal TCP server in `cmd/fileserver/` that uses KeyStore directly. Upload files, download by name or hash, list files. 4-byte length-prefixed binary protocol.
+- [x] **3.2 HTTP file server** — HTTP wrapper in `cmd/httpserver/` for browser/curl access. PUT/GET by name, GET by hash, Range header support via StreamChunkRange, JSON file listing, DELETE by hash.
+- [x] **3.3 Upload streaming** — `StoreFromReader(name string, r io.Reader, size uint64) (*File, error)` — accepts data from a connection via temp-file spill, delegates to LoadAndStoreFileLocal.
 
 ## Phase 4: Hardening
 

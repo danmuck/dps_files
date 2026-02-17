@@ -44,5 +44,11 @@ gen-file:
 tidy:
 	go mod tidy
 
+fileserver:
+	go run ./cmd/fileserver $(ARGS)
+
+httpserver:
+	go run ./cmd/httpserver $(ARGS)
+
 build-protobuf:
 	protoc --go_out=. --go_opt=paths=source_relative src/api/transport/rpc.proto

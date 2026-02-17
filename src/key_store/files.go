@@ -302,6 +302,57 @@ func (ks *KeyStore) ReassembleFileToPath(key [HashSize]byte, outputPath string) 
 	return nil
 }
 
+// StoreFromReader ingests a file from an io.Reader (e.g. a network connection)
+// and stores it locally. It spills to a temp file to avoid buffering the entire
+// upload in memory, then delegates to LoadAndStoreFileLocal for hash+chunk.
+func (ks *KeyStore) StoreFromReader(name string, r io.Reader, size uint64) (*File, error) {
+	// create temp file in storage dir
+	tmp, err := os.CreateTemp(ks.storageDir, "upload-*")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+
+	// stream reader to disk
+	written, err := io.Copy(tmp, r)
+	if err != nil {
+		tmp.Close()
+		return nil, fmt.Errorf("failed to write upload data: %w", err)
+	}
+	tmp.Close()
+
+	if uint64(written) != size {
+		return nil, fmt.Errorf("upload size mismatch: received %d bytes, expected %d", written, size)
+	}
+
+	// delegate to existing two-pass pipeline
+	file, err := ks.LoadAndStoreFileLocal(tmpPath)
+	if err != nil {
+		return nil, err
+	}
+
+	// patch filename — temp file had a random name
+	if file.MetaData.FileName != name {
+		ks.lock.Lock()
+		delete(ks.filesByName, file.MetaData.FileName)
+		file.MetaData.FileName = name
+		// update in-memory copy
+		if stored, ok := ks.files[file.MetaData.FileHash]; ok {
+			stored.MetaData.FileName = name
+		}
+		ks.filesByName[name] = file.MetaData.FileHash
+		ks.lock.Unlock()
+
+		// re-persist metadata with correct filename
+		if err := ks.fileToMemory(file); err != nil {
+			return nil, fmt.Errorf("failed to re-persist metadata: %w", err)
+		}
+	}
+
+	return file, nil
+}
+
 // Upload a file from your local file system and save the entire file to local storage
 // NOTE: prepare a document for ethe kdht but store the file in blocks locally
 func (ks *KeyStore) LoadAndStoreFileLocal(localFilePath string) (*File, error) {
