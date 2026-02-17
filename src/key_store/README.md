@@ -30,7 +30,7 @@ go run main.go run --ttl-seconds 15
 
 ## Configuration Options
 
-`cmd/key_store/main.go` uses a top-level `defaultRuntimeConfig` struct as the runtime default.
+`cmd/storage/main.go` uses a top-level `defaultRuntimeConfig` struct as the runtime default.
 Edit that struct to set baseline behavior (upload path, run mode, cleanup toggles, and default KeyStore config including TTL).
 
 CLI flags:

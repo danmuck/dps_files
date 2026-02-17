@@ -58,7 +58,7 @@ make build-protobuf                        # protoc → src/api/transport/rpc.pb
 make clean                                 # rm -rf bin/
 ```
 
-The key_store demo is run directly: `go run cmd/key_store/main.go`
+The key_store demo is run directly: `go run cmd/storage/main.go`
 
 ## Key Packages & Files
 
@@ -179,7 +179,7 @@ Files are reused if they already exist with the matching size.
 
 ### Run the File Storage Test
 ```sh
-go run cmd/key_store/main.go
+go run cmd/storage/main.go
 # Chunks appear in local/storage/data/, metadata in local/storage/metadata/
 ```
 

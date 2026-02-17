@@ -23,7 +23,7 @@ Files are split into chunks, each chunk gets a 20-byte SHA-1 DHT key, chunk payl
 - `cmd/server/main.go`: server node entry point (TCP listener demo)
 - `cmd/client/main.go`: client node entry point (Protobuf RPC demo)
 - `cmd/chain/main.go`: blockchain demo (AES-GCM)
-- `cmd/key_store/main.go`: file chunking integration flow
+- `cmd/storage/main.go`: file chunking integration flow
 - `src/api/nodes/`: node interfaces and routing scaffolding
 - `src/api/transport/`: transport interfaces, TCP handler, protobuf encoding, `rpc.proto`
 - `src/api/ledgers/`: ledger/snapshot interfaces
@@ -39,7 +39,7 @@ Files are split into chunks, each chunk gets a 20-byte SHA-1 DHT key, chunk payl
 - `make server`, `make client`, `make chain`
 - `make tidy`
 - `make build-protobuf`
-- `go run cmd/key_store/main.go`
+- `go run cmd/storage/main.go`
 
 ## Contracts And Interfaces
 
