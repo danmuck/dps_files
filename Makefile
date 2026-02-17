@@ -25,7 +25,7 @@ clean:
 	rm -rf .build/
 
 storage:
-	go run ./cmd/key_store $(ARGS)
+	clear; go run ./cmd/key_store $(ARGS)
 
 server:
 	go run cmd/server/main.go

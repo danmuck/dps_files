@@ -21,6 +21,7 @@ const (
 	MinBlockSize                 = 1 << 16      // 64kb minimum chunk
 	MaxBlockSize                 = 1 << 22      // 4mb maximum chunk
 	TargetBlocks                 = 1000         // aim for ~1000 chunks for large files
+	LargeFileMx                  = 128          // multiplier for defining large filesize (MaxBlockSize * LargeFileMx)
 	FileExtension                = ".kdht"
 	PRINT_BLOCKS                 = 500
 	VERIFY                       = false
@@ -167,6 +168,38 @@ func CalculateBlockSize(fileSize uint64) uint32 {
 	}
 
 	return uint32(blockSize)
+}
+
+// promoteCandidateBlockSize applies medium-file promotion to MaxBlockSize while
+// skipping large files above MaxBlockSize*LargeFileMx.
+//
+// The candidate is expected to come from the regular sizing calculation path.
+// This helper intentionally does not replace the regular sizing path until
+// callers opt in (test-first rollout).
+func promoteCandidateBlockSize(fileSize uint64, candidateBlockSize uint64) uint64 {
+	if fileSize == 0 {
+		return 0
+	}
+
+	if fileSize <= uint64(MaxBlockSize) {
+		return candidateBlockSize
+	}
+
+	largeThreshold := uint64(MaxBlockSize) * uint64(LargeFileMx)
+	if fileSize > largeThreshold {
+		return candidateBlockSize
+	}
+
+	maxBlocks := (fileSize + uint64(MaxBlockSize) - 1) / uint64(MaxBlockSize)
+	if maxBlocks <= uint64(TargetBlocks) {
+		promoted := max(candidateBlockSize, uint64(MaxBlockSize))
+		if promoted > uint64(MaxBlockSize) {
+			return uint64(MaxBlockSize)
+		}
+		return promoted
+	}
+
+	return candidateBlockSize
 }
 
 func HashFile(filePath string) ([32]byte, int64, error) {
