@@ -33,10 +33,11 @@
 - [x] Add configurable default TTL for `cmd/key_store` via `--ttl-seconds`, wired through `RuntimeConfig.TTLSeconds` into `KeyStoreConfig` and applied to local/remote store metadata (runtime default set explicitly, independent from library default)
 - [x] Refactor `cmd/key_store` runtime defaults to a top-level config struct (`RuntimeConfig`); CLI flags now act as run-time overrides on that default config
 - [x] Refactor `cmd/key_store` into smaller files and add explicit menu actions for `upload` (from `local/upload`, with indexed file list shown before selection), `store` (direct filepath), `clean` (`.kdht` only), `deep-clean` (`.kdht` + metadata + cache), and `view` (inspect metadata + optional reassembly to `local/storage/copy.*`); `InitKeyStore` now runs at process startup
+- [x] Improve `view` action metadata entry formatting in `cmd/key_store/view.go` (readable multi-line layout, human-readable size/TTL, last-chunk size, truncated hash)
 - [x] Prevent `.cache` metadata duplication, upsert cache metadata on successful store, and skip storing files whose hash is already present in cache (CLI now reports skip instead of fatal exit)
 - [x] Validate cache entries before hash-cache skip decisions: local (`file` protocol / `local/storage/*`) references are checked for chunk existence, stale cache entries are pruned on startup and hash-check paths, and uploads now proceed when cache metadata points to missing local data
 - [x] Make startup non-destructive: `InitKeyStoreWithConfig` no longer moves/prunes metadata/cache on boot; stale local references are validated at upload-time and missing-data hashes are evicted from in-memory indexes so upload reprocesses chunks
-- [x] Add internal block-size promotion utility with `LargeFileMx` guard in `config.go` (test-first only; not wired into `CalculateBlockSize` yet)
+- [x] Add internal block-size promotion utility with `LargeFileMx` guard in `config.go` and wire it into `CalculateBlockSize`
 - [ ] Fix `Cleanup` — only removes chunks tracked in memory; if the process crashed mid-store, orphaned `.kdht` files on disk are never cleaned up
 
 ### Phase 1B: Testing
@@ -52,6 +53,7 @@
 - [x] Add test: stale local cache metadata is pruned and does not block upload — `TestLoadAndStoreFileLocalPrunesDeadLocalCacheEntry`
 - [x] Add tests: startup is non-destructive and missing-data reupload works after restart — `TestInitKeyStoreDoesNotPruneStorageOnStartup`, `TestLoadAndStoreFileLocalReuploadsMissingDataAfterRestart`
 - [x] Add focused unit tests for block-size promotion utility and `LargeFileMx` threshold behavior — `TestPromoteCandidateBlockSize`
+- [x] Add `CalculateBlockSize` integration tests for promotion + large-file guard behavior — `TestCalculateBlockSizePromotionIntegration`
 
 ### Phase 1C: Cleanup & Performance
 - [ ] Replace all `fmt.Printf` in key_store with `log/slog` structured logging (file hash, chunk index, operation as context fields)

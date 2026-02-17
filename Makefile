@@ -6,11 +6,11 @@ all: test
 
 # Run all tests
 test:
-	go test -v ./...
+	clear; go test -v ./...
 
 # Run tests with coverage
 test-coverage:
-	go test -v ./... -cover
+	clear; go test -v ./... -cover
 
 # Build all main packages into .build/<name>/
 build:

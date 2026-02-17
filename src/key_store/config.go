@@ -159,6 +159,9 @@ func CalculateBlockSize(fileSize uint64) uint32 {
 	power := math.Log2(float64(blockSize))
 	blockSize = uint64(math.Pow(2, math.Round(power)))
 
+	// apply medium-file promotion while preserving large-file regular sizing.
+	blockSize = promoteCandidateBlockSize(fileSize, blockSize)
+
 	// clamp to min/max sizes
 	if blockSize < uint64(MinBlockSize) {
 		return MinBlockSize
@@ -174,8 +177,6 @@ func CalculateBlockSize(fileSize uint64) uint32 {
 // skipping large files above MaxBlockSize*LargeFileMx.
 //
 // The candidate is expected to come from the regular sizing calculation path.
-// This helper intentionally does not replace the regular sizing path until
-// callers opt in (test-first rollout).
 func promoteCandidateBlockSize(fileSize uint64, candidateBlockSize uint64) uint64 {
 	if fileSize == 0 {
 		return 0

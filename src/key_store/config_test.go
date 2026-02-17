@@ -69,3 +69,45 @@ func TestPromoteCandidateBlockSize(t *testing.T) {
 	}
 }
 
+func TestCalculateBlockSizePromotionIntegration(t *testing.T) {
+	tests := []struct {
+		name     string
+		fileSize uint64
+		want     uint32
+	}{
+		{
+			name:     "small file remains single chunk",
+			fileSize: 1024,
+			want:     1024,
+		},
+		{
+			name:     "just above max block promotes to max block",
+			fileSize: uint64(MaxBlockSize) + 1,
+			want:     MaxBlockSize,
+		},
+		{
+			name:     "at large threshold still promotes to max block",
+			fileSize: uint64(MaxBlockSize) * uint64(LargeFileMx),
+			want:     MaxBlockSize,
+		},
+		{
+			name:     "above large threshold uses regular calculation",
+			fileSize: uint64(MaxBlockSize)*uint64(LargeFileMx) + 1,
+			want:     1 << 19, // 512 KiB from regular rounding path
+		},
+		{
+			name:     "one gibibyte uses regular calculation",
+			fileSize: 1 << 30,
+			want:     1 << 20, // 1 MiB from regular rounding path
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := CalculateBlockSize(tc.fileSize)
+			if got != tc.want {
+				t.Fatalf("CalculateBlockSize(%d) = %d, want %d", tc.fileSize, got, tc.want)
+			}
+		})
+	}
+}

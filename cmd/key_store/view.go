@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/danmuck/dps_files/src/key_store"
@@ -26,14 +27,21 @@ func executeViewAction(cfg RuntimeConfig, ks *key_store.KeyStore) error {
 
 	fmt.Printf("\nStored metadata entries (%d):\n", len(metadata))
 	for i, md := range metadata {
-		fmt.Printf("  %d: name=%q hash=%x size=%d chunks=%d modified=%s ttl=%ds\n",
-			i,
-			md.FileName,
-			md.FileHash,
-			md.TotalSize,
-			md.TotalBlocks,
+		lastChunk := calculateLastChunkSize(md)
+		chunkSize := uint64(md.BlockSize)
+		hashHex := fmt.Sprintf("%x", md.FileHash)
+		shortHash := hashHex
+		if len(shortHash) > 16 {
+			shortHash = shortHash[:16]
+		}
+
+		fmt.Printf("  [%d] %s\n", i, md.FileName)
+		fmt.Printf("      hash: %s...  size: %s  chunks: %d\n", shortHash, formatBytes(md.TotalSize), md.TotalBlocks)
+		fmt.Printf("      chunk_size: %s  last_chunk: %s  modified: %s  ttl: %s\n",
+			formatBytes(chunkSize),
+			formatBytes(lastChunk),
 			formatUnixNano(md.Modified),
-			md.TTL,
+			formatTTLSeconds(md.TTL),
 		)
 	}
 
@@ -67,4 +75,47 @@ func formatUnixNano(value int64) string {
 		return "unknown"
 	}
 	return time.Unix(0, value).Format(time.RFC3339)
+}
+
+func formatTTLSeconds(seconds uint64) string {
+	if seconds == 0 {
+		return "0s"
+	}
+	return time.Duration(seconds * uint64(time.Second)).String()
+}
+
+func calculateLastChunkSize(md key_store.MetaData) uint64 {
+	if md.TotalBlocks == 0 || md.BlockSize == 0 {
+		return 0
+	}
+	if md.TotalBlocks == 1 {
+		return md.TotalSize
+	}
+	fullBlocks := uint64(md.BlockSize) * uint64(md.TotalBlocks-1)
+	if md.TotalSize <= fullBlocks {
+		return md.TotalSize
+	}
+	return md.TotalSize - fullBlocks
+}
+
+func formatBytes(value uint64) string {
+	if value == 0 {
+		return "0 B"
+	}
+
+	units := []string{"B", "KiB", "MiB", "GiB", "TiB"}
+	size := float64(value)
+	unitIdx := 0
+	for size >= 1024 && unitIdx < len(units)-1 {
+		size /= 1024
+		unitIdx++
+	}
+
+	if unitIdx == 0 {
+		return fmt.Sprintf("%d %s", value, units[unitIdx])
+	}
+
+	formatted := fmt.Sprintf("%.2f", size)
+	formatted = strings.TrimRight(strings.TrimRight(formatted, "0"), ".")
+	return fmt.Sprintf("%s %s", formatted, units[unitIdx])
 }
