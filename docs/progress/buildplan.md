@@ -41,6 +41,7 @@
 - [x] Validate cache entries before hash-cache skip decisions: local (`file` protocol / `local/storage/*`) references are checked for chunk existence, stale cache entries are pruned on startup and hash-check paths, and uploads now proceed when cache metadata points to missing local data
 - [x] Make startup non-destructive: `InitKeyStoreWithConfig` no longer moves/prunes metadata/cache on boot; stale local references are validated at upload-time and missing-data hashes are evicted from in-memory indexes so upload reprocesses chunks
 - [x] Add internal block-size promotion utility with `LargeFileMx` guard in `config.go` and wire it into `CalculateBlockSize`
+- [x] Restore `cmd/gen_file` default filename size-labeling (`test_<n>B|KB|MB|GB.dat`) so generated names use abbreviated units instead of raw byte-only labels
 - [ ] Fix `Cleanup` — only removes chunks tracked in memory; if the process crashed mid-store, orphaned `.kdht` files on disk are never cleaned up
 
 ### Phase 1B: Testing

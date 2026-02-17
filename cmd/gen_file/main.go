@@ -45,6 +45,19 @@ func parseSize(s string) (int64, error) {
 	return n * multiplier, nil
 }
 
+func defaultSizeLabel(size int64) string {
+	switch {
+	case size > 0 && size%(1<<30) == 0:
+		return fmt.Sprintf("%dGB", size>>(30))
+	case size > 0 && size%(1<<20) == 0:
+		return fmt.Sprintf("%dMB", size>>(20))
+	case size > 0 && size%(1<<10) == 0:
+		return fmt.Sprintf("%dKB", size>>(10))
+	default:
+		return fmt.Sprintf("%dB", size)
+	}
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "Usage: gen_file <size> [filename]\n")
@@ -64,7 +77,7 @@ func main() {
 	if len(os.Args) >= 3 {
 		filename = os.Args[2]
 	} else {
-		filename = filepath.Join(DefaultUploadDir, fmt.Sprintf("test_%d.dat", size))
+		filename = filepath.Join(DefaultUploadDir, fmt.Sprintf("test_%s.dat", defaultSizeLabel(size)))
 	}
 
 	// Create parent directory if needed
