@@ -14,31 +14,34 @@ import (
 )
 
 const (
-	KeySize       = 20      // 160 bits for kademlia dht routing
-	HashSize      = 32      // 256 bits (sha-256) for data integrity
-	CryptoSize    = 64      // 512 bits (sha-512) for security
-	MinBlockSize  = 1 << 16 // 64kb minimum chunk
-	MaxBlockSize  = 1 << 22 // 4mb maximum chunk
-	TargetBlocks  = 1000    // aim for ~1000 chunks for large files
-	FileExtension = ".kdht"
-	PRINT_BLOCKS  = 500
-	VERIFY        = false
+	KeySize                      = 20           // 160 bits for kademlia dht routing
+	HashSize                     = 32           // 256 bits (sha-256) for data integrity
+	CryptoSize                   = 64           // 512 bits (sha-512) for security
+	DefaultFileTTLSeconds uint64 = 24 * 60 * 60 // 24h
+	MinBlockSize                 = 1 << 16      // 64kb minimum chunk
+	MaxBlockSize                 = 1 << 22      // 4mb maximum chunk
+	TargetBlocks                 = 1000         // aim for ~1000 chunks for large files
+	FileExtension                = ".kdht"
+	PRINT_BLOCKS                 = 500
+	VERIFY                       = false
 )
 
 // KeyStoreConfig controls runtime behavior of a KeyStore instance.
 type KeyStoreConfig struct {
-	StorageDir    string // root directory for chunk and metadata storage
-	VerifyOnWrite bool   // when true, read-back and verify chunks immediately after writing
-	Verbose       bool   // when true, emit progress output via fmt.Printf
+	StorageDir        string // root directory for chunk and metadata storage
+	VerifyOnWrite     bool   // when true, read-back and verify chunks immediately after writing
+	Verbose           bool   // when true, emit progress output via fmt.Printf
+	DefaultTTLSeconds uint64 // default TTL for newly stored files
 }
 
 // DefaultConfig returns a KeyStoreConfig with verbose output enabled
 // and verify-on-write matching the VERIFY constant.
 func DefaultConfig(storageDir string) KeyStoreConfig {
 	return KeyStoreConfig{
-		StorageDir:    storageDir,
-		VerifyOnWrite: VERIFY,
-		Verbose:       true,
+		StorageDir:        storageDir,
+		VerifyOnWrite:     VERIFY,
+		Verbose:           true,
+		DefaultTTLSeconds: DefaultFileTTLSeconds,
 	}
 }
 

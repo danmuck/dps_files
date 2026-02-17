@@ -1,260 +1,149 @@
 package main
 
 import (
-	"crypto/sha256"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
-	"strings"
+	"sort"
 
 	"github.com/danmuck/dps_files/src/key_store"
 )
 
-const CLEAN = true
-const DATA_DIRECTORY = "./local/data/"
-const RUN_ALL = false
-
-//	var TEST_FILES = map[int]string{
-//		0: "image.jpg",
-//		1: "142_MB.dmg",
-//		2: "ubuntu.iso",
-//	}
-
-var TEST_FILES, err = getFilesInDirectory(DATA_DIRECTORY)
-var FILE = TEST_FILES[0]
-
-func getFilesInDirectory(dirPath string) ([]string, error) {
-	var files []string
-
-	// Read directory entries
-	entries, err := os.ReadDir(dirPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read directory %s: %w", dirPath, err)
-	}
-
-	// Add each file to slice, skipping directories and copy.* files
-	for _, entry := range entries {
-		if !entry.IsDir() && !strings.HasPrefix(entry.Name(), "copy.") {
-			files = append(files, entry.Name())
-		}
-	}
-
-	return files, nil
-}
-
-func getFilesRecursive(dirPath string) ([]string, error) {
-	var files []string
-
-	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if !info.IsDir() && !strings.HasPrefix(info.Name(), "copy.") {
-			// Use relative path from dirPath
-			relPath, err := filepath.Rel(dirPath, path)
-			if err != nil {
-				return err
-			}
-			files = append(files, relPath)
-		}
-		return nil
-	})
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to walk directory %s: %w", dirPath, err)
-	}
-
-	return files, nil
-}
-
-func CreateDirPath(dir string) error {
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("failed to create directory %s: %w", dir, err)
-	}
-	return nil
-}
-
-func verifyChunks(ks *key_store.KeyStore, file *key_store.File) error {
-	fmt.Printf("\nVerifying stored chunks: %d \n", len(file.References))
-
-	for i, ref := range file.References {
-		if ref == nil {
-			return fmt.Errorf("chunk reference %d is nil", i)
-		}
-
-		chunkData, err := ks.LoadFileReferenceData(ref.Key)
-		if err != nil {
-			return fmt.Errorf("failed to read chunk %d: %w", i, err)
-		}
-
-		// verify chunk size
-		if uint32(len(chunkData)) != ref.Size {
-			return fmt.Errorf("chunk %d size mismatch: got %d, expected %d",
-				i, len(chunkData), ref.Size)
-		}
-
-		// verify chunk hash
-		dataHash := sha256.Sum256(chunkData)
-		if dataHash != ref.DataHash {
-			return fmt.Errorf("chunk %d hash mismatch:\nstored:  %x\ncomputed: %x \n%v",
-				i, ref.DataHash, dataHash, ref.String())
-		}
-
-		// progress reporting
-		if i%key_store.PRINT_BLOCKS == 0 || i == int(file.MetaData.TotalBlocks-1) {
-			fmt.Printf("Verified chunk %d/%d: size=%d, index=%d, hash=%x\n",
-				i, file.MetaData.TotalBlocks-1, len(chunkData), ref.FileIndex, dataHash)
-		}
-	}
-	return nil
-}
-
-func cleanupCopyFiles(dir string) error {
-	files, err := os.ReadDir(dir)
-	if err != nil {
-		return fmt.Errorf("failed to read directory %s: %w", dir, err)
-	}
-
-	for _, file := range files {
-		if strings.HasPrefix(strings.ToLower(file.Name()), "copy") {
-			fullPath := filepath.Join(dir, file.Name())
-			if err := os.Remove(fullPath); err != nil {
-				return fmt.Errorf("failed to remove file %s: %w", fullPath, err)
-			}
-			fmt.Printf("Removed file: %s\n", fullPath)
-		}
-	}
-	return nil
-}
-
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Println("Usage: go run main.go [run|remote]")
-		fmt.Println("\nBefore running, please configure TEST_FILES in the source code:")
-		fmt.Println("\nvar TEST_FILES = map[int]string{")
-		fmt.Println("    0: \"your_file.ext\",")
-		fmt.Println("    1: \"another_file.ext\",")
-		fmt.Println("    // add more files as needed")
-		fmt.Println("}")
-		fmt.Println("\nCurrent TEST_FILES configuration:")
-		for idx, file := range TEST_FILES {
-			fmt.Printf("    %d: \"%s\"\n", idx, file)
+	cfg, err := parseCLI(os.Args[1:], defaultRuntimeConfig)
+	if err != nil {
+		indexedFiles, indexErr := getFilesInDirectory(defaultRuntimeConfig.UploadDirectory)
+		if indexErr == nil {
+			sort.Strings(indexedFiles)
 		}
-		fmt.Println("\nMake sure your files are in:", DATA_DIRECTORY)
+		fmt.Printf("Error: %v\n\n", err)
+		printUsage(indexedFiles, defaultRuntimeConfig)
+		if indexErr != nil {
+			fmt.Printf("\nIndexing error: %v\n", indexErr)
+		}
 		os.Exit(1)
 	}
 
-	// create storage directory
-	storageDir := filepath.Join(".", "local", "storage")
-	if err := CreateDirPath(storageDir); err != nil {
-		log.Fatal(err)
+	if err := createDirPath(cfg.UploadDirectory); err != nil {
+		log.Fatalf("Failed to ensure upload directory %s: %v", cfg.UploadDirectory, err)
 	}
 
-	// init new keystore
-	keystore, err := key_store.InitKeyStore(storageDir)
+	if err := createDirPath(cfg.KeyStore.StorageDir); err != nil {
+		log.Fatalf("Failed to ensure storage directory %s: %v", cfg.KeyStore.StorageDir, err)
+	}
+
+	indexedFiles, err := getFilesInDirectory(cfg.UploadDirectory)
 	if err != nil {
-		log.Fatalf("Failed to create keystore: %v", err)
+		log.Fatalf("Failed to index files in %s: %v", cfg.UploadDirectory, err)
+	}
+	sort.Strings(indexedFiles)
+
+	keystore, err := key_store.InitKeyStoreWithConfig(cfg.KeyStore)
+	if err != nil {
+		log.Fatalf("Failed to initialize keystore: %v", err)
 	}
 
-	// cleanup files
-	// note: should be configured up top
-	if CLEAN {
-		cleanupCopyFiles(DATA_DIRECTORY)
-		// defer keystore.cleanupextensions(".toml")
-		defer keystore.CleanupKDHT()
-		// defer keystore.cleanupmetadata()
+	if cfg.CleanKDHTOnExit {
+		defer func() {
+			if err := keystore.CleanupKDHT(); err != nil {
+				log.Printf("Warning: CleanupKDHT failed: %v", err)
+			}
+		}()
 	}
 
-	// enumurate test suite
-	files := make([]string, 0)
-	if RUN_ALL {
-		for _, v := range TEST_FILES {
-			files = append(files, v)
-		}
-	} else {
-		files = append(files, FILE)
-	}
-
-	// execute file loading
-	for _, FILE_test := range files {
-		filename := DATA_DIRECTORY + FILE_test
-
-		// read test file
-		originalData, err := os.ReadFile(filename)
+	metadataCount := len(keystore.ListKnownFiles())
+	if metadataCount == 0 {
+		metadataCount, err = metadataFileCount(cfg.KeyStore.StorageDir)
 		if err != nil {
-			log.Fatalf("Failed to read original file: %v", err)
+			log.Fatalf("Failed to count metadata entries: %v", err)
 		}
+	}
 
-		// calculate original hash
-		originalHash := sha256.Sum256(originalData)
-		fmt.Printf("Original file size: %d bytes\n", len(originalData))
-		fmt.Printf("Original file hash: %x\n\n", originalHash)
+	action, actionSource, err := promptAction(os.Stdin, cfg, indexedFiles, metadataCount)
+	if err != nil {
+		log.Fatalf("Failed to select action: %v", err)
+	}
+	cfg.Action = action
 
-		// store the file
-		var file *key_store.File
-		if os.Args[1] == "run" {
-			file, err = keystore.LoadAndStoreFileLocal(filename)
-			if err != nil {
-				log.Fatalf("Failed to store file: %v", err)
+	fmt.Printf("\nExecution mode: %s\n", cfg.Mode)
+	fmt.Printf("TTL seconds: %d\n", cfg.TTLSeconds)
+	fmt.Printf("Reassembly enabled: %v\n", cfg.ReassembleEnabled)
+	fmt.Printf("Action: %s\n", actionSource)
+	fmt.Printf("Storage root path: %s\n", cfg.KeyStore.StorageDir)
+
+	var selectedTargets []string
+
+	switch cfg.Action {
+	case ActionClean:
+		removed, err := cleanupAllKDHTFiles(cfg.KeyStore.StorageDir)
+		if err != nil {
+			log.Fatalf("Failed to clean .kdht files: %v", err)
+		}
+		fmt.Printf("Clean complete: removed %d .kdht file(s) from %s\n", removed, filepath.Join(cfg.KeyStore.StorageDir, "data"))
+		return
+	case ActionDeepClean:
+		result, err := deepCleanStorage(cfg.KeyStore.StorageDir)
+		if err != nil {
+			log.Fatalf("Failed to deep clean storage: %v", err)
+		}
+		fmt.Printf("Deep clean complete: removed %d .kdht, %d metadata file(s), %d cache file(s).\n",
+			result.RemovedKDHT,
+			result.RemovedMetadata,
+			result.RemovedCache,
+		)
+		return
+	case ActionUpload:
+		selectedUploads, selection, err := promptUploadSelection(indexedFiles, os.Stdin, cfg)
+		if err != nil {
+			log.Fatalf("Failed to select upload file(s): %v", err)
+		}
+		fmt.Printf("Selection: %s\n", selection)
+
+		selectedTargets = make([]string, 0, len(selectedUploads))
+		for _, name := range selectedUploads {
+			selectedTargets = append(selectedTargets, filepath.Join(cfg.UploadDirectory, name))
+		}
+	case ActionStore:
+		storePath, selection, err := resolveStorePath(os.Stdin, cfg)
+		if err != nil {
+			log.Fatalf("Failed to resolve store path: %v", err)
+		}
+		fmt.Printf("Selection: %s\n", selection)
+		selectedTargets = []string{storePath}
+	}
+
+	switch cfg.Action {
+	case ActionUpload:
+		if cfg.CleanCopyFiles {
+			if err := cleanupCopyFiles(cfg.KeyStore.StorageDir); err != nil {
+				log.Printf("Warning: cleanup copy files failed: %v", err)
 			}
 		}
-		if os.Args[1] == "remote" {
-			rh := key_store.DefaultRemoteHandler{}
-			file, err = keystore.LoadAndStoreFileRemote(filename, &rh)
-			if err != nil {
-				log.Fatalf("Failed to store file: %v", err)
-			}
-
+		if err := executeStoreTargets(cfg, keystore, selectedTargets); err != nil {
+			log.Fatalf("Upload action failed: %v", err)
 		}
-
-		fmt.Printf("\nFile details:\n")
-		fmt.Printf("Total size: %d bytes\n", file.MetaData.TotalSize)
-		fmt.Printf("Chunk size: %d bytes\n", file.MetaData.BlockSize)
-		fmt.Printf("Total chunks: %d\n", file.MetaData.TotalBlocks)
-		fmt.Printf("Last chunk size: %d bytes\n",
-			file.MetaData.TotalSize-uint64(file.MetaData.BlockSize*(file.MetaData.TotalBlocks-1)))
-		// fmt.Printf("\nFile:: %v \n", file.String())
-
-		if os.Args[1] == "run" {
-
-			// verify chunks
-			if err := verifyChunks(keystore, file); err != nil {
-				log.Fatalf("Chunk verification failed: %v", err)
+	case ActionStore:
+		if cfg.CleanCopyFiles {
+			if err := cleanupCopyFiles(cfg.KeyStore.StorageDir); err != nil {
+				log.Printf("Warning: cleanup copy files failed: %v", err)
 			}
-
-			// calculate last chunk size
-			lastChunkSize := file.MetaData.TotalSize % uint64(file.MetaData.BlockSize)
-			if lastChunkSize == 0 {
-				lastChunkSize = uint64(file.MetaData.BlockSize)
-			}
-			fmt.Printf("Expected last chunk size: %d\n", lastChunkSize)
-
-			// reassemble the file
-			realPath := DATA_DIRECTORY + "copy." + FILE_test
-
-			fmt.Printf("\nReassembling file to: %s\n", realPath)
-			if err := keystore.ReassembleFileToPath(file.MetaData.FileHash, realPath); err != nil {
-				log.Fatalf("Failed to reassemble file: %v", err)
-			}
-
-			reassembledHash, length, err := key_store.HashFile(realPath)
-			if err != nil {
-				log.Fatalf("Failed to verify reassembled file: %v", err)
-			}
-
-			fmt.Printf("\nReassembly complete:\n")
-			fmt.Printf("Original size: %d bytes\n", file.MetaData.TotalSize)
-			fmt.Printf("Original hash: %x\n", file.MetaData.FileHash)
-			fmt.Printf("Reassembled size: %d bytes\n", length)
-			fmt.Printf("Reassembled hash: %x\n", reassembledHash)
-
-			if file.MetaData.FileHash != reassembledHash {
-				log.Fatalf("Hash mismatch after reassembly!\nOriginal: %x\nReassembled: %x",
-					file.MetaData.FileHash, reassembledHash)
-			}
-
-			fmt.Printf("Successfully reassembled file to: %s\n", realPath)
 		}
+		if err := executeStoreTargets(cfg, keystore, selectedTargets); err != nil {
+			log.Fatalf("Store action failed: %v", err)
+		}
+	case ActionView:
+		if err := executeViewAction(cfg, keystore); err != nil {
+			log.Fatalf("View action failed: %v", err)
+		}
+	default:
+		log.Fatalf("Unsupported action: %s", cfg.Action)
+	}
+
+	kdhtCount, err := countKDHTFiles(cfg.KeyStore.StorageDir)
+	if err != nil {
+		log.Printf("Warning: failed to count .kdht files: %v", err)
+	} else {
+		fmt.Printf("\nStored .kdht files currently present: %d\n", kdhtCount)
 	}
 }

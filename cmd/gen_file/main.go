@@ -18,6 +18,8 @@ import (
 	"strings"
 )
 
+const DefaultUploadDir = "local/upload"
+
 func parseSize(s string) (int64, error) {
 	s = strings.TrimSpace(strings.ToUpper(s))
 	multiplier := int64(1)
@@ -48,6 +50,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Usage: gen_file <size> [filename]\n")
 		fmt.Fprintf(os.Stderr, "  size: number with optional suffix (B, KB, MB, GB)\n")
 		fmt.Fprintf(os.Stderr, "  Examples: 1MB, 256MB, 65536\n")
+		fmt.Fprintf(os.Stderr, "  Default output dir when filename omitted: %s/\n", DefaultUploadDir)
 		os.Exit(1)
 	}
 
@@ -61,7 +64,7 @@ func main() {
 	if len(os.Args) >= 3 {
 		filename = os.Args[2]
 	} else {
-		filename = fmt.Sprintf("test_%d.dat", size)
+		filename = filepath.Join(DefaultUploadDir, fmt.Sprintf("test_%d.dat", size))
 	}
 
 	// Create parent directory if needed

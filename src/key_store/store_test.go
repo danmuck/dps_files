@@ -13,7 +13,7 @@ import (
 
 // testDataDir is a persistent directory for reusable test files.
 // Files here survive across test runs to avoid regenerating large files.
-var testDataDir = filepath.Join("..", "..", "local", "data")
+var testDataDir = filepath.Join("..", "..", "local", "upload")
 
 // ensureTestFile returns the path to a test file of the given size.
 // If the file already exists with the correct size, it is reused.
@@ -363,7 +363,7 @@ func TestCleanupRemovesAllFiles(t *testing.T) {
 	}
 
 	// Verify .kdht files are gone
-	kdhtFiles, _ := filepath.Glob(filepath.Join(storageDir, "*.kdht"))
+	kdhtFiles, _ := filepath.Glob(filepath.Join(storageDir, "data", "*.kdht"))
 	if len(kdhtFiles) > 0 {
 		t.Errorf("Found %d .kdht files after cleanup", len(kdhtFiles))
 	}
@@ -614,10 +614,9 @@ func TestKeyStoreConfig(t *testing.T) {
 	storageDir := filepath.Join(t.TempDir(), "storage")
 
 	// Quiet mode — should not produce output (we just verify it doesn't panic)
-	ks, err := InitKeyStoreWithConfig(KeyStoreConfig{
-		StorageDir: storageDir,
-		Verbose:    false,
-	})
+	cfg := DefaultConfig(storageDir)
+	cfg.Verbose = false
+	ks, err := InitKeyStoreWithConfig(cfg)
 	if err != nil {
 		t.Fatalf("Failed to create quiet keystore: %v", err)
 	}
@@ -633,11 +632,10 @@ func TestKeyStoreConfig(t *testing.T) {
 	ks.Cleanup()
 
 	// Verify-on-write mode
-	ks2, err := InitKeyStoreWithConfig(KeyStoreConfig{
-		StorageDir:    filepath.Join(t.TempDir(), "storage2"),
-		VerifyOnWrite: true,
-		Verbose:       false,
-	})
+	cfg2 := DefaultConfig(filepath.Join(t.TempDir(), "storage2"))
+	cfg2.VerifyOnWrite = true
+	cfg2.Verbose = false
+	ks2, err := InitKeyStoreWithConfig(cfg2)
 	if err != nil {
 		t.Fatalf("Failed to create verify keystore: %v", err)
 	}
@@ -648,9 +646,59 @@ func TestKeyStoreConfig(t *testing.T) {
 	ks2.Cleanup()
 
 	// DefaultConfig should be verbose
-	cfg := DefaultConfig(storageDir)
+	cfg = DefaultConfig(storageDir)
 	if !cfg.Verbose {
 		t.Error("DefaultConfig should have Verbose=true")
+	}
+	if cfg.DefaultTTLSeconds != DefaultFileTTLSeconds {
+		t.Errorf("DefaultConfig should have DefaultTTLSeconds=%d, got %d", DefaultFileTTLSeconds, cfg.DefaultTTLSeconds)
+	}
+}
+
+func TestConfigurableDefaultTTL(t *testing.T) {
+	storageDir := filepath.Join(t.TempDir(), "storage")
+	cfg := DefaultConfig(storageDir)
+	cfg.Verbose = false
+	cfg.DefaultTTLSeconds = 2
+
+	ks, err := InitKeyStoreWithConfig(cfg)
+	if err != nil {
+		t.Fatalf("failed to create keystore: %v", err)
+	}
+	t.Cleanup(func() { ks.Cleanup() })
+
+	data := make([]byte, 1024)
+	if _, err := rand.Read(data); err != nil {
+		t.Fatal(err)
+	}
+
+	inMemoryFile, err := ks.StoreFileLocal("ttl_cfg_mem.dat", data)
+	if err != nil {
+		t.Fatalf("StoreFileLocal failed: %v", err)
+	}
+	if inMemoryFile.MetaData.TTL != 2 {
+		t.Fatalf("expected StoreFileLocal TTL=2, got %d", inMemoryFile.MetaData.TTL)
+	}
+
+	diskPath := filepath.Join(t.TempDir(), "ttl_cfg_disk.dat")
+	if err := os.WriteFile(diskPath, data, 0644); err != nil {
+		t.Fatalf("failed to write local input file: %v", err)
+	}
+	localFile, err := ks.LoadAndStoreFileLocal(diskPath)
+	if err != nil {
+		t.Fatalf("LoadAndStoreFileLocal failed: %v", err)
+	}
+	if localFile.MetaData.TTL != 2 {
+		t.Fatalf("expected LoadAndStoreFileLocal TTL=2, got %d", localFile.MetaData.TTL)
+	}
+
+	remoteHandler := &DefaultRemoteHandler{}
+	remoteFile, err := ks.LoadAndStoreFileRemote(diskPath, remoteHandler)
+	if err != nil {
+		t.Fatalf("LoadAndStoreFileRemote failed: %v", err)
+	}
+	if remoteFile.MetaData.TTL != 2 {
+		t.Fatalf("expected LoadAndStoreFileRemote TTL=2, got %d", remoteFile.MetaData.TTL)
 	}
 }
 

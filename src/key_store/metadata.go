@@ -26,7 +26,7 @@ type MetaData struct {
 
 func PrepareMetaDataSecure(name string, data []byte, signature [CryptoSize]byte) (metadata MetaData, e error) {
 	metadata.TotalSize = uint64(len(data))
-	metadata.TTL = 24 * 60 * 60 // 24 hrs in seconds
+	metadata.TTL = DefaultFileTTLSeconds
 	metadata.FileName = name
 	metadata.Modified = time.Now().UnixNano()
 	metadata.Permissions = DEFAULT_PERMISSIONS
@@ -41,7 +41,7 @@ func PrepareMetaDataSecure(name string, data []byte, signature [CryptoSize]byte)
 
 func PrepareMetaData(name string, data []byte) (metadata MetaData, e error) {
 	metadata.TotalSize = uint64(len(data))
-	metadata.TTL = 24 * 60 * 60
+	metadata.TTL = DefaultFileTTLSeconds
 	metadata.FileName = name
 	metadata.Modified = time.Now().UnixNano()
 	metadata.Permissions = DEFAULT_PERMISSIONS

@@ -29,7 +29,8 @@ Files are split into chunks, each chunk gets a 20-byte SHA-1 DHT key, chunk payl
 - `src/api/ledgers/`: ledger/snapshot interfaces
 - `src/impl/`: block and crypto primitives
 - `src/key_store/`: local chunking/storage/reassembly pipeline
-- `local/storage/`: runtime chunk/metadata cache (gitignored)
+- `local/upload/`: operator upload/test input files
+- `local/storage/`: runtime layout (`data/` chunks, `.cache/`, `metadata/`)
 
 ## Build And Run
 

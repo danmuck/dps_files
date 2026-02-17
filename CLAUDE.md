@@ -35,9 +35,10 @@ src/
   impl/                — Block, BlockData, crypto utilities (SHA, AES-GCM)
   key_store/           — KeyStore, File, FileReference, MetaData, RemoteHandler, chunking pipeline
 
-tools/gen_text/        — Python test file generator (legacy, see cmd/gen_file for Go version)
+tools/gen_text/        — Python test file generator (legacy, outputs should target local/upload)
 docs/progress/         — Build plan and progress tracking
-local/storage/               — Runtime data (gitignored): .cache/, metadata/, *.kdht chunks
+local/upload/          — Upload/test input files
+local/storage/         — Runtime data (gitignored): data/*.kdht, .cache/, metadata/
 ```
 
 ## Build & Run Commands
@@ -51,7 +52,7 @@ make build                                 # go build -o bin/project ./...
 make server                                # go run cmd/server/main.go
 make client                                # go run cmd/client/main.go
 make chain                                 # go run cmd/chain/main.go
-make gen-file SIZE=256MB FILE=local/data/test.dat # generate test file
+make gen-file SIZE=256MB FILE=local/upload/test.dat # generate test file
 make tidy                                  # go mod tidy
 make build-protobuf                        # protoc → src/api/transport/rpc.pb.go
 make clean                                 # rm -rf bin/
@@ -123,7 +124,7 @@ When adding new node types or storage backends, implement these interfaces:
 Input file → calculate metadata (SHA-256, size, permissions)
   → split into chunks (dynamic size, ~1000 chunks target)
   → each chunk gets SHA-1 key (computeChunkKey) + SHA-256 hash (for integrity)
-  → store chunks as local/storage/{key}.kdht
+  → store chunks as local/storage/data/{key}.kdht
   → persist metadata as local/storage/metadata/{hash}.toml
   → (future) distribute chunks via DHT STORE RPCs
 ```
@@ -170,16 +171,16 @@ For detailed per-module issue tracking, see `docs/progress/buildplan.md`.
 
 ### Generate Test Files
 ```sh
-go run cmd/gen_file/main.go 256MB local/data/test_256mb.dat
+go run cmd/gen_file/main.go 256MB local/upload/test_256mb.dat
 # Or via Makefile:
-make gen-file SIZE=256MB FILE=local/data/test_256mb.dat
+make gen-file SIZE=256MB FILE=local/upload/test_256mb.dat
 ```
 Files are reused if they already exist with the matching size.
 
 ### Run the File Storage Test
 ```sh
 go run cmd/key_store/main.go
-# Chunks appear in local/storage/, metadata in local/storage/metadata/
+# Chunks appear in local/storage/data/, metadata in local/storage/metadata/
 ```
 
 ### Add a New Transport Protocol
@@ -200,4 +201,4 @@ Test files follow `*_test.go` convention in their respective packages:
 - `src/api/nodes/routing_test.go` — 4 tests: node creation, bad ID rejection, start/shutdown lifecycle, router type verification
 - `src/api/transport/tcp_handler_test.go` — 2 tests: listener init + connect, full send/receive round-trip
 
-Test data goes in `./local/data/` (created by tests, reused across runs). The `local/storage/` directory is used at runtime and is gitignored.
+Test data goes in `./local/upload/` (created by tests, reused across runs). The `local/storage/` directory is used at runtime and is gitignored.

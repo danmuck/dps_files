@@ -24,6 +24,9 @@ build:
 clean:
 	rm -rf .build/
 
+storage:
+	go run ./cmd/key_store $(ARGS)
+
 server:
 	go run cmd/server/main.go
 
@@ -33,7 +36,7 @@ client:
 chain:
 	go run cmd/chain/main.go
 
-# Generate a test file: make gen-file SIZE=256MB FILE=local/data/test.dat
+# Generate an upload file: make gen-file SIZE=256MB FILE=local/upload/test.dat
 gen-file:
 	go run cmd/gen_file/main.go $(SIZE) $(FILE)
 

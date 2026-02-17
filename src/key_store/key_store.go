@@ -3,6 +3,7 @@ package key_store
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -24,6 +25,8 @@ type KeyStore struct {
 	filesByName map[string][HashSize]byte // filename → file hash
 }
 
+var ErrFileHashCached = errors.New("file hash already present in cache")
+
 // InitKeyStore creates a KeyStore with default config (verbose, no verify-on-write).
 func InitKeyStore(storageDir string) (*KeyStore, error) {
 	return InitKeyStoreWithConfig(DefaultConfig(storageDir))
@@ -31,6 +34,10 @@ func InitKeyStore(storageDir string) (*KeyStore, error) {
 
 // InitKeyStoreWithConfig creates a KeyStore with the given configuration.
 func InitKeyStoreWithConfig(cfg KeyStoreConfig) (*KeyStore, error) {
+	if cfg.DefaultTTLSeconds == 0 {
+		cfg.DefaultTTLSeconds = DefaultFileTTLSeconds
+	}
+
 	ks := &KeyStore{
 		chunkIndex:  make(map[[KeySize]byte]chunkLoc),
 		files:       make(map[[HashSize]byte]*File),
@@ -45,6 +52,11 @@ func InitKeyStoreWithConfig(cfg KeyStoreConfig) (*KeyStore, error) {
 	}
 
 	// load metadata files
+	chunkDataDir := ks.chunkDataDir()
+	if err := os.MkdirAll(chunkDataDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create chunk data directory: %w", err)
+	}
+
 	metadataDir := filepath.Join(cfg.StorageDir, "metadata")
 	if err := os.MkdirAll(metadataDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create metadata directory: %w", err)
@@ -85,19 +97,15 @@ func InitKeyStoreWithConfig(cfg KeyStoreConfig) (*KeyStore, error) {
 			// build chunk index
 			for i, ref := range file.References {
 				if ref != nil {
+					// Normalize location to current storage layout so older metadata
+					// written with previous paths remains readable.
+					ref.Location = ks.GetLocalBlockLocation(ref.Key)
 					ks.chunkIndex[ref.Key] = chunkLoc{
 						FileHash:   fileHash,
 						ChunkIndex: uint32(i),
 					}
 				}
 			}
-		}
-	}
-
-	// verify chunks and handle orphaned metadata
-	if err := ks.verifyFileReferences(); err != nil {
-		if ks.config.Verbose {
-			fmt.Printf("Warning: error during chunk verification: %v\n", err)
 		}
 	}
 
@@ -148,6 +156,10 @@ func (ks *KeyStore) fileToMemory(file *File) error {
 	// encode the complete file structure
 	if err := encoder.Encode(file); err != nil {
 		return fmt.Errorf("failed to encode file: %w", err)
+	}
+
+	if err := ks.upsertCacheEntry(file); err != nil {
+		return fmt.Errorf("failed to update cache entry: %w", err)
 	}
 
 	return nil
@@ -221,6 +233,57 @@ func (ks *KeyStore) ListKnownFiles() []MetaData {
 		entries = append(entries, file.MetaData) // copy the metadata from the file struct
 	}
 	return entries
+}
+
+func (ks *KeyStore) existingFileByHash(key [HashSize]byte) (*File, bool) {
+	ks.lock.RLock()
+	file, exists := ks.files[key]
+	if !exists {
+		ks.lock.RUnlock()
+		return nil, false
+	}
+
+	isStale := ks.fileHasMissingLocalReferences(file)
+	ks.lock.RUnlock()
+	if isStale {
+		ks.dropFileFromMemory(key)
+		return nil, false
+	}
+
+	fileCopy := *file
+	return &fileCopy, true
+}
+
+func (ks *KeyStore) fileHasMissingLocalReferences(file *File) bool {
+	for _, ref := range file.References {
+		if ref == nil {
+			return true
+		}
+		if ks.isLocalReference(ref) && !ks.localReferenceExists(ref) {
+			return true
+		}
+	}
+	return false
+}
+
+func (ks *KeyStore) dropFileFromMemory(key [HashSize]byte) {
+	ks.lock.Lock()
+	defer ks.lock.Unlock()
+
+	file, exists := ks.files[key]
+	if !exists {
+		return
+	}
+
+	for _, ref := range file.References {
+		if ref == nil {
+			continue
+		}
+		delete(ks.chunkIndex, ref.Key)
+	}
+
+	delete(ks.filesByName, file.MetaData.FileName)
+	delete(ks.files, key)
 }
 
 // GetFileByName returns a file by its original filename.
@@ -367,13 +430,14 @@ func (ks *KeyStore) Cleanup() error {
 	}
 
 	// clean up any orphaned .kdht files on disk (e.g. from crashed mid-store)
-	entries, err := os.ReadDir(ks.storageDir)
+	chunkDataDir := ks.chunkDataDir()
+	entries, err := os.ReadDir(chunkDataDir)
 	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to read storage directory: %w", err)
+		return fmt.Errorf("failed to read chunk data directory: %w", err)
 	}
 	for _, entry := range entries {
 		if !entry.IsDir() && filepath.Ext(entry.Name()) == ".kdht" {
-			if err := os.Remove(filepath.Join(ks.storageDir, entry.Name())); err != nil && !os.IsNotExist(err) {
+			if err := os.Remove(filepath.Join(chunkDataDir, entry.Name())); err != nil && !os.IsNotExist(err) {
 				return fmt.Errorf("failed to delete orphaned chunk %s: %w", entry.Name(), err)
 			}
 		}
@@ -448,9 +512,226 @@ func (ks *KeyStore) CleanupExtensions(extensions ...string) error {
 	return nil
 }
 
+func (ks *KeyStore) cacheDir() string {
+	return filepath.Join(ks.storageDir, ".cache")
+}
+
+func (ks *KeyStore) cachePathForHash(fileHash [HashSize]byte) string {
+	return filepath.Join(ks.cacheDir(), fmt.Sprintf("%x.toml", fileHash))
+}
+
+func (ks *KeyStore) upsertCacheEntry(file *File) error {
+	cacheDir := ks.cacheDir()
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		return fmt.Errorf("failed to create cache directory: %w", err)
+	}
+
+	cachePath := ks.cachePathForHash(file.MetaData.FileHash)
+	f, err := os.Create(cachePath)
+	if err != nil {
+		return fmt.Errorf("failed to create cache file: %w", err)
+	}
+	defer f.Close()
+
+	encoder := toml.NewEncoder(f)
+	encoder.Indent = "    "
+	if err := encoder.Encode(file); err != nil {
+		return fmt.Errorf("failed to encode cache file: %w", err)
+	}
+
+	return nil
+}
+
+func isCacheVariant(stem, candidateName string) bool {
+	if !strings.HasSuffix(candidateName, ".toml") {
+		return false
+	}
+	candidateStem := strings.TrimSuffix(candidateName, ".toml")
+	return candidateStem == stem || strings.HasPrefix(candidateStem, stem+" ")
+}
+
+func (ks *KeyStore) cacheEntryPathsForHash(fileHash [HashSize]byte) ([]string, error) {
+	stem := fmt.Sprintf("%x", fileHash)
+	cacheDir := ks.cacheDir()
+
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create cache directory: %w", err)
+	}
+
+	entries, err := os.ReadDir(cacheDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read cache directory: %w", err)
+	}
+
+	paths := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if isCacheVariant(stem, entry.Name()) {
+			paths = append(paths, filepath.Join(cacheDir, entry.Name()))
+		}
+	}
+
+	return paths, nil
+}
+
+func (ks *KeyStore) pruneCachePath(cachePath string) error {
+	if err := os.Remove(cachePath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to prune cache entry %s: %w", cachePath, err)
+	}
+	return nil
+}
+
+func (ks *KeyStore) isLocalReference(ref *FileReference) bool {
+	if ref == nil {
+		return false
+	}
+
+	if ref.Protocol == "" || ref.Protocol == "file" {
+		return true
+	}
+
+	if ref.Location == "" {
+		return false
+	}
+
+	cleanLocation := filepath.Clean(ref.Location)
+	cleanStorage := filepath.Clean(ks.storageDir)
+	rel, err := filepath.Rel(cleanStorage, cleanLocation)
+	if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return true
+	}
+
+	return strings.HasPrefix(filepath.ToSlash(cleanLocation), "local/storage/")
+}
+
+func (ks *KeyStore) localReferenceExists(ref *FileReference) bool {
+	if ref == nil {
+		return false
+	}
+
+	paths := []string{}
+	if ref.Location != "" {
+		paths = append(paths, ref.Location)
+	}
+
+	keyPath := ks.GetLocalBlockLocation(ref.Key)
+	if ref.Location != keyPath {
+		paths = append(paths, keyPath)
+	}
+
+	for _, path := range paths {
+		if _, err := os.Stat(path); err == nil {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (ks *KeyStore) cacheEntryIsLive(cachePath string) (bool, error) {
+	var file File
+	if _, err := toml.DecodeFile(cachePath, &file); err != nil {
+		return false, fmt.Errorf("failed to decode cache entry %s: %w", cachePath, err)
+	}
+
+	for _, ref := range file.References {
+		if ref == nil {
+			return false, nil
+		}
+		if ks.isLocalReference(ref) && !ks.localReferenceExists(ref) {
+			return false, nil
+		}
+	}
+
+	return true, nil
+}
+
+func (ks *KeyStore) pruneDeadCacheEntries() error {
+	cacheDir := ks.cacheDir()
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		return fmt.Errorf("failed to create cache directory: %w", err)
+	}
+
+	entries, err := os.ReadDir(cacheDir)
+	if err != nil {
+		return fmt.Errorf("failed to read cache directory: %w", err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".toml") {
+			continue
+		}
+
+		cachePath := filepath.Join(cacheDir, entry.Name())
+		live, err := ks.cacheEntryIsLive(cachePath)
+		if err != nil {
+			if ks.config.Verbose {
+				fmt.Printf("Warning: %v\n", err)
+			}
+			if err := ks.pruneCachePath(cachePath); err != nil {
+				return err
+			}
+			continue
+		}
+
+		if !live {
+			if err := ks.pruneCachePath(cachePath); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func (ks *KeyStore) hasCacheEntryForHash(fileHash [HashSize]byte) (bool, error) {
+	cachePaths, err := ks.cacheEntryPathsForHash(fileHash)
+	if err != nil {
+		return false, err
+	}
+
+	cached := false
+	for _, cachePath := range cachePaths {
+		live, err := ks.cacheEntryIsLive(cachePath)
+		if err != nil {
+			if ks.config.Verbose {
+				fmt.Printf("Warning: %v\n", err)
+			}
+			if err := ks.pruneCachePath(cachePath); err != nil {
+				return false, err
+			}
+			continue
+		}
+
+		if !live {
+			if err := ks.pruneCachePath(cachePath); err != nil {
+				return false, err
+			}
+			continue
+		}
+
+		cached = true
+	}
+
+	return cached, nil
+}
+
+func (ks *KeyStore) ensureHashNotCached(fileHash [HashSize]byte, fileName string) error {
+	cached, err := ks.hasCacheEntryForHash(fileHash)
+	if err != nil {
+		return err
+	}
+	if cached {
+		return fmt.Errorf("%w: %q (%x)", ErrFileHashCached, fileName, fileHash)
+	}
+	return nil
+}
+
 func (ks *KeyStore) moveToCache(sourcePath string) error {
 	// create cache directory
-	cacheDir := filepath.Join(ks.storageDir, ".cache")
+	cacheDir := ks.cacheDir()
 	if err := os.MkdirAll(cacheDir, 0755); err != nil {
 		return fmt.Errorf("failed to create cache directory: %w", err)
 	}
@@ -458,9 +739,34 @@ func (ks *KeyStore) moveToCache(sourcePath string) error {
 	// get filename and create destination path
 	fileName := filepath.Base(sourcePath)
 	destPath := filepath.Join(cacheDir, fileName)
+	stem := strings.TrimSuffix(fileName, ".toml")
+
+	// If the same metadata (or a legacy duplicate variant) already exists in cache,
+	// discard the source metadata file instead of creating another cache entry.
+	entries, err := os.ReadDir(cacheDir)
+	if err != nil {
+		return fmt.Errorf("failed to read cache directory: %w", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if isCacheVariant(stem, entry.Name()) {
+			if err := os.Remove(sourcePath); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("failed to remove duplicate metadata source: %w", err)
+			}
+			if ks.config.Verbose {
+				fmt.Printf("Cache already contains metadata for %s; discarded duplicate source\n", stem)
+			}
+			return nil
+		}
+	}
 
 	// move the file
 	if err := os.Rename(sourcePath, destPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
 		return fmt.Errorf("failed to move file to cache: %w", err)
 	}
 

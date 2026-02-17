@@ -20,8 +20,12 @@ type FileReference struct {
 	// MetaData  *MetaData      `toml:"metadata,omitempty"`
 }
 
+func (ks *KeyStore) chunkDataDir() string {
+	return filepath.Join(ks.storageDir, "data")
+}
+
 func (ks *KeyStore) GetLocalBlockLocation(id [KeySize]byte) string {
-	return filepath.Join(ks.storageDir, fmt.Sprintf("%x%s", id, FileExtension))
+	return filepath.Join(ks.chunkDataDir(), fmt.Sprintf("%x%s", id, FileExtension))
 }
 
 // store by value, return error
@@ -47,6 +51,9 @@ func (ks *KeyStore) StoreFileReference(ref *FileReference, data []byte) error {
 
 	// create block file
 	blockPath := ks.GetLocalBlockLocation(ref.Key)
+	if err := os.MkdirAll(filepath.Dir(blockPath), 0755); err != nil {
+		return fmt.Errorf("failed to create block directory: %w", err)
+	}
 	if err := os.WriteFile(blockPath, data, 0644); err != nil {
 		return fmt.Errorf("failed to write block file: %w", err)
 	}
@@ -145,12 +152,24 @@ func (ks *KeyStore) DeleteFileReference(key [KeySize]byte) error {
 	ks.lock.Lock()
 	defer ks.lock.Unlock()
 
-	ref, err := ks.resolveChunk(key)
-	if err != nil {
-		return err
+	loc, exists := ks.chunkIndex[key]
+	if !exists {
+		return fmt.Errorf("block not found for key %x", key)
 	}
 
-	if err := os.Remove(ref.Location); err != nil {
+	// Default to deterministic key-based path. If parent metadata exists in memory,
+	// prefer the stored location and clear the reference slot.
+	blockPath := ks.GetLocalBlockLocation(key)
+	if file, ok := ks.files[loc.FileHash]; ok {
+		if int(loc.ChunkIndex) < len(file.References) && file.References[loc.ChunkIndex] != nil {
+			if file.References[loc.ChunkIndex].Location != "" {
+				blockPath = file.References[loc.ChunkIndex].Location
+			}
+			file.References[loc.ChunkIndex] = nil
+		}
+	}
+
+	if err := os.Remove(blockPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to delete block file: %w", err)
 	}
 

@@ -110,7 +110,7 @@ steps = [
     "For each chunk index 0..TotalBlocks-1:",
     "  Read chunk bytes from file",
     "  Create FileReference with computeChunkKey, SHA-256 of chunk data",
-    "  Store chunk as local/storage/{hex(key)}.kdht via StoreFileReference",
+    "  Store chunk as local/storage/data/{hex(key)}.kdht via StoreFileReference",
     "  On failure: clean up all previously stored chunks",
     "Store complete File struct via fileToMemory (in-memory + TOML)",
 ]

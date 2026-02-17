@@ -28,7 +28,14 @@
 - [x] Fix `fileToMemory` variable shadowing — renamed to `metadataPath`
 - [x] Fix `LoadLocalFileToMemory` variable shadowing and ineffective `ref = nil` — uses index assignment
 - [x] Fix `CalculateBlockSize` / `PrepareMetaData` divide-by-zero on empty files
-- [x] Migrate runtime/test filesystem paths to local/storage and local/data
+- [x] Migrate runtime/test filesystem paths to local/storage/data (runtime chunk store) and local/upload (input files)
+- [x] Fix `cmd/key_store` CLI mode/output — `make storage` now runs `go run ./cmd/key_store`, defaults to `run`, reports automated indexing from `local/upload`, prompts for file index (`all`/`clean` supported), persists `.kdht` chunks in `local/storage/data` by default, and gates reassembly behind `--reassemble`
+- [x] Add configurable default TTL for `cmd/key_store` via `--ttl-seconds`, wired through `RuntimeConfig.TTLSeconds` into `KeyStoreConfig` and applied to local/remote store metadata (runtime default set explicitly, independent from library default)
+- [x] Refactor `cmd/key_store` runtime defaults to a top-level config struct (`RuntimeConfig`); CLI flags now act as run-time overrides on that default config
+- [x] Refactor `cmd/key_store` into smaller files and add explicit menu actions for `upload` (from `local/upload`, with indexed file list shown before selection), `store` (direct filepath), `clean` (`.kdht` only), `deep-clean` (`.kdht` + metadata + cache), and `view` (inspect metadata + optional reassembly to `local/storage/copy.*`); `InitKeyStore` now runs at process startup
+- [x] Prevent `.cache` metadata duplication, upsert cache metadata on successful store, and skip storing files whose hash is already present in cache (CLI now reports skip instead of fatal exit)
+- [x] Validate cache entries before hash-cache skip decisions: local (`file` protocol / `local/storage/*`) references are checked for chunk existence, stale cache entries are pruned on startup and hash-check paths, and uploads now proceed when cache metadata points to missing local data
+- [x] Make startup non-destructive: `InitKeyStoreWithConfig` no longer moves/prunes metadata/cache on boot; stale local references are validated at upload-time and missing-data hashes are evicted from in-memory indexes so upload reprocesses chunks
 - [ ] Fix `Cleanup` — only removes chunks tracked in memory; if the process crashed mid-store, orphaned `.kdht` files on disk are never cleaned up
 
 ### Phase 1B: Testing
@@ -40,6 +47,9 @@
 - [x] Add test: store → reload KeyStore from disk — `TestKeyStorePersistence`
 - [x] Add test: key consistency between `StoreFileLocal` and `LoadAndStoreFileLocal` — `TestStoreFileLocalAndLoadAndStoreFileLocalProduceSameKeys`
 - [x] Add test: chunk corruption detected — `TestChunkCorruptionDetected`
+- [x] Add tests: error-injection cleanup paths for failed metadata persistence — `TestStoreFileLocalErrorInjectionCleansChunks`, `TestLoadAndStoreFileLocalErrorInjectionCleansChunks`
+- [x] Add test: stale local cache metadata is pruned and does not block upload — `TestLoadAndStoreFileLocalPrunesDeadLocalCacheEntry`
+- [x] Add tests: startup is non-destructive and missing-data reupload works after restart — `TestInitKeyStoreDoesNotPruneStorageOnStartup`, `TestLoadAndStoreFileLocalReuploadsMissingDataAfterRestart`
 
 ### Phase 1C: Cleanup & Performance
 - [ ] Replace all `fmt.Printf` in key_store with `log/slog` structured logging (file hash, chunk index, operation as context fields)

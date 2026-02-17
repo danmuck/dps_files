@@ -51,9 +51,16 @@ func (ks *KeyStore) StoreFileLocal(name string, fileData []byte) (*File, error) 
 	if err != nil {
 		return nil, err
 	}
+	metadata.TTL = ks.config.DefaultTTLSeconds
 
 	// calculate and store file hash
 	metadata.FileHash = sha256.Sum256(fileData)
+	if existing, ok := ks.existingFileByHash(metadata.FileHash); ok {
+		return existing, nil
+	}
+	if err := ks.ensureHashNotCached(metadata.FileHash, metadata.FileName); err != nil {
+		return nil, err
+	}
 
 	// create file object
 	file := &File{
@@ -329,11 +336,18 @@ func (ks *KeyStore) LoadAndStoreFileLocal(localFilePath string) (*File, error) {
 		TotalSize:   uint64(fileInfo.Size()),
 		Modified:    time.Now().UnixNano(),
 		Permissions: uint32(fileInfo.Mode().Perm()),
+		TTL:         ks.config.DefaultTTLSeconds,
 		BlockSize:   CalculateBlockSize(uint64(fileInfo.Size())),
 	}
 	var fileHash [HashSize]byte
 	copy(fileHash[:], hash.Sum(nil))
 	metadata.FileHash = fileHash
+	if existing, ok := ks.existingFileByHash(metadata.FileHash); ok {
+		return existing, nil
+	}
+	if err := ks.ensureHashNotCached(metadata.FileHash, metadata.FileName); err != nil {
+		return nil, err
+	}
 	if metadata.BlockSize > 0 {
 		metadata.TotalBlocks = uint32((metadata.TotalSize + uint64(metadata.BlockSize) - 1) / uint64(metadata.BlockSize))
 	}
@@ -502,11 +516,18 @@ func (ks *KeyStore) LoadAndStoreFileRemote(localFilePath string, handler RemoteH
 		TotalSize:   uint64(fileInfo.Size()),
 		Modified:    time.Now().UnixNano(),
 		Permissions: uint32(fileInfo.Mode().Perm()),
+		TTL:         ks.config.DefaultTTLSeconds,
 		BlockSize:   CalculateBlockSize(uint64(fileInfo.Size())),
 	}
 	var fileHash [HashSize]byte
 	copy(fileHash[:], hash.Sum(nil))
 	metadata.FileHash = fileHash
+	if existing, ok := ks.existingFileByHash(metadata.FileHash); ok {
+		return existing, nil
+	}
+	if err := ks.ensureHashNotCached(metadata.FileHash, metadata.FileName); err != nil {
+		return nil, err
+	}
 	if metadata.BlockSize > 0 {
 		metadata.TotalBlocks = uint32((metadata.TotalSize + uint64(metadata.BlockSize) - 1) / uint64(metadata.BlockSize))
 	}
