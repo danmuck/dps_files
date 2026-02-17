@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"os"
+	"io"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -11,7 +11,7 @@ import (
 	"github.com/danmuck/dps_files/src/key_store"
 )
 
-func executeViewAction(cfg RuntimeConfig, ks *key_store.KeyStore) error {
+func executeViewAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.Reader) error {
 	metadata := ks.ListKnownFiles()
 	if len(metadata) == 0 {
 		fmt.Println("No metadata entries found in storage.")
@@ -45,7 +45,7 @@ func executeViewAction(cfg RuntimeConfig, ks *key_store.KeyStore) error {
 		)
 	}
 
-	selected, selection, err := promptMetadataReassemblySelection(metadata, os.Stdin)
+	selected, selection, err := promptMetadataReassemblySelection(metadata, input)
 	if err != nil {
 		return err
 	}

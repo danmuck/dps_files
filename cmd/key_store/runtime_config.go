@@ -20,6 +20,7 @@ const (
 	ActionClean     MenuAction = "clean"
 	ActionDeepClean MenuAction = "deep-clean"
 	ActionView      MenuAction = "view"
+	ActionStats     MenuAction = "stats"
 )
 
 const defaultRuntimeTTLSeconds uint64 = 300
@@ -165,6 +166,13 @@ func parseCLI(args []string, cfg RuntimeConfig) (RuntimeConfig, error) {
 			runtimeCfg.Action = ActionView
 			runtimeCfg.ActionProvided = true
 			actionProvided = true
+		case string(ActionStats):
+			if actionProvided {
+				return runtimeCfg, fmt.Errorf("multiple actions provided: %q", arg)
+			}
+			runtimeCfg.Action = ActionStats
+			runtimeCfg.ActionProvided = true
+			actionProvided = true
 		default:
 			return runtimeCfg, fmt.Errorf("unsupported argument %q", arg)
 		}
@@ -182,7 +190,7 @@ func printUsage(indexedFiles []string, cfg RuntimeConfig) {
 	sorted := append([]string(nil), indexedFiles...)
 	sort.Strings(sorted)
 
-	fmt.Printf("Usage: go run main.go [run|remote] [upload|store|clean|deep-clean|view] [%s] [%s N] [%s PATH]\n",
+	fmt.Printf("Usage: go run main.go [run|remote] [upload|store|clean|deep-clean|view|stats] [%s] [%s N] [%s PATH]\n",
 		REASSEMBLE_FLAG,
 		TTL_SECONDS_FLAG,
 		STORE_PATH_FLAG,
@@ -194,7 +202,7 @@ func printUsage(indexedFiles []string, cfg RuntimeConfig) {
 	fmt.Printf("Store action accepts a direct path via %q.\n", STORE_PATH_FLAG)
 	fmt.Printf("Reassembled copy outputs are written to %s.\n", cfg.KeyStore.StorageDir)
 	fmt.Printf("\nUpload action indexes %s and excludes directories + copy.* files.\n", cfg.UploadDirectory)
-	fmt.Println("Actions: upload (from upload dir), store (explicit filepath), clean (.kdht only), deep-clean (.kdht + metadata + cache), view (inspect metadata + optional reassemble).")
+	fmt.Println("Actions: upload (from upload dir), store (explicit filepath), clean (.kdht only), deep-clean (.kdht + metadata + cache), view (inspect metadata + optional reassemble), stats (storage/system stats).")
 
 	if len(sorted) == 0 {
 		fmt.Println("\nNo indexable upload files were found.")

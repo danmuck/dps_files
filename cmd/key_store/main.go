@@ -1,7 +1,9 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -33,12 +35,6 @@ func main() {
 		log.Fatalf("Failed to ensure storage directory %s: %v", cfg.KeyStore.StorageDir, err)
 	}
 
-	indexedFiles, err := getFilesInDirectory(cfg.UploadDirectory)
-	if err != nil {
-		log.Fatalf("Failed to index files in %s: %v", cfg.UploadDirectory, err)
-	}
-	sort.Strings(indexedFiles)
-
 	keystore, err := key_store.InitKeyStoreWithConfig(cfg.KeyStore)
 	if err != nil {
 		log.Fatalf("Failed to initialize keystore: %v", err)
@@ -52,51 +48,130 @@ func main() {
 		}()
 	}
 
-	metadataCount := len(keystore.ListKnownFiles())
-	if metadataCount == 0 {
-		metadataCount, err = metadataFileCount(cfg.KeyStore.StorageDir)
-		if err != nil {
-			log.Fatalf("Failed to count metadata entries: %v", err)
+	if shouldRunInteractiveSession(cfg, os.Stdin) {
+		if err := runInteractiveSession(cfg, keystore, os.Stdin); err != nil {
+			log.Fatalf("Interactive session failed: %v", err)
 		}
+		return
+	}
+
+	indexedFiles, metadataCount, err := refreshMenuContext(cfg, keystore)
+	if err != nil {
+		log.Fatalf("Failed to prepare runtime context: %v", err)
 	}
 
 	action, actionSource, err := promptAction(os.Stdin, cfg, indexedFiles, metadataCount)
+	if errors.Is(err, errMenuExit) {
+		return
+	}
 	if err != nil {
 		log.Fatalf("Failed to select action: %v", err)
 	}
 	cfg.Action = action
 
+	printRuntimeSummary(cfg, actionSource)
+	if err := executeActionOnce(cfg, keystore, os.Stdin, indexedFiles); err != nil {
+		if errors.Is(err, errMenuBack) {
+			fmt.Println("Action cancelled.")
+			return
+		}
+		log.Fatalf("Action %q failed: %v", cfg.Action, err)
+	}
+}
+
+func shouldRunInteractiveSession(cfg RuntimeConfig, input io.Reader) bool {
+	return !cfg.ActionProvided && isInteractiveReader(input)
+}
+
+func runInteractiveSession(cfg RuntimeConfig, keystore *key_store.KeyStore, input io.Reader) error {
+	reader := getBufferedReader(input)
+	clearTerminalIfInteractive(input)
+
+	for {
+		indexedFiles, metadataCount, err := refreshMenuContext(cfg, keystore)
+		if err != nil {
+			return err
+		}
+
+		action, actionSource, err := promptAction(reader, cfg, indexedFiles, metadataCount)
+		if errors.Is(err, errMenuExit) {
+			clearTerminalIfInteractive(input)
+			fmt.Println("Exited keystore menu.")
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("failed to select action: %w", err)
+		}
+
+		cfg.Action = action
+		clearTerminalIfInteractive(input)
+		printRuntimeSummary(cfg, actionSource)
+		err = executeActionOnce(cfg, keystore, reader, indexedFiles)
+		if err != nil && !errors.Is(err, errMenuBack) {
+			fmt.Printf("\nAction %q failed: %v\n", cfg.Action, err)
+		}
+		if errors.Is(err, errMenuBack) {
+			clearTerminalIfInteractive(input)
+			continue
+		}
+	}
+}
+
+func refreshMenuContext(cfg RuntimeConfig, keystore *key_store.KeyStore) ([]string, int, error) {
+	if err := keystore.ReloadLocalState(); err != nil {
+		return nil, 0, fmt.Errorf("failed to reload keystore state: %w", err)
+	}
+
+	indexedFiles, err := getFilesInDirectory(cfg.UploadDirectory)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to index files in %s: %w", cfg.UploadDirectory, err)
+	}
+	sort.Strings(indexedFiles)
+
+	metadataCount := len(keystore.ListKnownFiles())
+
+	return indexedFiles, metadataCount, nil
+}
+
+func printRuntimeSummary(cfg RuntimeConfig, actionSource string) {
 	fmt.Printf("\nExecution mode: %s\n", cfg.Mode)
 	fmt.Printf("TTL seconds: %d\n", cfg.TTLSeconds)
 	fmt.Printf("Reassembly enabled: %v\n", cfg.ReassembleEnabled)
 	fmt.Printf("Action: %s\n", actionSource)
 	fmt.Printf("Storage root path: %s\n", cfg.KeyStore.StorageDir)
+}
 
+func executeActionOnce(cfg RuntimeConfig, keystore *key_store.KeyStore, input io.Reader, indexedFiles []string) error {
 	var selectedTargets []string
 
 	switch cfg.Action {
 	case ActionClean:
 		removed, err := cleanupAllKDHTFiles(cfg.KeyStore.StorageDir)
 		if err != nil {
-			log.Fatalf("Failed to clean .kdht files: %v", err)
+			return fmt.Errorf("failed to clean .kdht files: %w", err)
 		}
 		fmt.Printf("Clean complete: removed %d .kdht file(s) from %s\n", removed, filepath.Join(cfg.KeyStore.StorageDir, "data"))
-		return
+		return nil
 	case ActionDeepClean:
 		result, err := deepCleanStorage(cfg.KeyStore.StorageDir)
 		if err != nil {
-			log.Fatalf("Failed to deep clean storage: %v", err)
+			return fmt.Errorf("failed to deep clean storage: %w", err)
 		}
 		fmt.Printf("Deep clean complete: removed %d .kdht, %d metadata file(s), %d cache file(s).\n",
 			result.RemovedKDHT,
 			result.RemovedMetadata,
 			result.RemovedCache,
 		)
-		return
+		return nil
+	case ActionStats:
+		if err := executeStatsAction(cfg); err != nil {
+			return fmt.Errorf("failed to collect stats: %w", err)
+		}
+		return nil
 	case ActionUpload:
-		selectedUploads, selection, err := promptUploadSelection(indexedFiles, os.Stdin, cfg)
+		selectedUploads, selection, err := promptUploadSelection(indexedFiles, input, cfg)
 		if err != nil {
-			log.Fatalf("Failed to select upload file(s): %v", err)
+			return err
 		}
 		fmt.Printf("Selection: %s\n", selection)
 
@@ -105,9 +180,9 @@ func main() {
 			selectedTargets = append(selectedTargets, filepath.Join(cfg.UploadDirectory, name))
 		}
 	case ActionStore:
-		storePath, selection, err := resolveStorePath(os.Stdin, cfg)
+		storePath, selection, err := resolveStorePath(input, cfg)
 		if err != nil {
-			log.Fatalf("Failed to resolve store path: %v", err)
+			return err
 		}
 		fmt.Printf("Selection: %s\n", selection)
 		selectedTargets = []string{storePath}
@@ -121,7 +196,7 @@ func main() {
 			}
 		}
 		if err := executeStoreTargets(cfg, keystore, selectedTargets); err != nil {
-			log.Fatalf("Upload action failed: %v", err)
+			return fmt.Errorf("upload action failed: %w", err)
 		}
 	case ActionStore:
 		if cfg.CleanCopyFiles {
@@ -130,14 +205,14 @@ func main() {
 			}
 		}
 		if err := executeStoreTargets(cfg, keystore, selectedTargets); err != nil {
-			log.Fatalf("Store action failed: %v", err)
+			return fmt.Errorf("store action failed: %w", err)
 		}
 	case ActionView:
-		if err := executeViewAction(cfg, keystore); err != nil {
-			log.Fatalf("View action failed: %v", err)
+		if err := executeViewAction(cfg, keystore, input); err != nil {
+			return fmt.Errorf("view action failed: %w", err)
 		}
 	default:
-		log.Fatalf("Unsupported action: %s", cfg.Action)
+		return fmt.Errorf("unsupported action: %s", cfg.Action)
 	}
 
 	kdhtCount, err := countKDHTFiles(cfg.KeyStore.StorageDir)
@@ -146,4 +221,13 @@ func main() {
 	} else {
 		fmt.Printf("\nStored .kdht files currently present: %d\n", kdhtCount)
 	}
+
+	return nil
+}
+
+func clearTerminalIfInteractive(input io.Reader) {
+	if !isInteractiveReader(input) {
+		return
+	}
+	fmt.Print("\033[H\033[2J")
 }

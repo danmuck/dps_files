@@ -112,6 +112,25 @@ func InitKeyStoreWithConfig(cfg KeyStoreConfig) (*KeyStore, error) {
 	return ks, nil
 }
 
+// ReloadLocalState rebuilds in-memory indexes from metadata files on disk.
+// This is useful when external cleanup or filesystem operations occur after
+// initialization (for example, deep-clean actions from CLI code paths).
+func (ks *KeyStore) ReloadLocalState() error {
+	fresh, err := InitKeyStoreWithConfig(ks.config)
+	if err != nil {
+		return fmt.Errorf("failed to reload local state: %w", err)
+	}
+
+	ks.lock.Lock()
+	defer ks.lock.Unlock()
+
+	ks.chunkIndex = fresh.chunkIndex
+	ks.files = fresh.files
+	ks.filesByName = fresh.filesByName
+
+	return nil
+}
+
 // store file to memory and write metadata toml to file system
 // NOTE: this does not store data to disk, only metadata
 func (ks *KeyStore) fileToMemory(file *File) error {

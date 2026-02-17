@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,9 @@ import (
 	"github.com/danmuck/dps_files/src/key_store"
 )
 
+var errMenuBack = errors.New("menu back")
+var errMenuExit = errors.New("menu exit")
+
 func isInteractiveInput(r *os.File) bool {
 	info, err := r.Stat()
 	if err != nil {
@@ -20,16 +24,32 @@ func isInteractiveInput(r *os.File) bool {
 	return (info.Mode() & os.ModeCharDevice) != 0
 }
 
+func isInteractiveReader(input io.Reader) bool {
+	file, ok := input.(*os.File)
+	if !ok {
+		// Non-file readers (e.g. buffered wrappers) are treated as interactive.
+		return true
+	}
+	return isInteractiveInput(file)
+}
+
+func getBufferedReader(input io.Reader) *bufio.Reader {
+	if reader, ok := input.(*bufio.Reader); ok {
+		return reader
+	}
+	return bufio.NewReader(input)
+}
+
 func promptAction(input io.Reader, cfg RuntimeConfig, indexedFiles []string, metadataCount int) (MenuAction, string, error) {
 	if cfg.ActionProvided {
 		return cfg.Action, fmt.Sprintf("%s (CLI)", cfg.Action), nil
 	}
 
-	if !isInteractiveInput(os.Stdin) {
+	if !isInteractiveReader(input) {
 		return cfg.Action, fmt.Sprintf("%s (non-interactive default)", cfg.Action), nil
 	}
 
-	reader := bufio.NewReader(input)
+	reader := getBufferedReader(input)
 	for {
 		fmt.Println("\nMain Menu")
 		fmt.Println("  1) upload (store files from upload dir)")
@@ -37,7 +57,9 @@ func promptAction(input io.Reader, cfg RuntimeConfig, indexedFiles []string, met
 		fmt.Println("  3) clean (.kdht only)")
 		fmt.Println("  4) deep clean (.kdht + metadata + cache)")
 		fmt.Println("  5) view (inspect metadata + reassemble)")
-		fmt.Printf("Choose action [1-5] (default: %s): ", cfg.Action)
+		fmt.Println("  6) stats (storage + system)")
+		fmt.Println("  e) exit")
+		fmt.Printf("Choose action [1-6 or e] (default: %s): ", cfg.Action)
 
 		line, err := reader.ReadString('\n')
 		if err != nil {
@@ -67,8 +89,12 @@ func promptAction(input io.Reader, cfg RuntimeConfig, indexedFiles []string, met
 				continue
 			}
 			return ActionView, "view", nil
+		case "6", string(ActionStats), "stat":
+			return ActionStats, "stats", nil
+		case "e", "exit", "q":
+			return "", "", errMenuExit
 		default:
-			fmt.Printf("Invalid action %q. Enter 1-5 or action name.\n", choice)
+			fmt.Printf("Invalid action %q. Enter 1-6, an action name, or e.\n", choice)
 		}
 	}
 }
@@ -87,7 +113,7 @@ func promptUploadSelection(indexedFiles []string, input io.Reader, cfg RuntimeCo
 			cfg.DefaultFileIndex, len(indexedFiles))
 	}
 
-	if !isInteractiveInput(os.Stdin) {
+	if !isInteractiveReader(input) {
 		return []string{indexedFiles[cfg.DefaultFileIndex]},
 			fmt.Sprintf("index %d (%q) [non-interactive default]", cfg.DefaultFileIndex, indexedFiles[cfg.DefaultFileIndex]), nil
 	}
@@ -97,7 +123,7 @@ func promptUploadSelection(indexedFiles []string, input io.Reader, cfg RuntimeCo
 		fmt.Printf("  %d) %s\n", idx, file)
 	}
 
-	reader := bufio.NewReader(input)
+	reader := getBufferedReader(input)
 	for {
 		fmt.Printf("\nSelect upload file [0-%d] or 'all' (default: %d): ", len(indexedFiles)-1, cfg.DefaultFileIndex)
 
@@ -114,6 +140,9 @@ func promptUploadSelection(indexedFiles []string, input io.Reader, cfg RuntimeCo
 		if choice == "" {
 			return []string{indexedFiles[cfg.DefaultFileIndex]},
 				fmt.Sprintf("index %d (%q)", cfg.DefaultFileIndex, indexedFiles[cfg.DefaultFileIndex]), nil
+		}
+		if choice == "e" {
+			return nil, "", errMenuBack
 		}
 
 		if choice == "all" || choice == "a" || choice == "*" {
@@ -141,11 +170,11 @@ func resolveStorePath(input io.Reader, cfg RuntimeConfig) (string, string, error
 		return cleaned, fmt.Sprintf("%s (CLI)", cleaned), nil
 	}
 
-	if !isInteractiveInput(os.Stdin) {
+	if !isInteractiveReader(input) {
 		return "", "", fmt.Errorf("store action requires %s PATH in non-interactive mode", STORE_PATH_FLAG)
 	}
 
-	reader := bufio.NewReader(input)
+	reader := getBufferedReader(input)
 	for {
 		fmt.Print("\nEnter file path to store: ")
 		line, err := reader.ReadString('\n')
@@ -161,6 +190,9 @@ func resolveStorePath(input io.Reader, cfg RuntimeConfig) (string, string, error
 			fmt.Println("Path cannot be empty.")
 			continue
 		}
+		if strings.EqualFold(candidate, "e") {
+			return "", "", errMenuBack
+		}
 
 		resolved := filepath.Clean(candidate)
 		return resolved, resolved, nil
@@ -172,11 +204,11 @@ func promptMetadataReassemblySelection(metadata []key_store.MetaData, input io.R
 		return nil, "none", nil
 	}
 
-	if !isInteractiveInput(os.Stdin) {
+	if !isInteractiveReader(input) {
 		return nil, "none [non-interactive]", nil
 	}
 
-	reader := bufio.NewReader(input)
+	reader := getBufferedReader(input)
 	for {
 		fmt.Printf("\nReassemble which metadata entry [0-%d], 'all', or 'none' (default: none): ", len(metadata)-1)
 		line, err := reader.ReadString('\n')
@@ -189,6 +221,8 @@ func promptMetadataReassemblySelection(metadata []key_store.MetaData, input io.R
 
 		choice := strings.ToLower(strings.TrimSpace(line))
 		switch choice {
+		case "e":
+			return nil, "", errMenuBack
 		case "", "none", "n":
 			return nil, "none", nil
 		case "all", "a", "*":
