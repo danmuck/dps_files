@@ -39,6 +39,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize keystore: %v", err)
 	}
+	fmt.Printf("KeyStore initialized: %d file(s) loaded.\n", len(keystore.ListKnownFiles()))
 
 	if cfg.CleanKDHTOnExit {
 		defer func() {
@@ -168,6 +169,14 @@ func executeActionOnce(cfg RuntimeConfig, keystore *key_store.KeyStore, input io
 			return fmt.Errorf("failed to collect stats: %w", err)
 		}
 		return nil
+	case ActionVerify:
+		return executeVerifyAction(cfg, keystore)
+	case ActionDelete:
+		return executeDeleteAction(cfg, keystore, input)
+	case ActionExpire:
+		return executeExpireAction(cfg, keystore)
+	case ActionStream:
+		return executeStreamAction(cfg, keystore, input)
 	case ActionUpload:
 		selectedUploads, selection, err := promptUploadSelection(indexedFiles, input, cfg)
 		if err != nil {

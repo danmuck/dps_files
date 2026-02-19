@@ -68,6 +68,16 @@ func (ks *KeyStore) StoreFileLocal(name string, fileData []byte) (*File, error) 
 		References: make([]*FileReference, metadata.TotalBlocks),
 	}
 
+	// Write intent before chunking so crash recovery can clean up orphans
+	if err := ks.writeIntent(metadata); err != nil {
+		return nil, fmt.Errorf("failed to write intent: %w", err)
+	}
+	defer func() {
+		if err := ks.clearIntent(metadata.FileHash); err != nil && ks.config.Verbose {
+			fmt.Printf("Warning: failed to clear intent for %x: %v\n", metadata.FileHash, err)
+		}
+	}()
+
 	// process file data into chunks
 	var totalBytesProcessed uint64 = 0
 	for i := uint32(0); i < metadata.TotalBlocks; i++ {
@@ -409,6 +419,16 @@ func (ks *KeyStore) LoadAndStoreFileLocal(localFilePath string) (*File, error) {
 		References: make([]*FileReference, metadata.TotalBlocks),
 	}
 
+	// Write intent before chunking so crash recovery can clean up orphans
+	if err := ks.writeIntent(metadata); err != nil {
+		return nil, fmt.Errorf("failed to write intent: %w", err)
+	}
+	defer func() {
+		if err := ks.clearIntent(metadata.FileHash); err != nil && ks.config.Verbose {
+			fmt.Printf("Warning: failed to clear intent for %x: %v\n", metadata.FileHash, err)
+		}
+	}()
+
 	if ks.config.Verbose {
 		fmt.Printf("Starting chunking process:\n")
 		fmt.Printf("Total size: %d bytes\n", metadata.TotalSize)
@@ -582,6 +602,16 @@ func (ks *KeyStore) LoadAndStoreFileRemote(localFilePath string, handler RemoteH
 	if metadata.BlockSize > 0 {
 		metadata.TotalBlocks = uint32((metadata.TotalSize + uint64(metadata.BlockSize) - 1) / uint64(metadata.BlockSize))
 	}
+
+	// Write intent before chunking so crash recovery can clean up orphans.
+	if err := ks.writeIntent(metadata); err != nil {
+		return nil, fmt.Errorf("failed to write intent: %w", err)
+	}
+	defer func() {
+		if err := ks.clearIntent(metadata.FileHash); err != nil && ks.config.Verbose {
+			fmt.Printf("Warning: failed to clear intent for %x: %v\n", metadata.FileHash, err)
+		}
+	}()
 
 	// Start receiver — StartReceiver launches its own goroutine internally
 	handler.StartReceiver(&metadata)

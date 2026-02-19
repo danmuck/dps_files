@@ -23,9 +23,9 @@
 
 ## Phase 4: Hardening
 
-- [ ] **4.1 Concurrent access testing** — Stress test parallel reads/writes to same KeyStore. Verify lock correctness under contention.
-- [ ] **4.2 Crash recovery** — Partial writes leave orphaned chunks. Add write-ahead intent file so recovery can complete or rollback interrupted stores.
-- [ ] **4.3 Integrity scan** — `VerifyAll() []error` reads and re-hashes every chunk on disk. Detects bit rot, returns list of corrupted chunks.
+- [x] **4.1 Concurrent access testing** — Stress test parallel reads/writes to same KeyStore. Verify lock correctness under contention.
+- [x] **4.2 Crash recovery** — Partial writes leave orphaned chunks. Add write-ahead intent file so recovery can complete or rollback interrupted stores.
+- [x] **4.3 Integrity scan** — `VerifyAll() []error` reads and re-hashes every chunk on disk. Detects bit rot, returns list of corrupted chunks.
 
 ## Phase 5: Network Integration (Future)
 

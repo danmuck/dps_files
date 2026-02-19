@@ -21,6 +21,10 @@ const (
 	ActionDeepClean MenuAction = "deep-clean"
 	ActionView      MenuAction = "view"
 	ActionStats     MenuAction = "stats"
+	ActionVerify    MenuAction = "verify"
+	ActionDelete    MenuAction = "delete"
+	ActionExpire    MenuAction = "expire"
+	ActionStream    MenuAction = "stream"
 )
 
 const defaultRuntimeTTLSeconds uint64 = 300
@@ -64,6 +68,7 @@ var defaultRuntimeConfig = defaultConfig()
 const REASSEMBLE_FLAG = "--reassemble"
 const TTL_SECONDS_FLAG = "--ttl-seconds"
 const STORE_PATH_FLAG = "--store-path"
+const VERBOSE_FLAG = "--verbose"
 
 func parseCLI(args []string, cfg RuntimeConfig) (RuntimeConfig, error) {
 	runtimeCfg := cfg
@@ -72,6 +77,11 @@ func parseCLI(args []string, cfg RuntimeConfig) (RuntimeConfig, error) {
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
+
+		if arg == VERBOSE_FLAG {
+			runtimeCfg.KeyStore.Verbose = true
+			continue
+		}
 
 		if arg == REASSEMBLE_FLAG {
 			runtimeCfg.ReassembleEnabled = true
@@ -173,6 +183,34 @@ func parseCLI(args []string, cfg RuntimeConfig) (RuntimeConfig, error) {
 			runtimeCfg.Action = ActionStats
 			runtimeCfg.ActionProvided = true
 			actionProvided = true
+		case string(ActionVerify):
+			if actionProvided {
+				return runtimeCfg, fmt.Errorf("multiple actions provided: %q", arg)
+			}
+			runtimeCfg.Action = ActionVerify
+			runtimeCfg.ActionProvided = true
+			actionProvided = true
+		case string(ActionDelete):
+			if actionProvided {
+				return runtimeCfg, fmt.Errorf("multiple actions provided: %q", arg)
+			}
+			runtimeCfg.Action = ActionDelete
+			runtimeCfg.ActionProvided = true
+			actionProvided = true
+		case string(ActionExpire):
+			if actionProvided {
+				return runtimeCfg, fmt.Errorf("multiple actions provided: %q", arg)
+			}
+			runtimeCfg.Action = ActionExpire
+			runtimeCfg.ActionProvided = true
+			actionProvided = true
+		case string(ActionStream):
+			if actionProvided {
+				return runtimeCfg, fmt.Errorf("multiple actions provided: %q", arg)
+			}
+			runtimeCfg.Action = ActionStream
+			runtimeCfg.ActionProvided = true
+			actionProvided = true
 		default:
 			return runtimeCfg, fmt.Errorf("unsupported argument %q", arg)
 		}
@@ -190,19 +228,21 @@ func printUsage(indexedFiles []string, cfg RuntimeConfig) {
 	sorted := append([]string(nil), indexedFiles...)
 	sort.Strings(sorted)
 
-	fmt.Printf("Usage: go run main.go [run|remote] [upload|store|clean|deep-clean|view|stats] [%s] [%s N] [%s PATH]\n",
+	fmt.Printf("Usage: go run main.go [run|remote] [upload|store|clean|deep-clean|view|stats|verify|delete|expire|stream] [%s] [%s] [%s N] [%s PATH]\n",
 		REASSEMBLE_FLAG,
+		VERBOSE_FLAG,
 		TTL_SECONDS_FLAG,
 		STORE_PATH_FLAG,
 	)
 	fmt.Printf("No mode defaults to %q.\n", cfg.Mode)
 	fmt.Printf("No action defaults to %q.\n", cfg.Action)
 	fmt.Printf("Reassembly defaults to disabled; enable with %q.\n", REASSEMBLE_FLAG)
+	fmt.Printf("Verbose logging defaults to disabled; enable with %q.\n", VERBOSE_FLAG)
 	fmt.Printf("Default TTL is %d seconds; override with %q.\n", cfg.TTLSeconds, TTL_SECONDS_FLAG)
 	fmt.Printf("Store action accepts a direct path via %q.\n", STORE_PATH_FLAG)
 	fmt.Printf("Reassembled copy outputs are written to %s.\n", cfg.KeyStore.StorageDir)
 	fmt.Printf("\nUpload action indexes %s and excludes directories + copy.* files.\n", cfg.UploadDirectory)
-	fmt.Println("Actions: upload (from upload dir), store (explicit filepath), clean (.kdht only), deep-clean (.kdht + metadata + cache), view (inspect metadata + optional reassemble), stats (storage/system stats).")
+	fmt.Println("Actions: upload (from upload dir), store (explicit filepath), clean (.kdht only), deep-clean (.kdht + metadata + cache), view (inspect metadata + optional reassemble), stats (storage/system stats), verify (deep integrity scan), delete (remove a single file), expire (sweep TTL-expired files), stream (stream a stored file to disk).")
 
 	if len(sorted) == 0 {
 		fmt.Println("\nNo indexable upload files were found.")

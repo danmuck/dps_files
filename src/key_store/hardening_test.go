@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -818,5 +819,418 @@ func TestLoadAndStoreFileLocalErrorInjectionCleansChunks(t *testing.T) {
 	}
 	if len(ks.chunkIndex) != 0 {
 		t.Fatalf("expected chunkIndex cleanup after failed load/store, found %d entries", len(ks.chunkIndex))
+	}
+}
+
+func TestConcurrentStores(t *testing.T) {
+	ks := newTestKeyStore(t)
+
+	const workers = 8
+	type input struct {
+		name string
+		data []byte
+		hash [HashSize]byte
+	}
+
+	inputs := make([]input, workers)
+	for i := 0; i < workers; i++ {
+		data := randomBytes(t, int(MinBlockSize)+i*37+11)
+		inputs[i] = input{
+			name: fmt.Sprintf("concurrent_store_%d.bin", i),
+			data: data,
+			hash: sha256.Sum256(data),
+		}
+	}
+
+	errCh := make(chan error, workers)
+	var wg sync.WaitGroup
+
+	for i := range inputs {
+		in := inputs[i]
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			stored, err := ks.StoreFileLocal(in.name, in.data)
+			if err != nil {
+				errCh <- fmt.Errorf("store failed for %s: %w", in.name, err)
+				return
+			}
+			if stored.MetaData.FileHash != in.hash {
+				errCh <- fmt.Errorf("hash mismatch for %s", in.name)
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		if err != nil {
+			t.Errorf("%v", err)
+		}
+	}
+
+	for _, in := range inputs {
+		file, err := ks.GetFileByName(in.name)
+		if err != nil {
+			t.Fatalf("failed to lookup %s: %v", in.name, err)
+		}
+
+		var out bytes.Buffer
+		if err := ks.StreamFile(file.MetaData.FileHash, &out); err != nil {
+			t.Fatalf("stream failed for %s: %v", in.name, err)
+		}
+		if !bytes.Equal(out.Bytes(), in.data) {
+			t.Fatalf("streamed payload mismatch for %s", in.name)
+		}
+	}
+}
+
+func TestConcurrentReads(t *testing.T) {
+	ks := newTestKeyStore(t)
+
+	data := randomBytes(t, int(MinBlockSize*3+99))
+	stored, err := ks.StoreFileLocal("concurrent_reads.bin", data)
+	if err != nil {
+		t.Fatalf("failed to seed file: %v", err)
+	}
+
+	const readers = 8
+	errCh := make(chan error, readers)
+	var wg sync.WaitGroup
+
+	for i := 0; i < readers; i++ {
+		wg.Add(1)
+		go func(readerID int) {
+			defer wg.Done()
+			var out bytes.Buffer
+			if err := ks.StreamFile(stored.MetaData.FileHash, &out); err != nil {
+				errCh <- fmt.Errorf("reader %d stream failed: %w", readerID, err)
+				return
+			}
+			if !bytes.Equal(out.Bytes(), data) {
+				errCh <- fmt.Errorf("reader %d got mismatched payload", readerID)
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		if err != nil {
+			t.Errorf("%v", err)
+		}
+	}
+}
+
+func TestConcurrentStoreAndRead(t *testing.T) {
+	ks := newTestKeyStore(t)
+
+	const (
+		storeCount = 12
+		readers    = 4
+	)
+
+	type storedInput struct {
+		name string
+		data []byte
+		hash [HashSize]byte
+	}
+
+	inputs := make([]storedInput, storeCount)
+	for i := 0; i < storeCount; i++ {
+		data := randomBytes(t, int(MinBlockSize)+i*53+7)
+		inputs[i] = storedInput{
+			name: fmt.Sprintf("mix_%d.bin", i),
+			data: data,
+			hash: sha256.Sum256(data),
+		}
+	}
+
+	errCh := make(chan error, readers+storeCount)
+	done := make(chan struct{})
+
+	var readWG sync.WaitGroup
+	for i := 0; i < readers; i++ {
+		readWG.Add(1)
+		go func(readerID int) {
+			defer readWG.Done()
+			for {
+				select {
+				case <-done:
+					return
+				default:
+				}
+
+				files := ks.ListKnownFiles()
+				for _, md := range files {
+					var out bytes.Buffer
+					if err := ks.StreamFile(md.FileHash, &out); err != nil {
+						errCh <- fmt.Errorf("reader %d stream failed: %w", readerID, err)
+						return
+					}
+					if sha256.Sum256(out.Bytes()) != md.FileHash {
+						errCh <- fmt.Errorf("reader %d hash mismatch for %s", readerID, md.FileName)
+						return
+					}
+				}
+
+				time.Sleep(2 * time.Millisecond)
+			}
+		}(i)
+	}
+
+	for _, in := range inputs {
+		if _, err := ks.StoreFileLocal(in.name, in.data); err != nil {
+			errCh <- fmt.Errorf("store failed for %s: %w", in.name, err)
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+
+	close(done)
+	readWG.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		if err != nil {
+			t.Errorf("%v", err)
+		}
+	}
+
+	for _, in := range inputs {
+		file, err := ks.GetFileByName(in.name)
+		if err != nil {
+			t.Fatalf("missing stored file %s: %v", in.name, err)
+		}
+
+		var out bytes.Buffer
+		if err := ks.StreamFile(file.MetaData.FileHash, &out); err != nil {
+			t.Fatalf("stream failed for %s: %v", in.name, err)
+		}
+		if !bytes.Equal(out.Bytes(), in.data) {
+			t.Fatalf("payload mismatch for %s", in.name)
+		}
+	}
+}
+
+func TestConcurrentDeletes(t *testing.T) {
+	ks := newTestKeyStore(t)
+
+	const workers = 8
+	type storedFile struct {
+		name string
+		hash [HashSize]byte
+	}
+
+	files := make([]storedFile, 0, workers)
+	for i := 0; i < workers; i++ {
+		name := fmt.Sprintf("delete_%d.bin", i)
+		data := randomBytes(t, int(MinBlockSize)+i*19+5)
+		stored, err := ks.StoreFileLocal(name, data)
+		if err != nil {
+			t.Fatalf("failed to seed %s: %v", name, err)
+		}
+		files = append(files, storedFile{name: name, hash: stored.MetaData.FileHash})
+	}
+
+	errCh := make(chan error, workers)
+	var wg sync.WaitGroup
+
+	for _, f := range files {
+		file := f
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := ks.DeleteFile(file.hash); err != nil {
+				errCh <- fmt.Errorf("delete failed for %s: %w", file.name, err)
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		if err != nil {
+			t.Errorf("%v", err)
+		}
+	}
+
+	for _, f := range files {
+		if _, err := ks.GetFileByHash(f.hash); err == nil {
+			t.Fatalf("expected deleted hash lookup to fail: %s", f.name)
+		}
+		if _, err := ks.GetFileByName(f.name); err == nil {
+			t.Fatalf("expected deleted name lookup to fail: %s", f.name)
+		}
+
+		var out bytes.Buffer
+		if err := ks.StreamFile(f.hash, &out); err == nil {
+			t.Fatalf("expected stream to fail for deleted file: %s", f.name)
+		}
+	}
+}
+
+func TestCrashRecoveryIntent(t *testing.T) {
+	storageDir := filepath.Join(t.TempDir(), "storage")
+	ks := newKeyStoreAt(t, storageDir)
+
+	data := randomBytes(t, int(MinBlockSize*2+101))
+	md, err := PrepareMetaData("crash_recovery.bin", data)
+	if err != nil {
+		t.Fatalf("PrepareMetaData failed: %v", err)
+	}
+	md.TTL = ks.config.DefaultTTLSeconds
+	md.FileHash = sha256.Sum256(data)
+
+	if err := ks.writeIntent(md); err != nil {
+		t.Fatalf("writeIntent failed: %v", err)
+	}
+
+	for i := uint32(0); i < md.TotalBlocks; i++ {
+		start := uint64(i) * uint64(md.BlockSize)
+		end := min(start+uint64(md.BlockSize), md.TotalSize)
+		key := computeChunkKey(md.FileHash, i)
+		path := ks.GetLocalBlockLocation(key)
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatalf("failed to create chunk dir: %v", err)
+		}
+		if err := os.WriteFile(path, data[start:end], 0644); err != nil {
+			t.Fatalf("failed to seed chunk: %v", err)
+		}
+	}
+
+	seeded, err := filepath.Glob(filepath.Join(storageDir, "data", "*.kdht"))
+	if err != nil {
+		t.Fatalf("failed to list seeded chunks: %v", err)
+	}
+	if len(seeded) == 0 {
+		t.Fatal("expected seeded orphaned chunks")
+	}
+
+	_, err = InitKeyStoreWithConfig(KeyStoreConfig{StorageDir: storageDir, Verbose: false})
+	if err != nil {
+		t.Fatalf("restart failed: %v", err)
+	}
+
+	recovered, err := filepath.Glob(filepath.Join(storageDir, "data", "*.kdht"))
+	if err != nil {
+		t.Fatalf("failed to list chunks after recovery: %v", err)
+	}
+	if len(recovered) != 0 {
+		t.Fatalf("expected orphaned chunks to be removed, found %d", len(recovered))
+	}
+
+	intents, err := filepath.Glob(filepath.Join(storageDir, ".intents", "*.json"))
+	if err != nil {
+		t.Fatalf("failed to list intent files: %v", err)
+	}
+	if len(intents) != 0 {
+		t.Fatalf("expected recovered intent files to be removed, found %d", len(intents))
+	}
+}
+
+func TestIntentRecoveryDoesNotDeleteCommittedFile(t *testing.T) {
+	storageDir := filepath.Join(t.TempDir(), "storage")
+	ks := newKeyStoreAt(t, storageDir)
+
+	data := randomBytes(t, int(MinBlockSize*2+57))
+	stored, err := ks.StoreFileLocal("committed.bin", data)
+	if err != nil {
+		t.Fatalf("StoreFileLocal failed: %v", err)
+	}
+
+	if err := ks.writeIntent(stored.MetaData); err != nil {
+		t.Fatalf("failed to seed stale intent: %v", err)
+	}
+
+	ksReloaded, err := InitKeyStoreWithConfig(KeyStoreConfig{StorageDir: storageDir, Verbose: false})
+	if err != nil {
+		t.Fatalf("restart failed: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := ksReloaded.StreamFile(stored.MetaData.FileHash, &out); err != nil {
+		t.Fatalf("committed file should still be readable: %v", err)
+	}
+	if !bytes.Equal(out.Bytes(), data) {
+		t.Fatal("reloaded committed file content mismatch")
+	}
+
+	intents, err := filepath.Glob(filepath.Join(storageDir, ".intents", "*.json"))
+	if err != nil {
+		t.Fatalf("failed to list intent files: %v", err)
+	}
+	if len(intents) != 0 {
+		t.Fatalf("expected stale intent to be removed, found %d", len(intents))
+	}
+}
+
+func TestVerifyAllDetectsCorruption(t *testing.T) {
+	ks := newTestKeyStore(t)
+
+	data := randomBytes(t, int(MinBlockSize*3+23))
+	stored, err := ks.StoreFileLocal("verify_corruption.bin", data)
+	if err != nil {
+		t.Fatalf("StoreFileLocal failed: %v", err)
+	}
+	if len(stored.References) < 3 {
+		t.Fatalf("expected at least 3 chunks, got %d", len(stored.References))
+	}
+
+	ref0 := stored.References[0]
+	corrupt0 := randomBytes(t, int(ref0.Size))
+	if err := os.WriteFile(ref0.Location, corrupt0, 0644); err != nil {
+		t.Fatalf("failed to corrupt chunk 0: %v", err)
+	}
+
+	ref1 := stored.References[1]
+	truncatedLen := int(ref1.Size / 2)
+	if truncatedLen == 0 {
+		truncatedLen = 1
+	}
+	if err := os.WriteFile(ref1.Location, randomBytes(t, truncatedLen), 0644); err != nil {
+		t.Fatalf("failed to truncate chunk 1: %v", err)
+	}
+
+	ref2 := stored.References[2]
+	if err := os.Remove(ref2.Location); err != nil {
+		t.Fatalf("failed to delete chunk 2: %v", err)
+	}
+
+	errs := ks.VerifyAll()
+	if len(errs) != 3 {
+		t.Fatalf("expected 3 integrity errors, got %d: %+v", len(errs), errs)
+	}
+
+	msgByChunk := make(map[uint32]string, len(errs))
+	for _, ce := range errs {
+		msgByChunk[ce.ChunkIndex] = ce.Err.Error()
+	}
+
+	if msg, ok := msgByChunk[0]; !ok || !strings.Contains(msg, "hash mismatch") {
+		t.Fatalf("expected hash mismatch for chunk 0, got %q", msg)
+	}
+	if msg, ok := msgByChunk[1]; !ok || !strings.Contains(msg, "size mismatch") {
+		t.Fatalf("expected size mismatch for chunk 1, got %q", msg)
+	}
+	if msg, ok := msgByChunk[2]; !ok || !strings.Contains(msg, "missing file") {
+		t.Fatalf("expected missing file for chunk 2, got %q", msg)
+	}
+}
+
+func TestVerifyAllCleanStore(t *testing.T) {
+	ks := newTestKeyStore(t)
+
+	data := randomBytes(t, int(MinBlockSize*2+17))
+	if _, err := ks.StoreFileLocal("verify_clean.bin", data); err != nil {
+		t.Fatalf("StoreFileLocal failed: %v", err)
+	}
+
+	errs := ks.VerifyAll()
+	if len(errs) != 0 {
+		t.Fatalf("expected no integrity errors, got %d: %+v", len(errs), errs)
 	}
 }

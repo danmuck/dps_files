@@ -109,6 +109,13 @@ func InitKeyStoreWithConfig(cfg KeyStoreConfig) (*KeyStore, error) {
 		}
 	}
 
+	// Recover incomplete stores from previous crashes
+	if err := ks.recoverIntents(); err != nil {
+		if ks.config.Verbose {
+			fmt.Printf("Warning: intent recovery failed: %v\n", err)
+		}
+	}
+
 	return ks, nil
 }
 

@@ -58,8 +58,12 @@ func promptAction(input io.Reader, cfg RuntimeConfig, indexedFiles []string, met
 		fmt.Println("  4) deep clean (.kdht + metadata + cache)")
 		fmt.Println("  5) view (inspect metadata + reassemble)")
 		fmt.Println("  6) stats (storage + system)")
+		fmt.Println("  7) verify (deep integrity scan of all chunks)")
+		fmt.Println("  8) delete (remove a single stored file + chunks)")
+		fmt.Println("  9) expire (sweep and remove TTL-expired files)")
+		fmt.Println(" 10) stream (stream a stored file to disk)")
 		fmt.Println("  e) exit")
-		fmt.Printf("Choose action [1-6 or e] (default: %s): ", cfg.Action)
+		fmt.Printf("Choose action [1-10 or e] (default: %s): ", cfg.Action)
 
 		line, err := reader.ReadString('\n')
 		if err != nil {
@@ -91,10 +95,26 @@ func promptAction(input io.Reader, cfg RuntimeConfig, indexedFiles []string, met
 			return ActionView, "view", nil
 		case "6", string(ActionStats), "stat":
 			return ActionStats, "stats", nil
+		case "7", string(ActionVerify):
+			return ActionVerify, "verify", nil
+		case "8", string(ActionDelete), "del":
+			if metadataCount == 0 {
+				fmt.Println("No stored files to delete.")
+				continue
+			}
+			return ActionDelete, "delete", nil
+		case "9", string(ActionExpire):
+			return ActionExpire, "expire", nil
+		case "10", string(ActionStream):
+			if metadataCount == 0 {
+				fmt.Println("No stored files to stream.")
+				continue
+			}
+			return ActionStream, "stream", nil
 		case "e", "exit", "q":
 			return "", "", errMenuExit
 		default:
-			fmt.Printf("Invalid action %q. Enter 1-6, an action name, or e.\n", choice)
+			fmt.Printf("Invalid action %q. Enter 1-10, an action name, or e.\n", choice)
 		}
 	}
 }
