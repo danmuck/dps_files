@@ -4,13 +4,13 @@ MODULE_NAME := github.com/danmuck/dps_files
 # Default target
 all: test
 
-# Run all tests
+# Run all tests: build executables, run tests, remove .build/ on success
 test:
-	clear; go test -v ./...
+	clear; $(MAKE) build && go test -v ./... && rm -rf .build/
 
-# Run tests with coverage
+# Run tests with coverage: build executables, run tests, remove .build/ on success
 test-coverage:
-	clear; go test -v ./... -cover
+	clear; $(MAKE) build && go test -v ./... -cover && rm -rf .build/
 
 # Build all main packages into .build/<name>/
 build:

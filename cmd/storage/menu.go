@@ -51,19 +51,22 @@ func promptAction(input io.Reader, cfg RuntimeConfig, indexedFiles []string, met
 
 	reader := getBufferedReader(input)
 	for {
-		fmt.Println("\nMain Menu")
-		fmt.Println("  1) upload (store files from upload dir)")
-		fmt.Println("  2) store (store explicit filepath)")
-		fmt.Println("  3) clean (.kdht only)")
-		fmt.Println("  4) deep clean (.kdht + metadata + cache)")
-		fmt.Println("  5) view (inspect metadata + reassemble)")
-		fmt.Println("  6) stats (storage + system)")
-		fmt.Println("  7) verify (deep integrity scan of all chunks)")
-		fmt.Println("  8) delete (remove a single stored file + chunks)")
-		fmt.Println("  9) expire (sweep and remove TTL-expired files)")
-		fmt.Println(" 10) stream (stream a stored file to disk)")
-		fmt.Println("  e) exit")
-		fmt.Printf("Choose action [1-10 or e] (default: %s): ", cfg.Action)
+		fmt.Println("\n   --[ dps_files ]--\n ")
+		fmt.Println("  view (inspect metadata + reassemble)")
+		fmt.Println("  store (store explicit filepath)")
+		fmt.Println("  upload (store files from upload dir)")
+		fmt.Println("  delete (remove a single stored file + chunks)")
+		fmt.Println("  stream (stream a stored file to disk)")
+		fmt.Println()
+		fmt.Println("  verify (deep integrity scan of all chunks)")
+		fmt.Println("  expire (sweep and remove TTL-expired files)")
+		fmt.Println("  clean (.kdht only)")
+		fmt.Println("  deep clean (.kdht + metadata + cache)")
+		fmt.Println()
+		fmt.Println("  stats (storage + system)")
+		fmt.Println("  exit")
+		fmt.Println()
+		fmt.Printf("Choose action (default: %s): ", cfg.Action)
 
 		line, err := reader.ReadString('\n')
 		if err != nil {
@@ -75,37 +78,37 @@ func promptAction(input io.Reader, cfg RuntimeConfig, indexedFiles []string, met
 
 		choice := strings.ToLower(strings.TrimSpace(line))
 		switch choice {
-		case "", "1", string(ActionUpload), "u":
+		case "", string(ActionUpload), "u":
 			if len(indexedFiles) == 0 {
 				fmt.Printf("No indexed files are available under %s.\n", cfg.UploadDirectory)
 				continue
 			}
 			return ActionUpload, "upload (from upload dir)", nil
-		case "2", string(ActionStore), "s":
+		case string(ActionStore), "s":
 			return ActionStore, "store (explicit filepath)", nil
-		case "3", string(ActionClean), "c":
+		case string(ActionClean), "cl":
 			return ActionClean, "clean", nil
-		case "4", string(ActionDeepClean), "deepclean", "deep_clean", "d":
+		case string(ActionDeepClean), "deepclean", "deep_clean", "dc":
 			return ActionDeepClean, "deep clean", nil
-		case "5", string(ActionView), "v":
+		case string(ActionView), "vi":
 			if metadataCount == 0 {
 				fmt.Println("No metadata entries found in storage/metadata.")
 				continue
 			}
 			return ActionView, "view", nil
-		case "6", string(ActionStats), "stat":
+		case string(ActionStats), "stat", "st":
 			return ActionStats, "stats", nil
-		case "7", string(ActionVerify):
+		case string(ActionVerify), "ve":
 			return ActionVerify, "verify", nil
-		case "8", string(ActionDelete), "del":
+		case string(ActionDelete), "del", "dl":
 			if metadataCount == 0 {
 				fmt.Println("No stored files to delete.")
 				continue
 			}
 			return ActionDelete, "delete", nil
-		case "9", string(ActionExpire):
+		case string(ActionExpire), "exp", "ex":
 			return ActionExpire, "expire", nil
-		case "10", string(ActionStream):
+		case string(ActionStream):
 			if metadataCount == 0 {
 				fmt.Println("No stored files to stream.")
 				continue
@@ -114,7 +117,20 @@ func promptAction(input io.Reader, cfg RuntimeConfig, indexedFiles []string, met
 		case "e", "exit", "q":
 			return "", "", errMenuExit
 		default:
-			fmt.Printf("Invalid action %q. Enter 1-10, an action name, or e.\n", choice)
+			fmt.Printf("Invalid action %q.\n\n", choice)
+		fmt.Println("  Action         Shorthand   Description")
+		fmt.Println("  ─────────────────────────────────────────────────────────────")
+		fmt.Println("  view           vi          inspect metadata + reassemble")
+		fmt.Println("  store          s           store explicit filepath")
+		fmt.Println("  upload         u           store files from upload dir")
+		fmt.Println("  delete         del, dl     remove a stored file + chunks")
+		fmt.Println("  stream                     stream a stored file to disk")
+		fmt.Println("  verify         ve          deep integrity scan of all chunks")
+		fmt.Println("  expire         exp, ex     sweep and remove TTL-expired files")
+		fmt.Println("  clean          cl          remove .kdht chunk files only")
+		fmt.Println("  deep clean     dc          remove .kdht + metadata + cache")
+		fmt.Println("  stats          stat, st    storage + system info")
+		fmt.Println("  exit           e, q        quit")
 		}
 	}
 }
