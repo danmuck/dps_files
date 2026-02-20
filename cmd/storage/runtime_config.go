@@ -55,7 +55,7 @@ const (
 	ActionDownload  MenuAction = "download"
 )
 
-const defaultRuntimeTTLSeconds uint64 = 300
+const defaultRuntimeTTLSeconds uint64 = 1800
 
 type RuntimeConfig struct {
 	UploadDirectory   string
@@ -87,7 +87,7 @@ func defaultConfig() RuntimeConfig {
 		ReassembleEnabled: false,
 		CleanCopyFiles:    true,
 		CleanKDHTOnExit:   false,
-		Action:            ActionUpload,
+		Action:            ActionView,
 		ActionProvided:    false,
 		StoreFilePath:     "",
 		TTLSeconds:        defaultRuntimeTTLSeconds,

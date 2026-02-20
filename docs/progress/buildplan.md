@@ -45,7 +45,8 @@
 - [x] Make startup non-destructive: `InitKeyStoreWithConfig` no longer moves/prunes metadata/cache on boot; stale local references are validated at upload-time and missing-data hashes are evicted from in-memory indexes so upload reprocesses chunks
 - [x] Add internal block-size promotion utility with `LargeFileMx` guard in `config.go` and wire it into `CalculateBlockSize`
 - [x] Restore `cmd/gen_file` default filename size-labeling (`test_<n>B|KB|MB|GB.dat`) so generated names use abbreviated units instead of raw byte-only labels
-- [ ] Fix `Cleanup` — only removes chunks tracked in memory; if the process crashed mid-store, orphaned `.kdht` files on disk are never cleaned up
+- [x] Fix `existingFileByHash` — re-upload of an expired file (TTL elapsed, chunks still on disk) now refreshes `Modified` timestamp and resets TTL to `DefaultTTLSeconds` via `fileToMemory`, so subsequent reassembly does not fail with "file expired"; all four upload paths (`StoreFileLocal`, `LoadAndStoreFileLocal`, `LoadAndStoreFileRemote`, `StoreFromReader`) are covered at the single dedup guard
+- [x] Fix `Cleanup` — scans `chunkDataDir` on disk and removes every `.kdht` file found (not just in-memory tracked chunks), covering orphaned files left by crashed mid-store operations
 
 ### Phase 1B: Testing
 - [x] Fix `TestLargeFileChunking` — now generates a 256MB test file and reuses it if present
@@ -61,6 +62,25 @@
 - [x] Add tests: startup is non-destructive and missing-data reupload works after restart — `TestInitKeyStoreDoesNotPruneStorageOnStartup`, `TestLoadAndStoreFileLocalReuploadsMissingDataAfterRestart`
 - [x] Add focused unit tests for block-size promotion utility and `LargeFileMx` threshold behavior — `TestPromoteCandidateBlockSize`
 - [x] Add `CalculateBlockSize` integration tests for promotion + large-file guard behavior — `TestCalculateBlockSizePromotionIntegration`
+- [x] Add test: re-upload of expired file refreshes TTL and permits reassembly — `TestReuploadRefreshesTTL`
+- [x] Add tests: small file parametric chunking — `TestSmallFileChunking`
+- [x] Add tests: streaming to writer — `TestStreamFile`, `TestStreamFileByName`, `TestStreamChunkRange`, `TestStreamFileDetectsCorruption`
+- [x] Add tests: filename index lookup and persistence — `TestGetFileByName`, `TestGetFileByNamePersistence`
+- [x] Add test: overwrite file by name — `TestFileByNameOverwrite`
+- [x] Add tests: KeyStoreConfig defaults and configurable TTL — `TestKeyStoreConfig`, `TestConfigurableDefaultTTL`
+- [x] Add test: chunk-loc index resolution — `TestChunkLocResolution`
+- [x] Add tests: TTL expiry, zero-TTL never-expires, CleanupExpired, DeleteFile — `TestTTLExpiry`, `TestTTLZeroNeverExpires`, `TestCleanupExpired`, `TestDeleteFile`
+- [x] Add tests: StoreFromReader success and size-mismatch error — `TestStoreFromReader`, `TestStoreFromReaderSizeMismatch`
+- [x] Add tests: ListStoredFileReferences and ListKnownFiles — `TestListStoredFileReferencesAndKnownFiles`
+- [x] Add test: ReassembleFileToPath — `TestReassembleFileToPath`
+- [x] Add test: DeleteFileReference — `TestDeleteFileReference`
+- [x] Add tests: LoadLocalFileToMemory filters missing location, LoadAllLocalFilesToMemory rebuilds indexes — `TestLoadLocalFileToMemoryFiltersMissingLocation`, `TestLoadAllLocalFilesToMemoryRebuildsIndexes`
+- [x] Add tests: CleanupKDHTAndMetaData, VerifyFileReferences moves orphan metadata to cache, MoveToCache deduplicates by hash — `TestCleanupKDHTAndMetaData`, `TestVerifyFileReferencesMovesOrphanMetadataToCache`, `TestMoveToCacheDeduplicatesByHash`
+- [x] Add tests: hash-cache skip decisions for StoreFileLocal and LoadAndStoreFileLocal — `TestStoreFileLocalSkipsWhenHashAlreadyCached`, `TestStoreFileLocalWritesCacheEntry`, `TestLoadAndStoreFileLocalSkipsWhenHashAlreadyCached`
+- [x] Add tests: utility functions, PrepareMetaDataSecure, LoadAndStoreFileRemote with default handler, string/formatting helpers — `TestUtilityFunctions`, `TestPrepareMetaDataSecure`, `TestLoadAndStoreFileRemoteWithDefaultHandler`, `TestStringAndFormattingHelpers`
+- [x] Add tests: concurrent stores, reads, store-and-read, deletes under contention — `TestConcurrentStores`, `TestConcurrentReads`, `TestConcurrentStoreAndRead`, `TestConcurrentDeletes`
+- [x] Add tests: crash-recovery intent file creation and committed-file safety — `TestCrashRecoveryIntent`, `TestIntentRecoveryDoesNotDeleteCommittedFile`
+- [x] Add tests: VerifyAll detects corruption and passes on clean store — `TestVerifyAllDetectsCorruption`, `TestVerifyAllCleanStore`
 
 ### Phase 1C: Cleanup & Performance
 - [ ] Replace all `fmt.Printf` in key_store with `log/slog` structured logging (file hash, chunk index, operation as context fields)
@@ -68,7 +88,7 @@
 - [ ] Make `PRINT_BLOCKS` a runtime field or remove progress printing from library code (move to cmd/)
 - [ ] Extract shared chunking logic from `StoreFileLocal` and `LoadAndStoreFileLocal` into a private helper to eliminate duplication
 - [ ] Add `context.Context` parameter to `StoreFileLocal` and `LoadAndStoreFileLocal` for cancellation support
-- [ ] Deduplicate: if a file with the same SHA-256 hash is already stored, return the existing `File` instead of re-chunking
+- [x] Deduplicate: `existingFileByHash` is called at the top of all store entry points (`StoreFileLocal`, `LoadAndStoreFileLocal`, `LoadAndStoreFileRemote`, `StoreFromReader`) and short-circuits chunking when the hash is already stored
 
 ---
 

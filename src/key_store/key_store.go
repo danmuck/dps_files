@@ -276,6 +276,19 @@ func (ks *KeyStore) existingFileByHash(key [HashSize]byte) (*File, bool) {
 		return nil, false
 	}
 
+	// If the file is expired, refresh its TTL and Modified timestamp so that
+	// a re-upload of the same bytes reactivates the entry without re-chunking.
+	if ks.isExpired(file) {
+		refreshed := *file
+		refreshed.MetaData.Modified = time.Now().UnixNano()
+		refreshed.MetaData.TTL = ks.config.DefaultTTLSeconds
+		if err := ks.fileToMemory(&refreshed); err == nil {
+			return &refreshed, true
+		}
+		// If persisting fails, fall through to the normal re-upload path.
+		return nil, false
+	}
+
 	fileCopy := *file
 	return &fileCopy, true
 }

@@ -61,12 +61,10 @@ func promptAction(input io.Reader, cfg *RuntimeConfig, indexedFiles []string, me
 		}
 		fmt.Printf("\n   --[ dps_files | %s ]--\n\n", modeLabel)
 		fmt.Println("  view (inspect metadata + reassemble)")
-		fmt.Println("  store (store explicit filepath)")
-		fmt.Println("  upload (store files from upload dir)")
+		fmt.Println("  store (chunk/store explicit filepath)")
+		fmt.Println("  upload (chunk/store files from upload dir)")
 		fmt.Println("  delete (remove a single stored file + chunks)")
 		fmt.Println("  download (write a stored file to disk)")
-		fmt.Println()
-		fmt.Println("  mode           m           toggle local / remote")
 		fmt.Println()
 		fmt.Println("  verify (deep integrity scan of all chunks)")
 		fmt.Println("  expire (sweep and remove TTL-expired files)")
@@ -74,6 +72,7 @@ func promptAction(input io.Reader, cfg *RuntimeConfig, indexedFiles []string, me
 		fmt.Println("  deep clean (.kdht + metadata + cache)")
 		fmt.Println()
 		fmt.Println("  stats (storage + system)")
+		fmt.Println("  mode (toggle local / remote)")
 		fmt.Println("  exit")
 		fmt.Println()
 		fmt.Printf("Choose action (default: %s): ", cfg.Action)
@@ -93,60 +92,72 @@ func promptAction(input io.Reader, cfg *RuntimeConfig, indexedFiles []string, me
 				fmt.Printf("Mode toggle: %v\n", err)
 			}
 			continue
-		case "", string(ActionUpload), "u":
-			if len(indexedFiles) == 0 {
-				fmt.Printf("No indexed files are available under %s.\n", cfg.UploadDirectory)
-				continue
-			}
-			return ActionUpload, "upload (from upload dir)", nil
-		case string(ActionStore), "s":
-			return ActionStore, "store (explicit filepath)", nil
-		case string(ActionClean), "cl":
-			return ActionClean, "clean", nil
-		case string(ActionDeepClean), "deepclean", "deep_clean", "dc":
-			return ActionDeepClean, "deep clean", nil
-		case string(ActionView), "vi":
+
+		case "", string(ActionView), "vi":
 			if cfg.Mode != ModeRemote && metadataCount == 0 {
 				fmt.Println("No metadata entries found in storage/metadata.")
 				continue
 			}
 			return ActionView, "view", nil
-		case string(ActionStats), "stat", "st":
-			return ActionStats, "stats", nil
-		case string(ActionVerify), "ve":
-			return ActionVerify, "verify", nil
-		case string(ActionDelete), "del", "dl":
-			if cfg.Mode != ModeRemote && metadataCount == 0 {
-				fmt.Println("No stored files to delete.")
+
+		case string(ActionUpload), "u", "up":
+			if len(indexedFiles) == 0 {
+				fmt.Printf("No indexed files are available under %s.\n", cfg.UploadDirectory)
 				continue
 			}
-			return ActionDelete, "delete", nil
-		case string(ActionExpire), "exp", "ex":
-			return ActionExpire, "expire", nil
-		case string(ActionDownload), "stream":
+			return ActionUpload, "upload (from upload dir)", nil
+
+		case string(ActionDownload), "dl", "down", "stream", "st":
 			if cfg.Mode != ModeRemote && metadataCount == 0 {
 				fmt.Println("No stored files to download.")
 				continue
 			}
 			return ActionDownload, "download", nil
+
+		case string(ActionStore), "s":
+			return ActionStore, "store (explicit filepath)", nil
+
+		case string(ActionDelete), "del":
+			if cfg.Mode != ModeRemote && metadataCount == 0 {
+				fmt.Println("No stored files to delete.")
+				continue
+			}
+			return ActionDelete, "delete", nil
+
+		case string(ActionVerify), "ve":
+			return ActionVerify, "verify", nil
+
+		case string(ActionExpire), "exp", "ex":
+			return ActionExpire, "expire", nil
+
+		case string(ActionClean), "cl":
+			return ActionClean, "clean", nil
+
+		case string(ActionDeepClean), "deepclean", "deep_clean", "dc", "cleand":
+			return ActionDeepClean, "deep clean", nil
+
+		case string(ActionStats), "stat":
+			return ActionStats, "stats", nil
+
 		case "e", "exit", "q":
 			return "", "", errMenuExit
+
 		default:
 			fmt.Printf("Invalid action %q.\n\n", choice)
 			fmt.Println("  Action         Shorthand   Description")
 			fmt.Println("  ─────────────────────────────────────────────────────────────")
-			fmt.Println("  view           vi          inspect metadata + reassemble")
-			fmt.Println("  store          s           store explicit filepath")
-			fmt.Println("  upload         u           store files from upload dir")
-			fmt.Println("  delete         del, dl     remove a stored file + chunks")
-			fmt.Println("  download                  write a stored file to disk (legacy alias: stream)")
-			fmt.Println("  mode           m           toggle local / remote")
-			fmt.Println("  verify         ve          deep integrity scan of all chunks")
-			fmt.Println("  expire         exp, ex     sweep and remove TTL-expired files")
-			fmt.Println("  clean          cl          remove .kdht chunk files only")
-			fmt.Println("  deep clean     dc          remove .kdht + metadata + cache")
-			fmt.Println("  stats          stat, st    storage + system info")
-			fmt.Println("  exit           e, q        quit")
+			fmt.Println("  mode           m           	toggle local / remote")
+			fmt.Println("  view           vi          	inspect metadata + reassemble")
+			fmt.Println("  upload         u, up          	store files from upload dir")
+			fmt.Println("  download       dl         		write a stored file to disk (legacy alias: stream)")
+			fmt.Println("  store          s           	store explicit filepath")
+			fmt.Println("  delete         del		     	remove a stored file + chunks")
+			fmt.Println("  verify         ve          	deep integrity scan of all chunks")
+			fmt.Println("  expire         exp, ex     	sweep and remove TTL-expired files")
+			fmt.Println("  clean          cl          	remove .kdht chunk files only")
+			fmt.Println("  deep clean     dc, cleand  	remove .kdht + metadata + cache")
+			fmt.Println("  stats          stat	   		storage + system info")
+			fmt.Println("  exit           e, q        	quit")
 		}
 	}
 }

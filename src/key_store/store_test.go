@@ -976,3 +976,50 @@ func TestStoreFileLocalAndLoadAndStoreFileLocalProduceSameKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestReuploadRefreshesTTL(t *testing.T) {
+	storageDir := filepath.Join(t.TempDir(), "storage")
+	cfg := DefaultConfig(storageDir)
+	cfg.Verbose = false
+	cfg.DefaultTTLSeconds = 1 // expire after 1 second
+
+	ks, err := InitKeyStoreWithConfig(cfg)
+	if err != nil {
+		t.Fatalf("failed to create keystore: %v", err)
+	}
+	t.Cleanup(func() { ks.Cleanup() })
+
+	data := make([]byte, 4096)
+	if _, err := rand.Read(data); err != nil {
+		t.Fatal(err)
+	}
+
+	// Initial upload
+	if _, err := ks.StoreFileLocal("refresh.dat", data); err != nil {
+		t.Fatalf("initial StoreFileLocal failed: %v", err)
+	}
+
+	// Wait for TTL to elapse
+	time.Sleep(2 * time.Second)
+
+	// Re-upload same bytes — should refresh the entry
+	reup, err := ks.StoreFileLocal("refresh.dat", data)
+	if err != nil {
+		t.Fatalf("re-upload StoreFileLocal failed: %v", err)
+	}
+
+	// Modified should be recent (within the last 5 seconds)
+	modifiedSec := reup.MetaData.Modified / 1e9
+	if time.Now().Unix()-modifiedSec > 5 {
+		t.Errorf("Modified timestamp not refreshed after re-upload: %d", reup.MetaData.Modified)
+	}
+
+	// Reassembly must succeed (file must not be considered expired)
+	got, err := ks.ReassembleFileToBytes(reup.MetaData.FileHash)
+	if err != nil {
+		t.Fatalf("ReassembleFileToBytes after re-upload failed: %v", err)
+	}
+	if string(got) != string(data) {
+		t.Error("reassembled data does not match original")
+	}
+}
