@@ -10,7 +10,62 @@ import (
 	"github.com/danmuck/dps_files/src/key_store"
 )
 
+func executeRemoteDeleteAction(cfg RuntimeConfig, input io.Reader) error {
+	client := NewFileServerClient(cfg.RemoteAddr)
+	entries, err := client.List()
+	if err != nil {
+		return fmt.Errorf("list remote files: %w", err)
+	}
+	if len(entries) == 0 {
+		fmt.Println("No files on remote server.")
+		return nil
+	}
+
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
+	fmt.Printf("\nRemote files (%d):\n", len(entries))
+	for i, e := range entries {
+		shortHash := e.Hash
+		if len(shortHash) > 16 {
+			shortHash = shortHash[:16]
+		}
+		fmt.Printf("  [%d] %s  hash: %s...  size: %s\n", i, e.Name, shortHash, formatBytes(e.Size))
+	}
+
+	reader := getBufferedReader(input)
+	for {
+		fmt.Printf("\nSelect file to delete [0-%d] (or e to cancel): ", len(entries)-1)
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return fmt.Errorf("read selection: %w", err)
+		}
+		choice := strings.TrimSpace(line)
+		if strings.EqualFold(choice, "e") {
+			return errMenuBack
+		}
+		idx, convErr := strconv.Atoi(choice)
+		if convErr != nil || idx < 0 || idx >= len(entries) {
+			fmt.Printf("Invalid selection %q.\n", choice)
+			continue
+		}
+		hash, err := hexToHash(entries[idx].Hash)
+		if err != nil {
+			return fmt.Errorf("invalid server hash for %q: %w", entries[idx].Name, err)
+		}
+		if err := client.Delete(hash); err != nil {
+			return fmt.Errorf("delete %q: %w", entries[idx].Name, err)
+		}
+		fmt.Printf("Deleted %q from remote server.\n", entries[idx].Name)
+		return nil
+	}
+}
+
 func executeDeleteAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.Reader) error {
+	if cfg.Mode == ModeRemote {
+		return executeRemoteDeleteAction(cfg, input)
+	}
 	metadata := ks.ListKnownFiles()
 	if len(metadata) == 0 {
 		fmt.Println("No stored files to delete.")

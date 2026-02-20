@@ -54,6 +54,22 @@ func executeStatsAction(cfg RuntimeConfig) error {
 	fmt.Printf("other in storage/: %s\n", formatBytes(storageStats.OtherBytes))
 	fmt.Printf("total storage/: %s\n", formatBytes(storageStats.TotalBytes))
 
+	if cfg.Mode == ModeRemote && cfg.RemoteAddr != "" {
+		fmt.Printf("\nRemote Server: %s\n", cfg.RemoteAddr)
+		client := NewFileServerClient(cfg.RemoteAddr)
+		entries, err := client.List()
+		if err != nil {
+			fmt.Printf("  Status: unreachable (%v)\n", err)
+		} else {
+			var totalSize uint64
+			for _, e := range entries {
+				totalSize += e.Size
+			}
+			fmt.Printf("  Status: reachable\n")
+			fmt.Printf("  Files: %d  Total size: %s\n", len(entries), formatBytes(totalSize))
+		}
+	}
+
 	return nil
 }
 

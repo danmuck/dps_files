@@ -11,7 +11,32 @@ import (
 	"github.com/danmuck/dps_files/src/key_store"
 )
 
+func executeRemoteViewAction(cfg RuntimeConfig) error {
+	client := NewFileServerClient(cfg.RemoteAddr)
+	entries, err := client.List()
+	if err != nil {
+		return fmt.Errorf("list remote files: %w", err)
+	}
+	if len(entries) == 0 {
+		fmt.Println("No files on remote server.")
+		return nil
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
+	fmt.Printf("\nRemote files (%d):\n", len(entries))
+	for i, e := range entries {
+		shortHash := e.Hash
+		if len(shortHash) > 16 {
+			shortHash = shortHash[:16]
+		}
+		fmt.Printf("  [%d] %-30s  hash: %s...  size: %s\n", i, e.Name, shortHash, formatBytes(e.Size))
+	}
+	return nil
+}
+
 func executeViewAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.Reader) error {
+	if cfg.Mode == ModeRemote {
+		return executeRemoteViewAction(cfg)
+	}
 	metadata := ks.ListKnownFiles()
 	if len(metadata) == 0 {
 		fmt.Println("No metadata entries found in storage.")

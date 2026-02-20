@@ -49,6 +49,16 @@ func main() {
 		}()
 	}
 
+	remotesCfg, remErr := loadRemotesConfig("./local/remotes.toml")
+	if remErr != nil {
+		log.Printf("Warning: could not load remotes config: %v", remErr)
+	} else {
+		cfg.KnownRemotes = remotesCfg.Remotes
+	}
+	if cfg.Mode == ModeRemote && cfg.RemoteAddr == "" && len(cfg.KnownRemotes) > 0 {
+		cfg.RemoteAddr = cfg.KnownRemotes[0].Address
+	}
+
 	if shouldRunInteractiveSession(cfg, os.Stdin) {
 		if err := runInteractiveSession(cfg, keystore, os.Stdin); err != nil {
 			log.Fatalf("Interactive session failed: %v", err)
@@ -61,7 +71,7 @@ func main() {
 		log.Fatalf("Failed to prepare runtime context: %v", err)
 	}
 
-	action, actionSource, err := promptAction(os.Stdin, cfg, indexedFiles, metadataCount)
+	action, actionSource, err := promptAction(os.Stdin, &cfg, indexedFiles, metadataCount)
 	if errors.Is(err, errMenuExit) {
 		return
 	}
@@ -94,7 +104,7 @@ func runInteractiveSession(cfg RuntimeConfig, keystore *key_store.KeyStore, inpu
 			return err
 		}
 
-		action, actionSource, err := promptAction(reader, cfg, indexedFiles, metadataCount)
+		action, actionSource, err := promptAction(reader, &cfg, indexedFiles, metadataCount)
 		if errors.Is(err, errMenuExit) {
 			clearTerminalIfInteractive(input)
 			fmt.Println("Exited keystore menu.")
@@ -144,6 +154,14 @@ func printRuntimeSummary(cfg RuntimeConfig, actionSource string) {
 
 func executeActionOnce(cfg RuntimeConfig, keystore *key_store.KeyStore, input io.Reader, indexedFiles []string) error {
 	var selectedTargets []string
+
+	switch cfg.Action {
+	case ActionClean, ActionDeepClean, ActionVerify, ActionExpire:
+		if cfg.Mode == ModeRemote {
+			fmt.Printf("Action %q is local-only. Switch to local mode to use it.\n", cfg.Action)
+			return nil
+		}
+	}
 
 	switch cfg.Action {
 	case ActionClean:
@@ -224,11 +242,13 @@ func executeActionOnce(cfg RuntimeConfig, keystore *key_store.KeyStore, input io
 		return fmt.Errorf("unsupported action: %s", cfg.Action)
 	}
 
-	kdhtCount, err := countKDHTFiles(cfg.KeyStore.StorageDir)
-	if err != nil {
-		log.Printf("Warning: failed to count .kdht files: %v", err)
-	} else {
-		fmt.Printf("\nStored .kdht files currently present: %d\n", kdhtCount)
+	if cfg.Mode == ModeRun {
+		kdhtCount, err := countKDHTFiles(cfg.KeyStore.StorageDir)
+		if err != nil {
+			log.Printf("Warning: failed to count .kdht files: %v", err)
+		} else {
+			fmt.Printf("\nStored .kdht files currently present: %d\n", kdhtCount)
+		}
 	}
 
 	return nil

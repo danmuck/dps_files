@@ -58,8 +58,17 @@ func executeStoreTargets(cfg RuntimeConfig, ks *key_store.KeyStore, filePaths []
 		case ModeRun:
 			file, err = ks.LoadAndStoreFileLocal(sourcePath)
 		case ModeRemote:
-			rh := key_store.DefaultRemoteHandler{}
-			file, err = ks.LoadAndStoreFileRemote(sourcePath, &rh)
+			if cfg.RemoteAddr == "" {
+				return fmt.Errorf("remote mode requires an address; use %s or toggle mode in the menu", REMOTE_ADDR_FLAG)
+			}
+			client := NewFileServerClient(cfg.RemoteAddr)
+			client.Timeout = 0 // no deadline for large uploads
+			hash, uploadErr := client.Upload(sourcePath)
+			if uploadErr != nil {
+				return fmt.Errorf("remote upload %s: %w", sourcePath, uploadErr)
+			}
+			fmt.Printf("Remote upload complete. Server hash: %x\n", hash)
+			continue
 		default:
 			return fmt.Errorf("unsupported mode %q", cfg.Mode)
 		}

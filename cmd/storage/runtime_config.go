@@ -2,12 +2,40 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/BurntSushi/toml"
 	"github.com/danmuck/dps_files/src/key_store"
 )
+
+// RemoteEntry represents a named remote fileserver address in local/remotes.toml.
+type RemoteEntry struct {
+	Name    string `toml:"name"`
+	Address string `toml:"address"`
+}
+
+// RemotesConfig is the top-level struct for local/remotes.toml.
+type RemotesConfig struct {
+	Remotes []RemoteEntry `toml:"remotes"`
+}
+
+// loadRemotesConfig reads local/remotes.toml, creating a default file if absent.
+func loadRemotesConfig(path string) (RemotesConfig, error) {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		defaultContent := "[[remotes]]\nname    = \"localhost\"\naddress = \"localhost:9000\"\n"
+		if err := os.WriteFile(path, []byte(defaultContent), 0o644); err != nil {
+			return RemotesConfig{}, fmt.Errorf("create default remotes.toml: %w", err)
+		}
+	}
+	var cfg RemotesConfig
+	if _, err := toml.DecodeFile(path, &cfg); err != nil {
+		return RemotesConfig{}, fmt.Errorf("decode %s: %w", path, err)
+	}
+	return cfg, nil
+}
 
 type MenuAction string
 
@@ -42,6 +70,8 @@ type RuntimeConfig struct {
 	StoreFilePath     string
 	TTLSeconds        uint64
 	KeyStore          key_store.KeyStoreConfig
+	RemoteAddr        string        // active remote host:port
+	KnownRemotes      []RemoteEntry // loaded from local/remotes.toml
 }
 
 func defaultConfig() RuntimeConfig {
@@ -69,6 +99,7 @@ const REASSEMBLE_FLAG = "--reassemble"
 const TTL_SECONDS_FLAG = "--ttl-seconds"
 const STORE_PATH_FLAG = "--store-path"
 const VERBOSE_FLAG = "--verbose"
+const REMOTE_ADDR_FLAG = "--remote-addr"
 
 func parseCLI(args []string, cfg RuntimeConfig) (RuntimeConfig, error) {
 	runtimeCfg := cfg
@@ -130,6 +161,20 @@ func parseCLI(args []string, cfg RuntimeConfig) (RuntimeConfig, error) {
 
 		if after, ok := strings.CutPrefix(arg, STORE_PATH_FLAG+"="); ok {
 			runtimeCfg.StoreFilePath = strings.TrimSpace(after)
+			continue
+		}
+
+		if arg == REMOTE_ADDR_FLAG {
+			if i+1 >= len(args) {
+				return runtimeCfg, fmt.Errorf("missing value after %q", REMOTE_ADDR_FLAG)
+			}
+			i++
+			runtimeCfg.RemoteAddr = strings.TrimSpace(args[i])
+			continue
+		}
+
+		if after, ok := strings.CutPrefix(arg, REMOTE_ADDR_FLAG+"="); ok {
+			runtimeCfg.RemoteAddr = strings.TrimSpace(after)
 			continue
 		}
 

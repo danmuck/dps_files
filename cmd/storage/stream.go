@@ -12,7 +12,67 @@ import (
 	"github.com/danmuck/dps_files/src/key_store"
 )
 
+func executeRemoteStreamAction(cfg RuntimeConfig, input io.Reader) error {
+	client := NewFileServerClient(cfg.RemoteAddr)
+	client.Timeout = 0 // no deadline for large downloads
+
+	entries, err := client.List()
+	if err != nil {
+		return fmt.Errorf("list remote files: %w", err)
+	}
+	if len(entries) == 0 {
+		fmt.Println("No files on remote server.")
+		return nil
+	}
+
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
+	fmt.Printf("\nRemote files (%d):\n", len(entries))
+	for i, e := range entries {
+		shortHash := e.Hash
+		if len(shortHash) > 16 {
+			shortHash = shortHash[:16]
+		}
+		fmt.Printf("  [%d] %s  hash: %s...  size: %s\n", i, e.Name, shortHash, formatBytes(e.Size))
+	}
+
+	reader := getBufferedReader(input)
+	var selected RemoteFileEntry
+	for {
+		fmt.Printf("\nSelect file to download [0-%d] (or e to cancel): ", len(entries)-1)
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return fmt.Errorf("read selection: %w", err)
+		}
+		choice := strings.TrimSpace(line)
+		if strings.EqualFold(choice, "e") {
+			return errMenuBack
+		}
+		idx, convErr := strconv.Atoi(choice)
+		if convErr != nil || idx < 0 || idx >= len(entries) {
+			fmt.Printf("Invalid selection %q.\n", choice)
+			continue
+		}
+		selected = entries[idx]
+		break
+	}
+
+	outputPath := copyOutputPath(cfg.KeyStore.StorageDir, selected.Name)
+	fmt.Printf("\nDownloading %q to %s\n", selected.Name, outputPath)
+	written, err := client.Download(selected.Name, outputPath)
+	if err != nil {
+		return fmt.Errorf("download %q: %w", selected.Name, err)
+	}
+	fmt.Printf("Downloaded %s to %s\n", formatBytes(written), outputPath)
+	return nil
+}
+
 func executeStreamAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.Reader) error {
+	if cfg.Mode == ModeRemote {
+		return executeRemoteStreamAction(cfg, input)
+	}
 	metadata := ks.ListKnownFiles()
 	if len(metadata) == 0 {
 		fmt.Println("No stored files to stream.")
