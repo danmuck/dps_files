@@ -76,17 +76,12 @@ func readErrorFrame(conn net.Conn) string {
 }
 
 // Upload sends localPath to the fileserver and returns the server-assigned SHA-256 hash.
+// r may be nil; if non-nil it is used as the data source instead of opening localPath.
 // Use Timeout=0 for large files so no deadline fires mid-transfer.
-func (c *FileServerClient) Upload(localPath string) ([32]byte, error) {
+func (c *FileServerClient) Upload(localPath string, r io.Reader) ([32]byte, error) {
 	var hash [32]byte
 
-	f, err := os.Open(localPath)
-	if err != nil {
-		return hash, fmt.Errorf("open %s: %w", localPath, err)
-	}
-	defer f.Close()
-
-	info, err := f.Stat()
+	info, err := os.Stat(localPath)
 	if err != nil {
 		return hash, fmt.Errorf("stat %s: %w", localPath, err)
 	}
@@ -112,7 +107,16 @@ func (c *FileServerClient) Upload(localPath string) ([32]byte, error) {
 	}
 
 	// Stream file data raw (not framed) after the header frame.
-	if _, err := io.Copy(conn, f); err != nil {
+	src := r
+	if src == nil {
+		f, openErr := os.Open(localPath)
+		if openErr != nil {
+			return hash, fmt.Errorf("open %s: %w", localPath, openErr)
+		}
+		defer f.Close()
+		src = f
+	}
+	if _, err := io.Copy(conn, src); err != nil {
 		return hash, fmt.Errorf("stream file data: %w", err)
 	}
 
@@ -174,8 +178,9 @@ func (c *FileServerClient) List() ([]RemoteFileEntry, error) {
 }
 
 // Download fetches a file by name from the fileserver and writes it to outputPath.
+// pw may be nil; if non-nil it receives a copy of each byte written for progress tracking.
 // Returns the number of bytes written.
-func (c *FileServerClient) Download(name, outputPath string) (uint64, error) {
+func (c *FileServerClient) Download(name, outputPath string, pw *progressWriter) (uint64, error) {
 	conn, err := c.dial()
 	if err != nil {
 		return 0, err
@@ -216,7 +221,11 @@ func (c *FileServerClient) Download(name, outputPath string) (uint64, error) {
 	}
 	defer outF.Close()
 
-	written, err := io.Copy(outF, io.LimitReader(conn, int64(fileSize)))
+	dst := io.Writer(outF)
+	if pw != nil {
+		dst = io.MultiWriter(outF, pw)
+	}
+	written, err := io.Copy(dst, io.LimitReader(conn, int64(fileSize)))
 	if err != nil {
 		return 0, fmt.Errorf("download stream: %w", err)
 	}

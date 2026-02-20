@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/danmuck/dps_files/src/key_store"
 )
@@ -61,11 +62,32 @@ func executeRemoteStreamAction(cfg RuntimeConfig, input io.Reader) error {
 
 	outputPath := copyOutputPath(cfg.KeyStore.StorageDir, selected.Name)
 	fmt.Printf("\nDownloading %q to %s\n", selected.Name, outputPath)
-	written, err := client.Download(selected.Name, outputPath)
-	if err != nil {
-		return fmt.Errorf("download %q: %w", selected.Name, err)
+
+	showBar := !cfg.KeyStore.Verbose
+	summary := OpSummary{
+		Operation: "remote-download",
+		FileName:  selected.Name,
+		FileSize:  selected.Size,
+		StartedAt: time.Now(),
 	}
+
+	pw := newProgressWriter(io.Discard, selected.Size, "download", showBar)
+	summary.Timer.Start("download")
+	written, downloadErr := client.Download(selected.Name, outputPath, pw)
+	pw.Finish()
+	summary.Timer.Stop(downloadErr != nil)
+
+	summary.Bytes = written
+	if downloadErr != nil {
+		summary.Err = downloadErr
+		renderSummary(summary)
+		writeOpLog(summary)
+		return fmt.Errorf("download %q: %w", selected.Name, downloadErr)
+	}
+
 	fmt.Printf("Downloaded %s to %s\n", formatBytes(written), outputPath)
+	renderSummary(summary)
+	writeOpLog(summary)
 	return nil
 }
 
@@ -157,6 +179,18 @@ func executeStreamAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.Rea
 			fmt.Println("Expected two numbers; streaming full file instead.")
 		}
 	}
+	if useRange {
+		effectiveEnd := chunkEnd
+		if effectiveEnd == 0 || effectiveEnd > totalChunks {
+			effectiveEnd = totalChunks
+		}
+		if chunkStart >= effectiveEnd {
+			fmt.Printf("Invalid range [%d, %d); streaming full file instead.\n", chunkStart, chunkEnd)
+			useRange = false
+		} else {
+			chunkEnd = effectiveEnd
+		}
+	}
 
 	// Resolve output path
 	outputPath := copyOutputPath(cfg.KeyStore.StorageDir, selectedMD.FileName)
@@ -177,20 +211,54 @@ func executeStreamAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.Rea
 	}
 	defer f.Close()
 
-	if useRange {
-		fmt.Printf("\nStreaming chunks [%d, %d) of %q to %s\n", chunkStart, chunkEnd, selectedMD.FileName, outputPath)
-		written, err := ks.StreamChunkRange(selectedMD.FileHash, chunkStart, chunkEnd, f)
-		if err != nil {
-			return fmt.Errorf("stream failed: %w", err)
-		}
-		fmt.Printf("Streamed %s to %s\n", formatBytes(written), outputPath)
-	} else {
-		fmt.Printf("\nStreaming %q to %s\n", selectedMD.FileName, outputPath)
-		if err := ks.StreamFile(selectedMD.FileHash, f); err != nil {
-			return fmt.Errorf("stream failed: %w", err)
-		}
-		fmt.Printf("Streamed %s to %s\n", formatBytes(selectedMD.TotalSize), outputPath)
+	showBar := !cfg.KeyStore.Verbose
+	summary := OpSummary{
+		Operation: "local-stream",
+		FileName:  selectedMD.FileName,
+		FileSize:  selectedMD.TotalSize,
+		StartedAt: time.Now(),
 	}
 
+	// Estimate total bytes for progress bar
+	var streamTotal uint64
+	if useRange {
+		streamTotal = uint64(chunkEnd-chunkStart) * uint64(selectedMD.BlockSize)
+	} else {
+		streamTotal = selectedMD.TotalSize
+	}
+
+	pw := newProgressWriter(f, streamTotal, "stream", showBar)
+
+	summary.Timer.Start("stream")
+	if useRange {
+		fmt.Printf("\nStreaming chunks [%d, %d) of %q to %s\n", chunkStart, chunkEnd, selectedMD.FileName, outputPath)
+		_, streamErr := ks.StreamChunkRange(selectedMD.FileHash, chunkStart, chunkEnd, pw)
+		pw.Finish()
+		summary.Timer.Stop(streamErr != nil)
+		summary.Bytes = pw.Written()
+		if streamErr != nil {
+			summary.Err = streamErr
+			renderSummary(summary)
+			writeOpLog(summary)
+			return fmt.Errorf("stream failed: %w", streamErr)
+		}
+		fmt.Printf("Streamed %s to %s\n", formatBytes(summary.Bytes), outputPath)
+	} else {
+		fmt.Printf("\nStreaming %q to %s\n", selectedMD.FileName, outputPath)
+		streamErr := ks.StreamFile(selectedMD.FileHash, pw)
+		pw.Finish()
+		summary.Timer.Stop(streamErr != nil)
+		summary.Bytes = pw.Written()
+		if streamErr != nil {
+			summary.Err = streamErr
+			renderSummary(summary)
+			writeOpLog(summary)
+			return fmt.Errorf("stream failed: %w", streamErr)
+		}
+		fmt.Printf("Streamed %s to %s\n", formatBytes(summary.Bytes), outputPath)
+	}
+
+	renderSummary(summary)
+	writeOpLog(summary)
 	return nil
 }
