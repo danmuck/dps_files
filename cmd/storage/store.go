@@ -56,9 +56,21 @@ func executeStoreTargets(cfg RuntimeConfig, ks *key_store.KeyStore, filePaths []
 		if cfg.Mode == ModeRemote {
 			summary.Operation = "remote-upload"
 		}
+		phaseTotal := 2
+		if cfg.Mode == ModeRun {
+			phaseTotal = 3
+			if cfg.ReassembleEnabled {
+				phaseTotal = 5
+			}
+		}
+		phaseIndex := 0
+		startPhase := func(phaseName, stageLabel string) {
+			phaseIndex++
+			beginPhase(&summary.Timer, summary.Operation, phaseName, stageLabel, phaseIndex, phaseTotal)
+		}
 
 		// Phase: hash
-		summary.Timer.Start("hash")
+		startPhase("hash", "hash source file")
 		originalHash, originalSize, err := key_store.HashFile(sourcePath)
 		summary.Timer.Stop(err != nil)
 		if err != nil {
@@ -85,7 +97,7 @@ func executeStoreTargets(cfg RuntimeConfig, ks *key_store.KeyStore, filePaths []
 		switch cfg.Mode {
 		case ModeRun:
 			// Phase: chunk+store
-			summary.Timer.Start("chunk+store")
+			startPhase("chunk+store", "chunk and store local blocks")
 			file, err = ks.LoadAndStoreFileLocal(sourcePath)
 			summary.Timer.Stop(err != nil)
 
@@ -108,7 +120,7 @@ func executeStoreTargets(cfg RuntimeConfig, ks *key_store.KeyStore, filePaths []
 			client := NewFileServerClient(cfg.RemoteAddr)
 			client.Timeout = 0 // no deadline for large uploads
 
-			summary.Timer.Start("upload")
+			startPhase("upload", "upload file bytes to remote server")
 			hash, uploadErr := client.Upload(sourcePath, pr)
 			pr.Finish()
 			f.Close()
@@ -172,7 +184,7 @@ func executeStoreTargets(cfg RuntimeConfig, ks *key_store.KeyStore, filePaths []
 		}
 
 		// Phase: verify
-		summary.Timer.Start("verify")
+		startPhase("verify", "verify stored chunks")
 		verifyErr := verifyChunks(ks, file)
 		summary.Timer.Stop(verifyErr != nil)
 		if verifyErr != nil {
@@ -200,7 +212,7 @@ func executeStoreTargets(cfg RuntimeConfig, ks *key_store.KeyStore, filePaths []
 		fmt.Printf("\nReassembling file to: %s\n", outputPath)
 
 		// Phase: reassemble
-		summary.Timer.Start("reassemble")
+		startPhase("reassemble", "reassemble output file")
 		reassembleErr := ks.ReassembleFileToPath(file.MetaData.FileHash, outputPath)
 		summary.Timer.Stop(reassembleErr != nil)
 		if reassembleErr != nil {
@@ -211,7 +223,7 @@ func executeStoreTargets(cfg RuntimeConfig, ks *key_store.KeyStore, filePaths []
 		}
 
 		// Phase: hash-check
-		summary.Timer.Start("hash-check")
+		startPhase("hash-check", "hash-check reassembled output")
 		reassembledHash, length, err := key_store.HashFile(outputPath)
 		summary.Timer.Stop(err != nil)
 		if err != nil {

@@ -13,7 +13,7 @@ import (
 	"github.com/danmuck/dps_files/src/key_store"
 )
 
-func executeRemoteStreamAction(cfg RuntimeConfig, input io.Reader) error {
+func executeRemoteDownloadAction(cfg RuntimeConfig, input io.Reader) error {
 	client := NewFileServerClient(cfg.RemoteAddr)
 	client.Timeout = 0 // no deadline for large downloads
 
@@ -72,7 +72,7 @@ func executeRemoteStreamAction(cfg RuntimeConfig, input io.Reader) error {
 	}
 
 	pw := newProgressWriter(io.Discard, selected.Size, "download", showBar)
-	summary.Timer.Start("download")
+	beginPhase(&summary.Timer, summary.Operation, "download", "download file bytes from remote server", 1, 1)
 	written, downloadErr := client.Download(selected.Name, outputPath, pw)
 	pw.Finish()
 	summary.Timer.Stop(downloadErr != nil)
@@ -91,13 +91,13 @@ func executeRemoteStreamAction(cfg RuntimeConfig, input io.Reader) error {
 	return nil
 }
 
-func executeStreamAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.Reader) error {
+func executeDownloadAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.Reader) error {
 	if cfg.Mode == ModeRemote {
-		return executeRemoteStreamAction(cfg, input)
+		return executeRemoteDownloadAction(cfg, input)
 	}
 	metadata := ks.ListKnownFiles()
 	if len(metadata) == 0 {
-		fmt.Println("No stored files to stream.")
+		fmt.Println("No stored files to download.")
 		return nil
 	}
 
@@ -124,7 +124,7 @@ func executeStreamAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.Rea
 	// Select file
 	var selectedMD key_store.MetaData
 	for {
-		fmt.Printf("\nSelect file to stream [0-%d] (or e to cancel): ", len(metadata)-1)
+		fmt.Printf("\nSelect file to download [0-%d] (or e to cancel): ", len(metadata)-1)
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			if err == io.EOF {
@@ -169,14 +169,14 @@ func executeStreamAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.Rea
 			start64, e1 := strconv.ParseUint(parts[0], 10, 32)
 			end64, e2 := strconv.ParseUint(parts[1], 10, 32)
 			if e1 != nil || e2 != nil {
-				fmt.Println("Invalid range; streaming full file instead.")
+				fmt.Println("Invalid range; downloading full file instead.")
 			} else {
 				chunkStart = uint32(start64)
 				chunkEnd = uint32(end64)
 				useRange = true
 			}
 		} else {
-			fmt.Println("Expected two numbers; streaming full file instead.")
+			fmt.Println("Expected two numbers; downloading full file instead.")
 		}
 	}
 	if useRange {
@@ -185,7 +185,7 @@ func executeStreamAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.Rea
 			effectiveEnd = totalChunks
 		}
 		if chunkStart >= effectiveEnd {
-			fmt.Printf("Invalid range [%d, %d); streaming full file instead.\n", chunkStart, chunkEnd)
+			fmt.Printf("Invalid range [%d, %d); downloading full file instead.\n", chunkStart, chunkEnd)
 			useRange = false
 		} else {
 			chunkEnd = effectiveEnd
@@ -213,7 +213,7 @@ func executeStreamAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.Rea
 
 	showBar := !cfg.KeyStore.Verbose
 	summary := OpSummary{
-		Operation: "local-stream",
+		Operation: "local-download",
 		FileName:  selectedMD.FileName,
 		FileSize:  selectedMD.TotalSize,
 		StartedAt: time.Now(),
@@ -227,35 +227,39 @@ func executeStreamAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.Rea
 		streamTotal = selectedMD.TotalSize
 	}
 
-	pw := newProgressWriter(f, streamTotal, "stream", showBar)
+	pw := newProgressWriter(f, streamTotal, "download", showBar)
 
-	summary.Timer.Start("stream")
+	stageLabel := "download full file to output path"
 	if useRange {
-		fmt.Printf("\nStreaming chunks [%d, %d) of %q to %s\n", chunkStart, chunkEnd, selectedMD.FileName, outputPath)
-		_, streamErr := ks.StreamChunkRange(selectedMD.FileHash, chunkStart, chunkEnd, pw)
+		stageLabel = "download selected chunk range to output path"
+	}
+	beginPhase(&summary.Timer, summary.Operation, "download", stageLabel, 1, 1)
+	if useRange {
+		fmt.Printf("\nDownloading chunks [%d, %d) of %q to %s\n", chunkStart, chunkEnd, selectedMD.FileName, outputPath)
+		_, downloadErr := ks.StreamChunkRange(selectedMD.FileHash, chunkStart, chunkEnd, pw)
 		pw.Finish()
-		summary.Timer.Stop(streamErr != nil)
+		summary.Timer.Stop(downloadErr != nil)
 		summary.Bytes = pw.Written()
-		if streamErr != nil {
-			summary.Err = streamErr
+		if downloadErr != nil {
+			summary.Err = downloadErr
 			renderSummary(summary)
 			writeOpLog(summary)
-			return fmt.Errorf("stream failed: %w", streamErr)
+			return fmt.Errorf("download failed: %w", downloadErr)
 		}
-		fmt.Printf("Streamed %s to %s\n", formatBytes(summary.Bytes), outputPath)
+		fmt.Printf("Downloaded %s to %s\n", formatBytes(summary.Bytes), outputPath)
 	} else {
-		fmt.Printf("\nStreaming %q to %s\n", selectedMD.FileName, outputPath)
-		streamErr := ks.StreamFile(selectedMD.FileHash, pw)
+		fmt.Printf("\nDownloading %q to %s\n", selectedMD.FileName, outputPath)
+		downloadErr := ks.StreamFile(selectedMD.FileHash, pw)
 		pw.Finish()
-		summary.Timer.Stop(streamErr != nil)
+		summary.Timer.Stop(downloadErr != nil)
 		summary.Bytes = pw.Written()
-		if streamErr != nil {
-			summary.Err = streamErr
+		if downloadErr != nil {
+			summary.Err = downloadErr
 			renderSummary(summary)
 			writeOpLog(summary)
-			return fmt.Errorf("stream failed: %w", streamErr)
+			return fmt.Errorf("download failed: %w", downloadErr)
 		}
-		fmt.Printf("Streamed %s to %s\n", formatBytes(summary.Bytes), outputPath)
+		fmt.Printf("Downloaded %s to %s\n", formatBytes(summary.Bytes), outputPath)
 	}
 
 	renderSummary(summary)

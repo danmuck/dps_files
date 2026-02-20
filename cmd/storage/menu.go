@@ -13,7 +13,6 @@ import (
 	"github.com/danmuck/dps_files/src/key_store"
 )
 
-
 var errMenuBack = errors.New("menu back")
 var errMenuExit = errors.New("menu exit")
 
@@ -65,7 +64,7 @@ func promptAction(input io.Reader, cfg *RuntimeConfig, indexedFiles []string, me
 		fmt.Println("  store (store explicit filepath)")
 		fmt.Println("  upload (store files from upload dir)")
 		fmt.Println("  delete (remove a single stored file + chunks)")
-		fmt.Println("  stream (stream a stored file to disk)")
+		fmt.Println("  download (write a stored file to disk)")
 		fmt.Println()
 		fmt.Println("  mode           m           toggle local / remote")
 		fmt.Println()
@@ -124,12 +123,12 @@ func promptAction(input io.Reader, cfg *RuntimeConfig, indexedFiles []string, me
 			return ActionDelete, "delete", nil
 		case string(ActionExpire), "exp", "ex":
 			return ActionExpire, "expire", nil
-		case string(ActionStream):
+		case string(ActionDownload), "stream":
 			if cfg.Mode != ModeRemote && metadataCount == 0 {
-				fmt.Println("No stored files to stream.")
+				fmt.Println("No stored files to download.")
 				continue
 			}
-			return ActionStream, "stream", nil
+			return ActionDownload, "download", nil
 		case "e", "exit", "q":
 			return "", "", errMenuExit
 		default:
@@ -140,7 +139,7 @@ func promptAction(input io.Reader, cfg *RuntimeConfig, indexedFiles []string, me
 			fmt.Println("  store          s           store explicit filepath")
 			fmt.Println("  upload         u           store files from upload dir")
 			fmt.Println("  delete         del, dl     remove a stored file + chunks")
-			fmt.Println("  stream                     stream a stored file to disk")
+			fmt.Println("  download                  write a stored file to disk (legacy alias: stream)")
 			fmt.Println("  mode           m           toggle local / remote")
 			fmt.Println("  verify         ve          deep integrity scan of all chunks")
 			fmt.Println("  expire         exp, ex     sweep and remove TTL-expired files")

@@ -55,9 +55,15 @@ func (pt *PhaseTimer) Phases() []PhaseRecord {
 	return pt.phases
 }
 
+// beginPhase prints the current operation stage and starts timing that phase.
+func beginPhase(timer *PhaseTimer, operation, phaseName, stageLabel string, stageIndex, stageTotal int) {
+	fmt.Printf("\n[%s] Stage %d/%d: %s\n", operation, stageIndex, stageTotal, stageLabel)
+	timer.Start(phaseName)
+}
+
 // OpSummary holds the result of an operation for display and logging.
 type OpSummary struct {
-	Operation string // "local-store", "remote-upload", "local-stream", "remote-download"
+	Operation string // "local-store", "remote-upload", "local-download", "remote-download"
 	FileName  string
 	FileSize  uint64
 	Bytes     uint64 // bytes transferred

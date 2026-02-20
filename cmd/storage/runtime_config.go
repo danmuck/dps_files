@@ -52,7 +52,7 @@ const (
 	ActionVerify    MenuAction = "verify"
 	ActionDelete    MenuAction = "delete"
 	ActionExpire    MenuAction = "expire"
-	ActionStream    MenuAction = "stream"
+	ActionDownload  MenuAction = "download"
 )
 
 const defaultRuntimeTTLSeconds uint64 = 300
@@ -76,6 +76,8 @@ type RuntimeConfig struct {
 
 func defaultConfig() RuntimeConfig {
 	ksCfg := key_store.DefaultConfig("./local/storage")
+	// CLI default: progress bars on, chunk-level keystore debug output off.
+	ksCfg.Verbose = false
 	ksCfg.DefaultTTLSeconds = defaultRuntimeTTLSeconds
 	return RuntimeConfig{
 		UploadDirectory:   "./local/upload/",
@@ -249,11 +251,11 @@ func parseCLI(args []string, cfg RuntimeConfig) (RuntimeConfig, error) {
 			runtimeCfg.Action = ActionExpire
 			runtimeCfg.ActionProvided = true
 			actionProvided = true
-		case string(ActionStream):
+		case string(ActionDownload), "stream":
 			if actionProvided {
 				return runtimeCfg, fmt.Errorf("multiple actions provided: %q", arg)
 			}
-			runtimeCfg.Action = ActionStream
+			runtimeCfg.Action = ActionDownload
 			runtimeCfg.ActionProvided = true
 			actionProvided = true
 		default:
@@ -273,7 +275,7 @@ func printUsage(indexedFiles []string, cfg RuntimeConfig) {
 	sorted := append([]string(nil), indexedFiles...)
 	sort.Strings(sorted)
 
-	fmt.Printf("Usage: go run main.go [run|remote] [upload|store|clean|deep-clean|view|stats|verify|delete|expire|stream] [%s] [%s] [%s N] [%s PATH]\n",
+	fmt.Printf("Usage: go run main.go [run|remote] [upload|store|clean|deep-clean|view|stats|verify|delete|expire|download] [%s] [%s] [%s N] [%s PATH]\n",
 		REASSEMBLE_FLAG,
 		VERBOSE_FLAG,
 		TTL_SECONDS_FLAG,
@@ -287,7 +289,7 @@ func printUsage(indexedFiles []string, cfg RuntimeConfig) {
 	fmt.Printf("Store action accepts a direct path via %q.\n", STORE_PATH_FLAG)
 	fmt.Printf("Reassembled copy outputs are written to %s.\n", cfg.KeyStore.StorageDir)
 	fmt.Printf("\nUpload action indexes %s and excludes directories + copy.* files.\n", cfg.UploadDirectory)
-	fmt.Println("Actions: upload (from upload dir), store (explicit filepath), clean (.kdht only), deep-clean (.kdht + metadata + cache), view (inspect metadata + optional reassemble), stats (storage/system stats), verify (deep integrity scan), delete (remove a single file), expire (sweep TTL-expired files), stream (stream a stored file to disk).")
+	fmt.Println("Actions: upload (from upload dir), store (explicit filepath), clean (.kdht only), deep-clean (.kdht + metadata + cache), view (inspect metadata + optional reassemble), stats (storage/system stats), verify (deep integrity scan), delete (remove a single file), expire (sweep TTL-expired files), download (write stored file to disk; legacy alias: stream).")
 
 	if len(sorted) == 0 {
 		fmt.Println("\nNo indexable upload files were found.")

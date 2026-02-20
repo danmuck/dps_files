@@ -193,8 +193,8 @@ func executeActionOnce(cfg RuntimeConfig, keystore *key_store.KeyStore, input io
 		return executeDeleteAction(cfg, keystore, input)
 	case ActionExpire:
 		return executeExpireAction(cfg, keystore)
-	case ActionStream:
-		return executeStreamAction(cfg, keystore, input)
+	case ActionDownload:
+		return executeDownloadAction(cfg, keystore, input)
 	case ActionUpload:
 		selectedUploads, selection, err := promptUploadSelection(indexedFiles, input, cfg)
 		if err != nil {
