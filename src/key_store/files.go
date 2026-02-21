@@ -1,6 +1,7 @@
 package key_store
 
 import (
+	"bytes"
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/binary"
@@ -23,6 +24,72 @@ func computeChunkKey(fileHash [HashSize]byte, chunkIndex uint32) [KeySize]byte {
 	copy(buf[:HashSize], fileHash[:])
 	binary.LittleEndian.PutUint64(buf[HashSize:], uint64(chunkIndex))
 	return sha1.Sum(buf)
+}
+
+// cleanupChunks deletes stored chunks for rollback on failure.
+func (ks *KeyStore) cleanupChunks(refs []*FileReference) {
+	for _, ref := range refs {
+		if ref != nil {
+			ks.DeleteFileReference(ref.Key)
+		}
+	}
+}
+
+// chunkAndStore reads from r in BlockSize chunks, computes DHT keys, stores each
+// chunk, and populates file.References. On failure it cleans up stored chunks.
+func (ks *KeyStore) chunkAndStore(r io.Reader, metadata MetaData, file *File) error {
+	buffer := make([]byte, metadata.BlockSize)
+	var totalBytes uint64
+
+	for i := uint32(0); i < metadata.TotalBlocks; i++ {
+		bytesToRead := uint64(metadata.BlockSize)
+		remaining := metadata.TotalSize - totalBytes
+		if remaining < bytesToRead {
+			bytesToRead = remaining
+		}
+
+		n, err := io.ReadFull(r, buffer[:bytesToRead])
+		if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+			ks.cleanupChunks(file.References[:i])
+			return fmt.Errorf("read block %d: %w", i, err)
+		}
+		if n == 0 {
+			ks.cleanupChunks(file.References[:i])
+			return fmt.Errorf("unexpected end of file at block %d", i)
+		}
+
+		blockData := buffer[:n]
+		block := FileReference{
+			FileName:  metadata.FileName,
+			Parent:    metadata.FileHash,
+			Size:      uint32(n),
+			FileIndex: i,
+			Protocol:  "file",
+			DataHash:  sha256.Sum256(blockData),
+		}
+		block.Key = computeChunkKey(metadata.FileHash, i)
+
+		if err := ks.StoreFileReference(&block, blockData); err != nil {
+			ks.cleanupChunks(file.References[:i])
+			return fmt.Errorf("store block %d: %w", i, err)
+		}
+
+		blockRef := block
+		file.References[i] = &blockRef
+		totalBytes += uint64(n)
+
+		if ks.config.Verbose && (i%500 == 0 || i == metadata.TotalBlocks-1) {
+			logs.Debugf("Stored block %d/%d (%.1f%%)",
+				i+1, metadata.TotalBlocks, float64(i+1)/float64(metadata.TotalBlocks)*100)
+		}
+	}
+
+	if totalBytes != metadata.TotalSize {
+		ks.cleanupChunks(file.References)
+		return fmt.Errorf("processed bytes (%d) doesn't match file size (%d)",
+			totalBytes, metadata.TotalSize)
+	}
+	return nil
 }
 
 type File struct {
@@ -81,72 +148,14 @@ func (ks *KeyStore) StoreFileLocal(name string, fileData []byte) (*File, error) 
 	}()
 
 	// process file data into chunks
-	var totalBytesProcessed uint64 = 0
-	for i := uint32(0); i < metadata.TotalBlocks; i++ {
-		// calculate chunk boundaries
-		startIdx := uint64(i) * uint64(metadata.BlockSize)
-		endIdx := min(startIdx+uint64(metadata.BlockSize), metadata.TotalSize)
-
-		blockData := fileData[startIdx:endIdx]
-		blockSize := uint32(len(blockData))
-
-		// create filereference for this block
-		block := FileReference{
-			FileName:  metadata.FileName,
-			Parent:    metadata.FileHash,
-			Size:      blockSize,
-			FileIndex: i,
-			Protocol:  "file",
-			DataHash:  sha256.Sum256(blockData),
-		}
-
-		// calculate block dht routing key
-		block.Key = computeChunkKey(metadata.FileHash, i)
-
-		// store the block
-		if err := ks.StoreFileReference(&block, blockData); err != nil {
-			// cleanup any chunks we've already stored
-			for j := uint32(0); j < i; j++ {
-				if file.References[j] != nil {
-					ks.DeleteFileReference(file.References[j].Key)
-				}
-			}
-			return nil, fmt.Errorf("failed to store block %d: %w", i, err)
-		}
-
-		// store reference in file
-		blockRef := block // make a copy
-		file.References[i] = &blockRef
-
-		totalBytesProcessed += uint64(blockSize)
-
-		// progress output
-		if ks.config.Verbose && (i%500 == 0 || i == metadata.TotalBlocks-1) {
-			logs.Debugf("Stored block %d/%d (%.1f%%)",
-				i+1, metadata.TotalBlocks, float64(i+1)/float64(metadata.TotalBlocks)*100)
-		}
-	}
-
-	// verify total bytes processed
-	if totalBytesProcessed != metadata.TotalSize {
-		// cleanup all chunks on size mismatch
-		for _, ref := range file.References {
-			if ref != nil {
-				ks.DeleteFileReference(ref.Key)
-			}
-		}
-		return nil, fmt.Errorf("processed bytes (%d) doesn't match file size (%d)",
-			totalBytesProcessed, metadata.TotalSize)
+	r := bytes.NewReader(fileData)
+	if err := ks.chunkAndStore(r, metadata, file); err != nil {
+		return nil, err
 	}
 
 	// store the complete file with metadata and references
 	if err := ks.fileToMemory(file); err != nil {
-		// cleanup all chunks on failure
-		for _, ref := range file.References {
-			if ref != nil {
-				ks.DeleteFileReference(ref.Key)
-			}
-		}
+		ks.cleanupChunks(file.References)
 		return nil, fmt.Errorf("failed to store file metadata: %w", err)
 	}
 
@@ -431,118 +440,27 @@ func (ks *KeyStore) LoadAndStoreFileLocal(localFilePath string) (*File, error) {
 		}
 	}()
 
-	if ks.config.Verbose {
-		logs.Debugf("Starting chunking: size=%d block_size=%d blocks=%d",
-			metadata.TotalSize, metadata.BlockSize, metadata.TotalBlocks)
-	}
-
 	// process file in chunks
-	buffer := make([]byte, metadata.BlockSize)
-	var totalBytesRead uint64 = 0
-
-	for i := uint32(0); i < metadata.TotalBlocks; i++ {
-		// calculate expected block size
-		var bytesToRead uint32 = metadata.BlockSize
-		if i == metadata.TotalBlocks-1 {
-			// for the last block, calculate remaining bytes
-			remainingBytes := metadata.TotalSize - totalBytesRead
-			bytesToRead = uint32(remainingBytes)
-			if ks.config.Verbose {
-				logs.Debugf("Last block %d: remaining %d bytes", i, bytesToRead)
-			}
-		}
-
-		// read block
-		n, err := io.ReadFull(f, buffer[:bytesToRead])
-		if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
-			return nil, fmt.Errorf("failed to read block %d: %w", i, err)
-		}
-
-		if n == 0 {
-			return nil, fmt.Errorf("unexpected end of file at block %d", i)
-		}
-
-		if ks.config.Verbose && (i%100 == 0 || i == metadata.TotalBlocks-1) {
-			logs.Debugf("Block %d: read %d bytes (total: %d/%d)",
-				i, n, totalBytesRead+uint64(n), metadata.TotalSize)
-		}
-		blockData := buffer[:n]
-
-		// create filereference for this block
-		block := FileReference{
-			FileName:  metadata.FileName,
-			Parent:    metadata.FileHash,
-			Size:      uint32(n),
-			FileIndex: i,
-			Protocol:  "file",
-			DataHash:  sha256.Sum256(blockData),
-		}
-
-		// calculate chunk's dht routing key
-		block.Key = computeChunkKey(metadata.FileHash, i)
-
-		// store the block
-		if err := ks.StoreFileReference(&block, blockData); err != nil {
-			// cleanup on failure
-			for j := uint32(0); j < i; j++ {
-				if file.References[j] != nil {
-					ks.DeleteFileReference(file.References[j].Key)
-				}
-			}
-			return nil, fmt.Errorf("failed to store block %d: %w", i, err)
-		}
-
-		// StoreFileReference sets block.Location, but block is a local copy.
-		// Copy after store so the reference has the location set.
-		blockRef := block
-		file.References[i] = &blockRef
-
-		totalBytesRead += uint64(n)
-
-		// progress reporting
-		if ks.config.Verbose && (i%100 == 0 || i == metadata.TotalBlocks-1) {
-			logs.Debugf("Stored block %d/%d (%.1f%%) size=%d",
-				i+1, metadata.TotalBlocks,
-				float64(i+1)/float64(metadata.TotalBlocks)*100,
-				n)
-		}
+	if err := ks.chunkAndStore(f, metadata, file); err != nil {
+		return nil, err
 	}
-	if ks.config.VerifyOnWrite {
-		// verify total bytes read
-		if totalBytesRead != metadata.TotalSize {
-			// cleanup on failure
-			for _, ref := range file.References {
-				if ref != nil {
-					ks.DeleteFileReference(ref.Key)
-				}
-			}
-			return nil, fmt.Errorf("total bytes read (%d) doesn't match file size (%d)",
-				totalBytesRead, metadata.TotalSize)
-		}
 
-		if ks.config.Verbose {
-			// final verification
-			logs.Debugf("Final verification: total blocks stored=%d", len(file.References))
-			for i, ref := range file.References {
-				if ref == nil {
-					return nil, fmt.Errorf("missing reference for block %d", i)
-				}
-				if i%500 == 0 || i == len(file.References)-1 {
-					logs.Debugf("Block %d: Size=%d, Index=%d", i, ref.Size, ref.FileIndex)
-				}
+	if ks.config.VerifyOnWrite && ks.config.Verbose {
+		// final verification
+		logs.Debugf("Final verification: total blocks stored=%d", len(file.References))
+		for i, ref := range file.References {
+			if ref == nil {
+				return nil, fmt.Errorf("missing reference for block %d", i)
+			}
+			if i%500 == 0 || i == len(file.References)-1 {
+				logs.Debugf("Block %d: Size=%d, Index=%d", i, ref.Size, ref.FileIndex)
 			}
 		}
 	}
 
-	// fmt.Println(file.String())
 	// store the complete file metadata
 	if err := ks.fileToMemory(file); err != nil {
-		// cleanup on failure
-		for _, ref := range file.References {
-			if ref != nil {
-				ks.DeleteFileReference(ref.Key)
-			}
-		}
+		ks.cleanupChunks(file.References)
 		return nil, fmt.Errorf("failed to store file: %w", err)
 	}
 
