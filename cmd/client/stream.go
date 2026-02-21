@@ -76,7 +76,7 @@ func executeRemoteDownloadAction(cfg RuntimeConfig, input io.Reader) error {
 	}
 
 	beginPhase(&summary.Timer, summary.Operation, "download", "download file bytes from remote server", 1, 1)
-	written, downloadErr := client.Download(selected.Name, outputPath)
+	written, downloadErr := client.Download(selected.Name, outputPath, selected.Size)
 	summary.Timer.Stop(downloadErr != nil)
 
 	summary.Bytes = written

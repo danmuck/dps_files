@@ -82,6 +82,10 @@ func (c *GRPCClient) Upload(localPath string) ([32]byte, error) {
 	}
 	defer f.Close()
 
+	size := uint64(info.Size())
+	pr := newProgressReader(f, size, "upload", true)
+	defer pr.Finish()
+
 	// No deadline for large transfers.
 	stream, err := c.stub.Upload(context.Background())
 	if err != nil {
@@ -89,13 +93,13 @@ func (c *GRPCClient) Upload(localPath string) ([32]byte, error) {
 	}
 	if err := stream.Send(&pb.UploadChunk{
 		Name: filepath.Base(localPath),
-		Size: uint64(info.Size()),
+		Size: size,
 	}); err != nil {
 		return hash, fmt.Errorf("send metadata: %w", err)
 	}
 	buf := make([]byte, 1<<20) // 1 MiB chunks
 	for {
-		n, readErr := f.Read(buf)
+		n, readErr := pr.Read(buf)
 		if n > 0 {
 			if err := stream.Send(&pb.UploadChunk{Data: buf[:n]}); err != nil {
 				return hash, fmt.Errorf("send chunk: %w", err)
@@ -117,8 +121,9 @@ func (c *GRPCClient) Upload(localPath string) ([32]byte, error) {
 }
 
 // Download fetches a file by name and writes it to outputPath.
+// size is a hint for the progress bar (0 = unknown).
 // Returns bytes written.
-func (c *GRPCClient) Download(name, outputPath string) (uint64, error) {
+func (c *GRPCClient) Download(name, outputPath string, size uint64) (uint64, error) {
 	// No deadline — large files.
 	stream, err := c.stub.Download(context.Background(), &pb.DownloadRequest{Name: name})
 	if err != nil {
@@ -132,22 +137,23 @@ func (c *GRPCClient) Download(name, outputPath string) (uint64, error) {
 		return 0, fmt.Errorf("create output file: %w", err)
 	}
 	defer out.Close()
-	var total uint64
+
+	pw := newProgressWriter(out, size, "download", true)
+	defer pw.Finish()
+
 	for {
 		chunk, err := stream.Recv()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			return total, fmt.Errorf("recv chunk: %w", err)
+			return pw.Written(), fmt.Errorf("recv chunk: %w", err)
 		}
-		n, err := out.Write(chunk.Data)
-		total += uint64(n)
-		if err != nil {
-			return total, fmt.Errorf("write: %w", err)
+		if _, err := pw.Write(chunk.Data); err != nil {
+			return pw.Written(), fmt.Errorf("write: %w", err)
 		}
 	}
-	return total, nil
+	return pw.Written(), nil
 }
 
 // Delete removes the file identified by its 32-byte SHA-256 hash.

@@ -33,7 +33,7 @@
 # level — minimum log level emitted by the package-global logger.
 # Valid values: "trace" | "debug" | "info" | "warn" | "error" | "fatal"
 # Does not set the zerolog global level; use SetGlobalLevel in code for that.
-level = "info"
+level = "debug"
 
 # timestamp — append a timestamp field to every log entry.
 timestamp = true

@@ -26,16 +26,16 @@ clean:
 	rm -rf .build/
 
 server:
-	go run ./cmd/server $(ARGS)
+	clear; go run ./cmd/server $(ARGS)
 
 srvd:
-	go run ./cmd/server --addr :9000 --http :8080 --storage local/storage
+	clear; go run ./cmd/server --addr :9000 --http :8080 --storage local/storage
 
 client:
-	go run ./cmd/client $(ARGS)
+	clear; go run ./cmd/client $(ARGS)
 
 chain:
-	go run cmd/chain/main.go
+	clear; go run cmd/chain/main.go
 
 # Generate an upload file: make gen-file SIZE=256MB FILE=local/upload/test.dat
 gen-file:

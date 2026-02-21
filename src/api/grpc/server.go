@@ -7,6 +7,7 @@ import (
 
 	"github.com/danmuck/dps_files/src/api/ledgers"
 	"github.com/danmuck/dps_files/src/api/pb"
+	logs "github.com/danmuck/smplog"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -36,6 +37,8 @@ func (s *Server) Upload(stream pb.DPSFiles_UploadServer) error {
 	if name == "" {
 		return status.Error(codes.InvalidArgument, "name is required in first chunk")
 	}
+
+	logs.Infof("Upload started: name=%q size=%d", name, size)
 
 	pr, pw := io.Pipe()
 	errCh := make(chan error, 1)
@@ -69,12 +72,15 @@ func (s *Server) Upload(stream pb.DPSFiles_UploadServer) error {
 	recvErr := <-errCh
 
 	if storeErr != nil {
+		logs.Errorf(storeErr, "Upload store failed: name=%q", name)
 		return status.Errorf(codes.Internal, "store: %v", storeErr)
 	}
 	if recvErr != nil {
+		logs.Errorf(recvErr, "Upload receive failed: name=%q", name)
 		return status.Errorf(codes.Internal, "receive: %v", recvErr)
 	}
 
+	logs.Infof("Upload complete: name=%q hash=%x size=%d", name, fid, size)
 	return stream.SendAndClose(&pb.UploadResponse{
 		Hash: fid[:],
 		Name: name,
@@ -84,6 +90,8 @@ func (s *Server) Upload(stream pb.DPSFiles_UploadServer) error {
 
 // Download streams a stored file to the client in 1 MiB chunks.
 func (s *Server) Download(req *pb.DownloadRequest, stream pb.DPSFiles_DownloadServer) error {
+	logs.Debugf("Download request: name=%q hash=%x", req.Name, req.Hash)
+
 	pr, pw := io.Pipe()
 	errCh := make(chan error, 1)
 
@@ -102,6 +110,7 @@ func (s *Server) Download(req *pb.DownloadRequest, stream pb.DPSFiles_DownloadSe
 		errCh <- err
 	}()
 
+	var sent uint64
 	buf := make([]byte, downloadChunkSize)
 	for {
 		n, err := pr.Read(buf)
@@ -111,6 +120,7 @@ func (s *Server) Download(req *pb.DownloadRequest, stream pb.DPSFiles_DownloadSe
 				<-errCh
 				return sendErr
 			}
+			sent += uint64(n)
 		}
 		if err == io.EOF {
 			break
@@ -121,8 +131,10 @@ func (s *Server) Download(req *pb.DownloadRequest, stream pb.DPSFiles_DownloadSe
 		}
 	}
 	if err := <-errCh; err != nil {
+		logs.Errorf(err, "Download stream failed: name=%q", req.Name)
 		return status.Errorf(codes.NotFound, "stream: %v", err)
 	}
+	logs.Infof("Download complete: name=%q sent=%d bytes", req.Name, sent)
 	return nil
 }
 
@@ -133,15 +145,19 @@ func (s *Server) Delete(_ context.Context, req *pb.DeleteRequest) (*pb.DeleteRes
 	}
 	var fid ledgers.FileID
 	copy(fid[:], req.Hash)
+	logs.Infof("Delete: hash=%x", req.Hash)
 	if err := s.storage.DeleteFile(fid); err != nil {
+		logs.Errorf(err, "Delete failed: hash=%x", req.Hash)
 		return nil, status.Errorf(codes.NotFound, "delete: %v", err)
 	}
+	logs.Infof("Delete complete: hash=%x", req.Hash)
 	return &pb.DeleteResponse{}, nil
 }
 
 // List returns metadata for all stored files and directories.
 func (s *Server) List(_ context.Context, _ *pb.ListRequest) (*pb.ListResponse, error) {
 	summaries := s.storage.ListKnownFilesMetadata()
+	logs.Debugf("List: returning %d file(s)", len(summaries))
 	entries := make([]*pb.FileEntry, len(summaries))
 	for i, sm := range summaries {
 		entries[i] = &pb.FileEntry{
