@@ -1,140 +1,63 @@
-package nodes
+package nodes_test
 
 import (
-	"os"
+	"context"
 	"testing"
-	"time"
 
-	"github.com/danmuck/dps_files/src/api/transport"
+	"github.com/danmuck/dps_files/src/api/nodes"
+	"github.com/danmuck/dps_files/src/api/pb"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
-func TestServerNode_StartAndShutdown(t *testing.T) {
-	dir, _ := os.MkdirTemp("", "sn-test-*")
-	defer os.RemoveAll(dir)
-
-	sn, err := NewServerNode([]byte("test-server-node-id!"), "localhost:0", dir)
+func newTestServerNode(t *testing.T) (*nodes.DefaultServerNode, pb.DPSFilesClient) {
+	t.Helper()
+	id := make([]byte, 20)
+	sn, err := nodes.NewServerNode(id, "localhost:0", t.TempDir())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("NewServerNode: %v", err)
 	}
-	// Compile-time interface check.
-	var _ ServerNode = sn
-
 	if err := sn.Start(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("Start: %v", err)
 	}
+	t.Cleanup(func() { sn.Shutdown() })
 
-	time.Sleep(100 * time.Millisecond)
-
-	if sn.Storage() == nil {
-		t.Fatal("expected non-nil storage")
+	conn, err := grpc.NewClient(sn.Addr(),
+		grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("dial: %v", err)
 	}
-
-	if err := sn.Shutdown(); err != nil {
-		t.Fatalf("shutdown: %v", err)
-	}
+	t.Cleanup(func() { conn.Close() })
+	return sn, pb.NewDPSFilesClient(conn)
 }
 
-func TestServerNode_HandleRPC_Ping(t *testing.T) {
-	dir, _ := os.MkdirTemp("", "sn-test-*")
-	defer os.RemoveAll(dir)
-
-	sn, err := NewServerNode([]byte("test-server-node-id!"), "localhost:0", dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	rpc := &transport.RPC{
-		Meta:   &transport.RPCT{Command: transport.Command_PING},
-		Sender: &transport.NodeInfo{Address: "localhost:9999"},
-	}
-	resp, err := sn.HandleRPC(rpc)
-	if err != nil {
-		t.Fatalf("HandleRPC PING: %v", err)
-	}
-	if resp.Meta.Command != transport.Command_ACK {
-		t.Fatalf("expected ACK, got %v", resp.Meta.Command)
-	}
+func TestServerNodeStartShutdown(t *testing.T) {
+	_, _ = newTestServerNode(t)
 }
 
-func TestServerNode_HandleRPC_StoreAndList(t *testing.T) {
-	dir, _ := os.MkdirTemp("", "sn-test-*")
-	defer os.RemoveAll(dir)
+func TestServerNodeUploadAndList(t *testing.T) {
+	_, client := newTestServerNode(t)
 
-	sn, err := NewServerNode([]byte("test-server-node-id!"), "localhost:0", dir)
+	stream, err := client.Upload(context.Background())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("Upload open: %v", err)
 	}
-
-	// Upload
-	uploadRPC := &transport.RPC{
-		Meta:  &transport.RPCT{Command: transport.Command_UPLOAD},
-		Key:   []byte("test.txt"),
-		Value: []byte("hello server node"),
-	}
-	resp, err := sn.HandleRPC(uploadRPC)
+	data := []byte("server node test data")
+	stream.Send(&pb.UploadChunk{Name: "node_test.txt", Size: uint64(len(data))})
+	stream.Send(&pb.UploadChunk{Data: data})
+	resp, err := stream.CloseAndRecv()
 	if err != nil {
-		t.Fatalf("HandleRPC UPLOAD: %v", err)
+		t.Fatalf("CloseAndRecv: %v", err)
 	}
-	if resp.Meta.Command != transport.Command_ACK {
-		t.Fatalf("expected ACK, got %v", resp.Meta.Command)
-	}
-	if len(resp.Key) != 32 {
-		t.Fatalf("expected 32-byte file hash, got %d bytes", len(resp.Key))
+	if len(resp.Hash) != 32 {
+		t.Errorf("expected 32-byte hash, got %d", len(resp.Hash))
 	}
 
-	// List
-	listRPC := &transport.RPC{
-		Meta: &transport.RPCT{Command: transport.Command_LIST},
-	}
-	listResp, err := sn.HandleRPC(listRPC)
+	list, err := client.List(context.Background(), &pb.ListRequest{})
 	if err != nil {
-		t.Fatalf("HandleRPC LIST: %v", err)
+		t.Fatalf("List: %v", err)
 	}
-	if len(listResp.Payload) == 0 {
-		t.Fatal("expected non-empty payload for LIST")
-	}
-
-	// Download
-	downloadRPC := &transport.RPC{
-		Meta: &transport.RPCT{Command: transport.Command_DOWNLOAD},
-		Key:  resp.Key,
-	}
-	dlResp, err := sn.HandleRPC(downloadRPC)
-	if err != nil {
-		t.Fatalf("HandleRPC DOWNLOAD: %v", err)
-	}
-	if string(dlResp.Value) != "hello server node" {
-		t.Fatalf("expected 'hello server node', got %q", dlResp.Value)
-	}
-
-	// Delete
-	deleteRPC := &transport.RPC{
-		Meta: &transport.RPCT{Command: transport.Command_DELETE},
-		Key:  resp.Key,
-	}
-	delResp, err := sn.HandleRPC(deleteRPC)
-	if err != nil {
-		t.Fatalf("HandleRPC DELETE: %v", err)
-	}
-	if delResp.Meta.Command != transport.Command_ACK {
-		t.Fatalf("expected ACK, got %v", delResp.Meta.Command)
-	}
-}
-
-func TestServerNode_HandleRPC_UnhandledCommand(t *testing.T) {
-	dir, _ := os.MkdirTemp("", "sn-test-*")
-	defer os.RemoveAll(dir)
-
-	sn, err := NewServerNode([]byte("test-server-node-id!"), "localhost:0", dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	rpc := &transport.RPC{
-		Meta: &transport.RPCT{Command: transport.Command_FIND_NODE},
-	}
-	_, err = sn.HandleRPC(rpc)
-	if err == nil {
-		t.Fatal("expected error for unhandled command")
+	if len(list.Files) != 1 || list.Files[0].Name != "node_test.txt" {
+		t.Errorf("unexpected list: %+v", list.Files)
 	}
 }

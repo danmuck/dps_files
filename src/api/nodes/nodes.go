@@ -1,8 +1,6 @@
 package nodes
 
 import (
-	"net/http"
-
 	"github.com/danmuck/dps_files/src/api/ledgers"
 	"github.com/danmuck/dps_files/src/api/transport"
 )
@@ -24,12 +22,10 @@ type Node interface {
 	Peers() []*transport.NodeInfo
 }
 
-// ServerNode manages storage and responds to RPCs.
+// ServerNode manages storage and serves gRPC RPCs.
 type ServerNode interface {
 	Node
 	Storage() ledgers.FileLedger
-	HandleRPC(rpc *transport.RPC) (*transport.RPC, error)
-	ServeHTTP(w http.ResponseWriter, r *http.Request)
 }
 
 // ClientNode performs file operations against ServerNodes.

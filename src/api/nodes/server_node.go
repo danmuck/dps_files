@@ -1,30 +1,31 @@
 package nodes
 
 import (
-	"encoding/json"
 	"fmt"
-	"net/http"
+	"net"
 
+	grpcserver "github.com/danmuck/dps_files/src/api/grpc"
 	"github.com/danmuck/dps_files/src/api/ledgers"
-	"github.com/danmuck/dps_files/src/api/transport"
+	"github.com/danmuck/dps_files/src/api/pb"
 	"github.com/danmuck/dps_files/src/key_store"
 	logs "github.com/danmuck/smplog"
+	"google.golang.org/grpc"
 )
 
-// DefaultServerNode embeds DefaultNode and adds file storage via FileLedger,
-// RPC dispatch, and optional HTTP serving.
+// DefaultServerNode serves files over gRPC. An optional gRPC-Gateway HTTP
+// listener can be added with WithHTTP to expose a REST/JSON API on a second port.
 type DefaultServerNode struct {
 	*DefaultNode
 	storage    ledgers.FileLedger
+	grpcServer *grpc.Server
 	httpAddr   string
-	httpServer *http.Server
-	mux        *http.ServeMux
+	listener   net.Listener
 }
 
 // ServerOption configures optional DefaultServerNode features.
 type ServerOption func(*DefaultServerNode)
 
-// WithHTTP enables an HTTP server on the given address.
+// WithHTTP enables a gRPC-Gateway HTTP listener on the given address.
 func WithHTTP(addr string) ServerOption {
 	return func(s *DefaultServerNode) { s.httpAddr = addr }
 }
@@ -35,18 +36,16 @@ func NewServerNode(id []byte, addr string, storageDir string, opts ...ServerOpti
 	if err != nil {
 		return nil, err
 	}
-
 	ks, err := key_store.InitKeyStore(storageDir)
 	if err != nil {
 		return nil, fmt.Errorf("init keystore: %w", err)
 	}
-
 	sn := &DefaultServerNode{
 		DefaultNode: base,
 		storage:     key_store.NewFileLedger(ks),
-		mux:         http.NewServeMux(),
+		grpcServer:  grpc.NewServer(),
 	}
-	sn.registerHTTPRoutes()
+	pb.RegisterDPSFilesServer(sn.grpcServer, grpcserver.New(sn.storage))
 	for _, opt := range opts {
 		opt(sn)
 	}
@@ -58,8 +57,7 @@ func (s *DefaultServerNode) Storage() ledgers.FileLedger {
 	return s.storage
 }
 
-// RawKeyStore returns the underlying KeyStore for direct access.
-// Used by the TUI for operations not yet in the FileLedger interface.
+// RawKeyStore returns the underlying *KeyStore for TUI operations.
 func (s *DefaultServerNode) RawKeyStore() *key_store.KeyStore {
 	if ksl, ok := s.storage.(*key_store.KeyStoreLedger); ok {
 		return ksl.KeyStore()
@@ -67,170 +65,39 @@ func (s *DefaultServerNode) RawKeyStore() *key_store.KeyStore {
 	return nil
 }
 
-// Start begins the TCP listener, RPC dispatch loop, and optional HTTP server.
-// It does NOT call DefaultNode.Start() to avoid a duplicate RPC consumer.
-func (s *DefaultServerNode) Start() error {
-	if err := s.TCPHandler.ListenAndAccept(); err != nil {
-		return fmt.Errorf("listen: %w", err)
+// Addr returns the address the gRPC listener is bound to.
+func (s *DefaultServerNode) Addr() string {
+	if s.listener != nil {
+		return s.listener.Addr().String()
 	}
-	go s.dispatchRPCs()
+	return s.address
+}
 
+// Start binds the TCP listener, starts serving gRPC, and optionally starts the
+// gRPC-Gateway HTTP listener.
+func (s *DefaultServerNode) Start() error {
+	lis, err := net.Listen("tcp", s.address)
+	if err != nil {
+		return fmt.Errorf("listen %s: %w", s.address, err)
+	}
+	s.listener = lis
+	go func() {
+		if err := s.grpcServer.Serve(lis); err != nil {
+			logs.Warnf("gRPC server stopped: %v", err)
+		}
+	}()
 	if s.httpAddr != "" {
-		s.httpServer = &http.Server{Addr: s.httpAddr, Handler: s.mux}
 		go func() {
-			if err := s.httpServer.ListenAndServe(); err != http.ErrServerClosed {
-				logs.Warnf("HTTP server error: %v", err)
+			if err := s.serveGateway(s.httpAddr, s.Addr()); err != nil {
+				logs.Warnf("gRPC-Gateway stopped: %v", err)
 			}
 		}()
 	}
 	return nil
 }
 
-// dispatchRPCs reads inbound RPCs and routes them through HandleRPC.
-func (s *DefaultServerNode) dispatchRPCs() {
-	ch := s.TCPHandler.ProcessRPC()
-	for {
-		select {
-		case <-s.exit:
-			return
-		case rpc := <-ch:
-			if rpc == nil {
-				continue
-			}
-			resp, err := s.HandleRPC(rpc)
-			if err != nil {
-				logs.Warnf("HandleRPC error: %v", err)
-				continue
-			}
-			if resp != nil && rpc.Sender != nil {
-				conn, dialErr := s.TCPHandler.Dial(rpc.Sender.Address)
-				if dialErr != nil {
-					logs.Warnf("dial back to %s: %v", rpc.Sender.Address, dialErr)
-					continue
-				}
-				if sendErr := s.TCPHandler.Send(conn, resp); sendErr != nil {
-					logs.Warnf("send response to %s: %v", rpc.Sender.Address, sendErr)
-				}
-			}
-		}
-	}
-}
-
-// HandleRPC processes a single RPC and returns a response.
-func (s *DefaultServerNode) HandleRPC(rpc *transport.RPC) (*transport.RPC, error) {
-	switch rpc.Meta.Command {
-	case transport.Command_PING:
-		return &transport.RPC{
-			Meta:   &transport.RPCT{Command: transport.Command_ACK},
-			Sender: s.nodeInfo(),
-		}, nil
-
-	case transport.Command_LIST:
-		summaries := s.storage.ListKnownFilesMetadata()
-		data, err := json.Marshal(summaries)
-		if err != nil {
-			return nil, fmt.Errorf("marshal file list: %w", err)
-		}
-		return &transport.RPC{
-			Meta:    &transport.RPCT{Command: transport.Command_ACK},
-			Sender:  s.nodeInfo(),
-			Payload: data,
-		}, nil
-
-	case transport.Command_UPLOAD:
-		name := string(rpc.Key)
-		fid, err := s.storage.StoreFileLocal(name, rpc.Value)
-		if err != nil {
-			return nil, fmt.Errorf("store file: %w", err)
-		}
-		return &transport.RPC{
-			Meta:   &transport.RPCT{Command: transport.Command_ACK},
-			Sender: s.nodeInfo(),
-			Key:    fid[:],
-		}, nil
-
-	case transport.Command_DOWNLOAD:
-		if len(rpc.Key) != 32 {
-			return nil, fmt.Errorf("DOWNLOAD requires 32-byte file hash key")
-		}
-		var fid ledgers.FileID
-		copy(fid[:], rpc.Key)
-		data, err := s.storage.ReassembleFileToBytes(fid)
-		if err != nil {
-			return nil, fmt.Errorf("reassemble file: %w", err)
-		}
-		return &transport.RPC{
-			Meta:   &transport.RPCT{Command: transport.Command_ACK},
-			Sender: s.nodeInfo(),
-			Value:  data,
-		}, nil
-
-	case transport.Command_DELETE:
-		if len(rpc.Key) != 32 {
-			return nil, fmt.Errorf("DELETE requires 32-byte file hash key")
-		}
-		var fid ledgers.FileID
-		copy(fid[:], rpc.Key)
-		if err := s.storage.DeleteFile(fid); err != nil {
-			return nil, fmt.Errorf("delete file: %w", err)
-		}
-		return &transport.RPC{
-			Meta:   &transport.RPCT{Command: transport.Command_ACK},
-			Sender: s.nodeInfo(),
-		}, nil
-
-	case transport.Command_UPLOAD_DIR:
-		dirPath := string(rpc.Key)
-		fid, err := s.storage.StoreDirectory(dirPath)
-		if err != nil {
-			return nil, fmt.Errorf("store directory: %w", err)
-		}
-		return &transport.RPC{
-			Meta:   &transport.RPCT{Command: transport.Command_ACK},
-			Sender: s.nodeInfo(),
-			Key:    fid[:],
-		}, nil
-
-	case transport.Command_LIST_DIR:
-		if len(rpc.Key) != 32 {
-			return nil, fmt.Errorf("LIST_DIR requires 32-byte directory hash key")
-		}
-		var fid ledgers.FileID
-		copy(fid[:], rpc.Key)
-		entries, err := s.storage.ListDirectory(fid)
-		if err != nil {
-			return nil, fmt.Errorf("list directory: %w", err)
-		}
-		data, err := json.Marshal(entries)
-		if err != nil {
-			return nil, fmt.Errorf("marshal directory listing: %w", err)
-		}
-		return &transport.RPC{
-			Meta:    &transport.RPCT{Command: transport.Command_ACK},
-			Sender:  s.nodeInfo(),
-			Payload: data,
-		}, nil
-
-	default:
-		return nil, fmt.Errorf("unhandled command: %v", rpc.Meta.Command)
-	}
-}
-
-// ServeHTTP delegates to the internal ServeMux.
-func (s *DefaultServerNode) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.mux.ServeHTTP(w, r)
-}
-
-// Shutdown stops the HTTP server (if running) and the base node.
+// Shutdown stops the gRPC server gracefully.
 func (s *DefaultServerNode) Shutdown() error {
-	if s.httpServer != nil {
-		s.httpServer.Close()
-	}
-	return s.DefaultNode.Shutdown()
-}
-
-// nodeInfo returns a pointer to the node's transport.NodeInfo.
-func (s *DefaultServerNode) nodeInfo() *transport.NodeInfo {
-	info := s.NodeInfo()
-	return &info
+	s.grpcServer.GracefulStop()
+	return nil
 }

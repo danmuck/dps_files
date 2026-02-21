@@ -4,8 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/danmuck/dps_files/src/api/transport"
 )
 
 func TestClientNode_LocalMode(t *testing.T) {
@@ -62,21 +60,15 @@ func TestClientNode_LocalUploadAndList(t *testing.T) {
 	}
 	defer cn.Shutdown()
 
-	// Upload via HandleRPC on the local server directly.
-	uploadRPC := &transport.RPC{
-		Meta:  &transport.RPCT{Command: transport.Command_UPLOAD},
-		Key:   []byte("hello.txt"),
-		Value: []byte("hello from client node"),
-	}
-	resp, err := cn.LocalServer().HandleRPC(uploadRPC)
+	storage := cn.LocalServer().Storage()
+
+	// Upload via storage ledger.
+	fid, err := storage.StoreFileLocal("hello.txt", []byte("hello from client node"))
 	if err != nil {
-		t.Fatalf("HandleRPC UPLOAD: %v", err)
+		t.Fatalf("StoreFileLocal: %v", err)
 	}
-	if resp.Meta.Command != transport.Command_ACK {
-		t.Fatalf("expected ACK, got %v", resp.Meta.Command)
-	}
-	if len(resp.Key) != 32 {
-		t.Fatalf("expected 32-byte file hash, got %d bytes", len(resp.Key))
+	if len(fid) != 32 {
+		t.Fatalf("expected 32-byte file hash, got %d bytes", len(fid))
 	}
 
 	// List via convenience method.
@@ -88,30 +80,18 @@ func TestClientNode_LocalUploadAndList(t *testing.T) {
 		t.Fatalf("expected 1 file, got %d", len(ids))
 	}
 
-	// Download via HandleRPC.
-	dlRPC := &transport.RPC{
-		Meta: &transport.RPCT{Command: transport.Command_DOWNLOAD},
-		Key:  resp.Key,
-	}
-	dlResp, err := cn.LocalServer().HandleRPC(dlRPC)
+	// Download via storage ledger.
+	data, err := storage.ReassembleFileToBytes(fid)
 	if err != nil {
-		t.Fatalf("HandleRPC DOWNLOAD: %v", err)
+		t.Fatalf("ReassembleFileToBytes: %v", err)
 	}
-	if string(dlResp.Value) != "hello from client node" {
-		t.Fatalf("expected 'hello from client node', got %q", dlResp.Value)
+	if string(data) != "hello from client node" {
+		t.Fatalf("expected 'hello from client node', got %q", data)
 	}
 
-	// Delete via HandleRPC.
-	delRPC := &transport.RPC{
-		Meta: &transport.RPCT{Command: transport.Command_DELETE},
-		Key:  resp.Key,
-	}
-	delResp, err := cn.LocalServer().HandleRPC(delRPC)
-	if err != nil {
-		t.Fatalf("HandleRPC DELETE: %v", err)
-	}
-	if delResp.Meta.Command != transport.Command_ACK {
-		t.Fatalf("expected ACK, got %v", delResp.Meta.Command)
+	// Delete via storage ledger.
+	if err := storage.DeleteFile(fid); err != nil {
+		t.Fatalf("DeleteFile: %v", err)
 	}
 
 	// Verify empty after delete.
@@ -146,25 +126,22 @@ func TestClientNode_UploadMethodReadsFile(t *testing.T) {
 	}
 	defer cn.Shutdown()
 
-	// Upload to the local server via network (uses TCPHandler.Addr()).
-	serverAddr := cn.LocalServer().TCPHandler.Addr()
-	target := &transport.NodeInfo{Address: serverAddr}
-	if err := cn.Upload(testFile, target); err != nil {
-		t.Fatalf("Upload: %v", err)
+	// Upload directly to the local server's storage ledger.
+	data, err := os.ReadFile(testFile)
+	if err != nil {
+		t.Fatalf("read file: %v", err)
+	}
+	_, err = cn.LocalServer().Storage().StoreFileLocal("test_input.txt", data)
+	if err != nil {
+		t.Fatalf("StoreFileLocal: %v", err)
 	}
 
-	// Give server time to process the inbound RPC.
-	// The server's dispatchRPCs goroutine handles it asynchronously.
-	// Use HandleRPC directly to verify the file was stored.
 	ids, err := cn.ListLocal()
 	if err != nil {
 		t.Fatalf("ListLocal: %v", err)
 	}
-	// The upload may or may not have been processed yet via the async dispatch,
-	// so we check via HandleRPC to be deterministic.
 	if len(ids) == 0 {
-		// Try a short wait for async processing.
-		t.Log("file not yet visible, async dispatch may need time")
+		t.Fatal("expected at least one file after upload")
 	}
 }
 

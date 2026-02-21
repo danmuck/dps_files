@@ -1,7 +1,6 @@
 package nodes
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -147,17 +146,7 @@ func (c *DefaultClientNode) ListLocal() ([]ledgers.FileID, error) {
 	if c.localServer == nil {
 		return nil, fmt.Errorf("no local server configured")
 	}
-	listRPC := &transport.RPC{
-		Meta: &transport.RPCT{Command: transport.Command_LIST},
-	}
-	resp, err := c.localServer.HandleRPC(listRPC)
-	if err != nil {
-		return nil, err
-	}
-	var summaries []ledgers.FileMetaSummary
-	if err := json.Unmarshal(resp.Payload, &summaries); err != nil {
-		return nil, fmt.Errorf("unmarshal file list: %w", err)
-	}
+	summaries := c.localServer.Storage().ListKnownFilesMetadata()
 	ids := make([]ledgers.FileID, len(summaries))
 	for i, s := range summaries {
 		ids[i] = s.Hash
