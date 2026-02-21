@@ -136,3 +136,68 @@ func TestDeleteFile(t *testing.T) {
 		t.Errorf("expected 0 files after delete, got %d", len(listResp.Files))
 	}
 }
+
+func TestVerifyEmpty(t *testing.T) {
+	client := newTestServer(t)
+	resp, err := client.Verify(context.Background(), &pb.VerifyRequest{})
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if len(resp.Errors) != 0 {
+		t.Errorf("expected no errors on empty store, got %d", len(resp.Errors))
+	}
+}
+
+func TestExpireEmpty(t *testing.T) {
+	client := newTestServer(t)
+	resp, err := client.Expire(context.Background(), &pb.ExpireRequest{})
+	if err != nil {
+		t.Fatalf("expire: %v", err)
+	}
+	if resp.Removed < 0 {
+		t.Errorf("expected non-negative removed count, got %d", resp.Removed)
+	}
+}
+
+func TestCleanShallow(t *testing.T) {
+	client := newTestServer(t)
+	stream, _ := client.Upload(context.Background())
+	stream.Send(&pb.UploadChunk{Name: "toclean.txt", Size: 5})
+	stream.Send(&pb.UploadChunk{Data: []byte("hello")})
+	if _, err := stream.CloseAndRecv(); err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+	resp, err := client.Clean(context.Background(), &pb.CleanRequest{Deep: false})
+	if err != nil {
+		t.Fatalf("clean: %v", err)
+	}
+	if resp.RemovedKdht < 0 {
+		t.Errorf("unexpected negative kdht count: %d", resp.RemovedKdht)
+	}
+}
+
+func TestCleanDeep(t *testing.T) {
+	client := newTestServer(t)
+	stream, _ := client.Upload(context.Background())
+	stream.Send(&pb.UploadChunk{Name: "todeep.txt", Size: 5})
+	stream.Send(&pb.UploadChunk{Data: []byte("world")})
+	if _, err := stream.CloseAndRecv(); err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+	resp, err := client.Clean(context.Background(), &pb.CleanRequest{Deep: true})
+	if err != nil {
+		t.Fatalf("deep clean: %v", err)
+	}
+	_ = resp
+}
+
+func TestStats(t *testing.T) {
+	client := newTestServer(t)
+	resp, err := client.Stats(context.Background(), &pb.StatsRequest{})
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if resp.TotalBytes < 0 {
+		t.Errorf("unexpected negative total bytes")
+	}
+}

@@ -4,9 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
 
 	"github.com/danmuck/dps_files/src/api/ledgers"
 	"github.com/danmuck/dps_files/src/api/pb"
+	"github.com/danmuck/dps_files/src/key_store"
 	logs "github.com/danmuck/smplog"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -23,6 +27,16 @@ type Server struct {
 // New returns a Server using the given FileLedger.
 func New(storage ledgers.FileLedger) *Server {
 	return &Server{storage: storage}
+}
+
+// managedStore type-asserts storage to *key_store.KeyStoreLedger to expose
+// management operations. Returns Unimplemented if the backend is not KeyStoreLedger.
+func (s *Server) managedStore() (*key_store.KeyStore, error) {
+	ledger, ok := s.storage.(*key_store.KeyStoreLedger)
+	if !ok {
+		return nil, status.Error(codes.Unimplemented, "management RPCs require KeyStoreLedger backend")
+	}
+	return ledger.KeyStore(), nil
 }
 
 // Upload receives a client-streamed file and stores it via StoreFromReader.
@@ -204,4 +218,122 @@ func (s *Server) ListDir(_ context.Context, req *pb.ListDirRequest) (*pb.ListDir
 		}
 	}
 	return &pb.ListDirResponse{Entries: entries}, nil
+}
+
+// Verify runs a full integrity scan and returns any chunk errors found.
+func (s *Server) Verify(_ context.Context, _ *pb.VerifyRequest) (*pb.VerifyResponse, error) {
+	ks, err := s.managedStore()
+	if err != nil {
+		return nil, err
+	}
+	chunkErrs := ks.VerifyAll()
+	protoErrs := make([]*pb.VerifyError, len(chunkErrs))
+	for i, ce := range chunkErrs {
+		protoErrs[i] = &pb.VerifyError{
+			ChunkIndex: uint64(ce.ChunkIndex),
+			FileName:   ce.FileName,
+			Error:      ce.Err.Error(),
+		}
+	}
+	return &pb.VerifyResponse{Errors: protoErrs}, nil
+}
+
+// Expire sweeps TTL-expired files and returns the number removed.
+func (s *Server) Expire(_ context.Context, _ *pb.ExpireRequest) (*pb.ExpireResponse, error) {
+	ks, err := s.managedStore()
+	if err != nil {
+		return nil, err
+	}
+	removed := ks.CleanupExpired()
+	return &pb.ExpireResponse{Removed: int64(removed)}, nil
+}
+
+// Clean removes stored data. If req.Deep is true, also removes metadata and cache.
+func (s *Server) Clean(_ context.Context, req *pb.CleanRequest) (*pb.CleanResponse, error) {
+	ks, err := s.managedStore()
+	if err != nil {
+		return nil, err
+	}
+	if req.Deep {
+		result, cleanErr := ks.DeepClean()
+		if cleanErr != nil {
+			return nil, status.Errorf(codes.Internal, "deep clean: %v", cleanErr)
+		}
+		return &pb.CleanResponse{
+			RemovedKdht:     int64(result.RemovedKDHT),
+			RemovedMetadata: int64(result.RemovedMetadata),
+			RemovedCache:    int64(result.RemovedCache),
+		}, nil
+	}
+	// Shallow clean: .kdht only. Count before removal for the response.
+	kdhtPattern := filepath.Join(ks.StorageDir(), "data", "*.kdht")
+	kdhtFiles, globErr := filepath.Glob(kdhtPattern)
+	if globErr != nil {
+		return nil, status.Errorf(codes.Internal, "glob kdht: %v", globErr)
+	}
+	if cleanErr := ks.CleanupKDHT(); cleanErr != nil {
+		return nil, status.Errorf(codes.Internal, "cleanup kdht: %v", cleanErr)
+	}
+	return &pb.CleanResponse{RemovedKdht: int64(len(kdhtFiles))}, nil
+}
+
+// Stats returns byte-level storage usage for the server's storage root.
+func (s *Server) Stats(_ context.Context, _ *pb.StatsRequest) (*pb.StatsResponse, error) {
+	ks, err := s.managedStore()
+	if err != nil {
+		return nil, err
+	}
+	storageDir := ks.StorageDir()
+	entries, readErr := os.ReadDir(storageDir)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		return nil, status.Errorf(codes.Internal, "read storage dir: %v", readErr)
+	}
+	var dataBytes, metaBytes, cacheBytes, otherBytes uint64
+	for _, entry := range entries {
+		entryPath := filepath.Join(storageDir, entry.Name())
+		size, sizeErr := dirSize(entryPath)
+		if sizeErr != nil {
+			return nil, status.Errorf(codes.Internal, "stat %s: %v", entry.Name(), sizeErr)
+		}
+		switch entry.Name() {
+		case "data":
+			dataBytes += size
+		case "metadata":
+			metaBytes += size
+		case ".cache":
+			cacheBytes += size
+		default:
+			otherBytes += size
+		}
+	}
+	summaries := s.storage.ListKnownFilesMetadata()
+	return &pb.StatsResponse{
+		DataBytes:     dataBytes,
+		MetadataBytes: metaBytes,
+		CacheBytes:    cacheBytes,
+		TotalBytes:    dataBytes + metaBytes + cacheBytes + otherBytes,
+		FileCount:     int64(len(summaries)),
+	}, nil
+}
+
+// dirSize returns the total byte size of all files under path.
+func dirSize(path string) (uint64, error) {
+	var total uint64
+	err := filepath.WalkDir(path, func(_ string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() && info.Size() > 0 {
+			total += uint64(info.Size())
+		}
+		return nil
+	})
+	if err != nil && !os.IsNotExist(err) {
+		return 0, err
+	}
+	return total, nil
 }
