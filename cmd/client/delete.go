@@ -12,7 +12,11 @@ import (
 )
 
 func executeRemoteDeleteAction(cfg RuntimeConfig, input io.Reader) error {
-	client := NewFileServerClient(cfg.RemoteAddr)
+	client, err := NewGRPCClient(cfg.RemoteAddr)
+	if err != nil {
+		return fmt.Errorf("connect to remote: %w", err)
+	}
+	defer client.Close()
 	entries, err := client.List()
 	if err != nil {
 		return fmt.Errorf("list remote files: %w", err)

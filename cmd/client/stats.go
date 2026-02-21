@@ -58,17 +58,22 @@ func executeStatsAction(cfg RuntimeConfig) error {
 
 	if cfg.Mode == ModeRemote && cfg.RemoteAddr != "" {
 		logs.Titlef("\nRemote Server: %s\n", cfg.RemoteAddr)
-		client := NewFileServerClient(cfg.RemoteAddr)
-		entries, err := client.List()
-		if err != nil {
-			logs.Dataf("  Status: unreachable (%v)\n", err)
+		client, dialErr := NewGRPCClient(cfg.RemoteAddr)
+		if dialErr != nil {
+			logs.Dataf("  Status: unreachable (%v)\n", dialErr)
 		} else {
-			var totalSize uint64
-			for _, e := range entries {
-				totalSize += e.Size
+			defer client.Close()
+			entries, listErr := client.List()
+			if listErr != nil {
+				logs.Dataf("  Status: unreachable (%v)\n", listErr)
+			} else {
+				var totalSize uint64
+				for _, e := range entries {
+					totalSize += e.Size
+				}
+				logs.Dataf("  Status: reachable\n")
+				logs.Dataf("  Files: %d  Total size: %s\n", len(entries), formatBytes(totalSize))
 			}
-			logs.Dataf("  Status: reachable\n")
-			logs.Dataf("  Files: %d  Total size: %s\n", len(entries), formatBytes(totalSize))
 		}
 	}
 

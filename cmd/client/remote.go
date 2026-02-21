@@ -1,267 +1,161 @@
 package main
 
 import (
-	"encoding/binary"
+	"context"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/danmuck/dps_files/src/api/pb"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
-// RemoteFileEntry is a file entry returned by the fileserver List command.
+// RemoteFileEntry is a file entry returned by the server List RPC.
 type RemoteFileEntry struct {
-	Name string `json:"name"`
-	Hash string `json:"hash"` // hex-encoded 32-byte SHA-256
-	Size uint64 `json:"size"`
+	Name string
+	Hash string // hex-encoded 32-byte SHA-256
+	Size uint64
 }
 
-// FileServerClient dials cmd/fileserver over TCP.
-type FileServerClient struct {
-	Addr    string
-	Timeout time.Duration // 0 = no deadline (use for large transfers)
+// GRPCClient wraps a pb.DPSFilesClient stub with convenience methods
+// matching the surface previously provided by FileServerClient.
+type GRPCClient struct {
+	conn    *grpc.ClientConn
+	stub    pb.DPSFilesClient
+	timeout time.Duration
 }
 
-// NewFileServerClient returns a client with a 30-second default timeout.
-func NewFileServerClient(addr string) *FileServerClient {
-	return &FileServerClient{Addr: addr, Timeout: 30 * time.Second}
-}
-
-func (c *FileServerClient) dial() (net.Conn, error) {
-	conn, err := net.DialTimeout("tcp", c.Addr, 10*time.Second)
+// NewGRPCClient dials addr and returns a GRPCClient. Call Close() when done.
+func NewGRPCClient(addr string) (*GRPCClient, error) {
+	conn, err := grpc.NewClient(addr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		return nil, fmt.Errorf("dial %s: %w", c.Addr, err)
+		return nil, fmt.Errorf("dial %s: %w", addr, err)
 	}
-	if c.Timeout > 0 {
-		if err := conn.SetDeadline(time.Now().Add(c.Timeout)); err != nil {
-			conn.Close()
-			return nil, fmt.Errorf("set deadline: %w", err)
+	return &GRPCClient{
+		conn:    conn,
+		stub:    pb.NewDPSFilesClient(conn),
+		timeout: 30 * time.Second,
+	}, nil
+}
+
+// Close releases the underlying connection.
+func (c *GRPCClient) Close() { c.conn.Close() }
+
+func (c *GRPCClient) ctx() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), c.timeout)
+}
+
+// List returns all files known to the server.
+func (c *GRPCClient) List() ([]RemoteFileEntry, error) {
+	ctx, cancel := c.ctx()
+	defer cancel()
+	resp, err := c.stub.List(ctx, &pb.ListRequest{})
+	if err != nil {
+		return nil, fmt.Errorf("list: %w", err)
+	}
+	entries := make([]RemoteFileEntry, len(resp.Files))
+	for i, f := range resp.Files {
+		entries[i] = RemoteFileEntry{
+			Name: f.Name,
+			Hash: hex.EncodeToString(f.Hash),
+			Size: f.Size,
 		}
-	}
-	return conn, nil
-}
-
-// remoteReadFrame reads a 4-byte big-endian length prefix then the payload.
-func remoteReadFrame(r io.Reader) ([]byte, error) {
-	var length uint32
-	if err := binary.Read(r, binary.BigEndian, &length); err != nil {
-		return nil, fmt.Errorf("read frame length: %w", err)
-	}
-	buf := make([]byte, length)
-	if _, err := io.ReadFull(r, buf); err != nil {
-		return nil, fmt.Errorf("read frame body: %w", err)
-	}
-	return buf, nil
-}
-
-// remoteWriteFrame writes a 4-byte big-endian length prefix then the payload.
-func remoteWriteFrame(w io.Writer, data []byte) error {
-	if err := binary.Write(w, binary.BigEndian, uint32(len(data))); err != nil {
-		return err
-	}
-	_, err := w.Write(data)
-	return err
-}
-
-// readErrorFrame reads the error message frame that follows a StatusError byte.
-func readErrorFrame(conn net.Conn) string {
-	msg, err := remoteReadFrame(conn)
-	if err != nil {
-		return "(could not read server error message)"
-	}
-	return string(msg)
-}
-
-// Upload sends localPath to the fileserver and returns the server-assigned SHA-256 hash.
-// r may be nil; if non-nil it is used as the data source instead of opening localPath.
-// Use Timeout=0 for large files so no deadline fires mid-transfer.
-func (c *FileServerClient) Upload(localPath string, r io.Reader) ([32]byte, error) {
-	var hash [32]byte
-
-	info, err := os.Stat(localPath)
-	if err != nil {
-		return hash, fmt.Errorf("stat %s: %w", localPath, err)
-	}
-	fileSize := uint64(info.Size())
-	name := filepath.Base(localPath)
-	nameBytes := []byte(name)
-
-	// Frame body: [0x01][2B name_len][name][8B file_size]
-	frame := make([]byte, 1+2+len(nameBytes)+8)
-	frame[0] = 0x01 // CmdUpload
-	binary.BigEndian.PutUint16(frame[1:3], uint16(len(nameBytes)))
-	copy(frame[3:3+len(nameBytes)], nameBytes)
-	binary.BigEndian.PutUint64(frame[3+len(nameBytes):], fileSize)
-
-	conn, err := c.dial()
-	if err != nil {
-		return hash, err
-	}
-	defer conn.Close()
-
-	if err := remoteWriteFrame(conn, frame); err != nil {
-		return hash, fmt.Errorf("write upload header frame: %w", err)
-	}
-
-	// Stream file data raw (not framed) after the header frame.
-	src := r
-	if src == nil {
-		f, openErr := os.Open(localPath)
-		if openErr != nil {
-			return hash, fmt.Errorf("open %s: %w", localPath, openErr)
-		}
-		defer f.Close()
-		src = f
-	}
-	if _, err := io.Copy(conn, src); err != nil {
-		return hash, fmt.Errorf("stream file data: %w", err)
-	}
-
-	// Response: [1B status][32B hash]  — or [1B 0x02][frame: error msg]
-	var statusBuf [1]byte
-	if _, err := io.ReadFull(conn, statusBuf[:]); err != nil {
-		return hash, fmt.Errorf("read upload response: %w", err)
-	}
-	switch statusBuf[0] {
-	case 0x00: // StatusOK
-	case 0x02: // StatusError
-		return hash, fmt.Errorf("server error: %s", readErrorFrame(conn))
-	default:
-		return hash, fmt.Errorf("unexpected upload status 0x%02x", statusBuf[0])
-	}
-
-	if _, err := io.ReadFull(conn, hash[:]); err != nil {
-		return hash, fmt.Errorf("read upload hash: %w", err)
-	}
-	return hash, nil
-}
-
-// List returns all files known to the fileserver.
-func (c *FileServerClient) List() ([]RemoteFileEntry, error) {
-	conn, err := c.dial()
-	if err != nil {
-		return nil, err
-	}
-	defer conn.Close()
-
-	// Frame body: [0x03]
-	if err := remoteWriteFrame(conn, []byte{0x03}); err != nil {
-		return nil, fmt.Errorf("write list command: %w", err)
-	}
-
-	// Response: [1B status] then frame with JSON
-	var statusBuf [1]byte
-	if _, err := io.ReadFull(conn, statusBuf[:]); err != nil {
-		return nil, fmt.Errorf("read list status: %w", err)
-	}
-	switch statusBuf[0] {
-	case 0x00: // StatusOK
-	case 0x02:
-		return nil, fmt.Errorf("server error: %s", readErrorFrame(conn))
-	default:
-		return nil, fmt.Errorf("unexpected list status 0x%02x", statusBuf[0])
-	}
-
-	data, err := remoteReadFrame(conn)
-	if err != nil {
-		return nil, fmt.Errorf("read list response frame: %w", err)
-	}
-
-	var entries []RemoteFileEntry
-	if err := json.Unmarshal(data, &entries); err != nil {
-		return nil, fmt.Errorf("decode list JSON: %w", err)
 	}
 	return entries, nil
 }
 
-// Download fetches a file by name from the fileserver and writes it to outputPath.
-// pw may be nil; if non-nil it receives a copy of each byte written for progress tracking.
-// Returns the number of bytes written.
-func (c *FileServerClient) Download(name, outputPath string, pw *progressWriter) (uint64, error) {
-	conn, err := c.dial()
+// Upload sends localPath to the server and returns the 32-byte SHA-256 hash.
+func (c *GRPCClient) Upload(localPath string) ([32]byte, error) {
+	var hash [32]byte
+	info, err := os.Stat(localPath)
 	if err != nil {
-		return 0, err
+		return hash, fmt.Errorf("stat: %w", err)
 	}
-	defer conn.Close()
-
-	// Frame body: [0x02][0x01 (by-name)][name bytes]
-	payload := make([]byte, 2+len(name))
-	payload[0] = 0x02 // CmdDownload
-	payload[1] = 0x01 // lookup by name
-	copy(payload[2:], []byte(name))
-
-	if err := remoteWriteFrame(conn, payload); err != nil {
-		return 0, fmt.Errorf("write download command: %w", err)
+	f, err := os.Open(localPath)
+	if err != nil {
+		return hash, fmt.Errorf("open: %w", err)
 	}
+	defer f.Close()
 
-	// Response: [1B status][8B file_size] then raw stream
-	var respHeader [9]byte
-	if _, err := io.ReadFull(conn, respHeader[:]); err != nil {
-		return 0, fmt.Errorf("read download header: %w", err)
+	// No deadline for large transfers.
+	stream, err := c.stub.Upload(context.Background())
+	if err != nil {
+		return hash, fmt.Errorf("open upload stream: %w", err)
 	}
-	switch respHeader[0] {
-	case 0x00: // StatusOK
-	case 0x01: // StatusNotFound — no error frame follows
-		return 0, fmt.Errorf("file %q not found on server", name)
-	default:
-		return 0, fmt.Errorf("unexpected download status 0x%02x", respHeader[0])
+	if err := stream.Send(&pb.UploadChunk{
+		Name: filepath.Base(localPath),
+		Size: uint64(info.Size()),
+	}); err != nil {
+		return hash, fmt.Errorf("send metadata: %w", err)
 	}
+	buf := make([]byte, 1<<20) // 1 MiB chunks
+	for {
+		n, readErr := f.Read(buf)
+		if n > 0 {
+			if err := stream.Send(&pb.UploadChunk{Data: buf[:n]}); err != nil {
+				return hash, fmt.Errorf("send chunk: %w", err)
+			}
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return hash, fmt.Errorf("read file: %w", readErr)
+		}
+	}
+	resp, err := stream.CloseAndRecv()
+	if err != nil {
+		return hash, fmt.Errorf("finish upload: %w", err)
+	}
+	copy(hash[:], resp.Hash)
+	return hash, nil
+}
 
-	fileSize := binary.BigEndian.Uint64(respHeader[1:9])
-
-	if err := createDirPath(filepath.Dir(outputPath)); err != nil {
+// Download fetches a file by name and writes it to outputPath.
+// Returns bytes written.
+func (c *GRPCClient) Download(name, outputPath string) (uint64, error) {
+	// No deadline — large files.
+	stream, err := c.stub.Download(context.Background(), &pb.DownloadRequest{Name: name})
+	if err != nil {
+		return 0, fmt.Errorf("open download stream: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
 		return 0, fmt.Errorf("ensure output dir: %w", err)
 	}
-	outF, err := os.Create(outputPath)
+	out, err := os.Create(outputPath)
 	if err != nil {
 		return 0, fmt.Errorf("create output file: %w", err)
 	}
-	defer outF.Close()
-
-	dst := io.Writer(outF)
-	if pw != nil {
-		dst = io.MultiWriter(outF, pw)
+	defer out.Close()
+	var total uint64
+	for {
+		chunk, err := stream.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return total, fmt.Errorf("recv chunk: %w", err)
+		}
+		n, err := out.Write(chunk.Data)
+		total += uint64(n)
+		if err != nil {
+			return total, fmt.Errorf("write: %w", err)
+		}
 	}
-	written, err := io.Copy(dst, io.LimitReader(conn, int64(fileSize)))
-	if err != nil {
-		return 0, fmt.Errorf("download stream: %w", err)
-	}
-	return uint64(written), nil
+	return total, nil
 }
 
-// Delete removes the file identified by its 32-byte SHA-256 hash from the fileserver.
-func (c *FileServerClient) Delete(hash [32]byte) error {
-	conn, err := c.dial()
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-
-	// Frame body: [0x04][32B hash]
-	payload := make([]byte, 1+32)
-	payload[0] = 0x04 // CmdDelete
-	copy(payload[1:], hash[:])
-
-	if err := remoteWriteFrame(conn, payload); err != nil {
-		return fmt.Errorf("write delete command: %w", err)
-	}
-
-	// Response: [1B status] or [1B 0x02][frame: error msg]
-	var statusBuf [1]byte
-	if _, err := io.ReadFull(conn, statusBuf[:]); err != nil {
-		return fmt.Errorf("read delete response: %w", err)
-	}
-	switch statusBuf[0] {
-	case 0x00: // StatusOK
-		return nil
-	case 0x02:
-		return fmt.Errorf("server error: %s", readErrorFrame(conn))
-	default:
-		return fmt.Errorf("unexpected delete status 0x%02x", statusBuf[0])
-	}
+// Delete removes the file identified by its 32-byte SHA-256 hash.
+func (c *GRPCClient) Delete(hash [32]byte) error {
+	ctx, cancel := c.ctx()
+	defer cancel()
+	_, err := c.stub.Delete(ctx, &pb.DeleteRequest{Hash: hash[:]})
+	return err
 }
 
 // hexToHash decodes a 64-char hex string into a [32]byte.

@@ -15,8 +15,11 @@ import (
 )
 
 func executeRemoteDownloadAction(cfg RuntimeConfig, input io.Reader) error {
-	client := NewFileServerClient(cfg.RemoteAddr)
-	client.Timeout = 0 // no deadline for large downloads
+	client, err := NewGRPCClient(cfg.RemoteAddr)
+	if err != nil {
+		return fmt.Errorf("connect to remote: %w", err)
+	}
+	defer client.Close()
 
 	entries, err := client.List()
 	if err != nil {
@@ -65,7 +68,6 @@ func executeRemoteDownloadAction(cfg RuntimeConfig, input io.Reader) error {
 	outputPath := copyOutputPath(cfg.KeyStore.StorageDir, selected.Name)
 	logs.Printf("\nDownloading %q to %s\n", selected.Name, outputPath)
 
-	showBar := !cfg.KeyStore.Verbose
 	summary := OpSummary{
 		Operation: "remote-download",
 		FileName:  selected.Name,
@@ -73,10 +75,8 @@ func executeRemoteDownloadAction(cfg RuntimeConfig, input io.Reader) error {
 		StartedAt: time.Now(),
 	}
 
-	pw := newProgressWriter(io.Discard, selected.Size, "download", showBar)
 	beginPhase(&summary.Timer, summary.Operation, "download", "download file bytes from remote server", 1, 1)
-	written, downloadErr := client.Download(selected.Name, outputPath, pw)
-	pw.Finish()
+	written, downloadErr := client.Download(selected.Name, outputPath)
 	summary.Timer.Stop(downloadErr != nil)
 
 	summary.Bytes = written

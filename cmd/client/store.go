@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -44,8 +43,6 @@ func verifyChunks(ks *key_store.KeyStore, file *key_store.File) error {
 }
 
 func executeStoreTargets(cfg RuntimeConfig, ks *key_store.KeyStore, filePaths []string) error {
-	showBar := !cfg.KeyStore.Verbose
-
 	for _, sourcePath := range filePaths {
 		displayName := filepath.Base(sourcePath)
 
@@ -110,25 +107,20 @@ func executeStoreTargets(cfg RuntimeConfig, ks *key_store.KeyStore, filePaths []
 				writeOpLog(summary)
 				return fmt.Errorf("remote mode requires an address; use %s or toggle mode in the menu", REMOTE_ADDR_FLAG)
 			}
-			f, openErr := os.Open(sourcePath)
-			if openErr != nil {
-				summary.Err = openErr
+			client, dialErr := NewGRPCClient(cfg.RemoteAddr)
+			if dialErr != nil {
+				summary.Err = dialErr
 				renderSummary(summary)
 				writeOpLog(summary)
-				return fmt.Errorf("open %s for upload: %w", sourcePath, openErr)
+				return fmt.Errorf("connect to remote: %w", dialErr)
 			}
 
-			pr := newProgressReader(f, sourceSize, "upload", showBar)
-			client := NewFileServerClient(cfg.RemoteAddr)
-			client.Timeout = 0 // no deadline for large uploads
-
 			startPhase("upload", "upload file bytes to remote server")
-			hash, uploadErr := client.Upload(sourcePath, pr)
-			pr.Finish()
-			f.Close()
+			hash, uploadErr := client.Upload(sourcePath)
+			client.Close()
 			summary.Timer.Stop(uploadErr != nil)
 
-			summary.Bytes = pr.BytesRead()
+			summary.Bytes = sourceSize
 			if uploadErr != nil {
 				summary.Err = uploadErr
 				renderSummary(summary)
