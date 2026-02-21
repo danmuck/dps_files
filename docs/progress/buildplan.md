@@ -101,52 +101,45 @@
 
 ---
 
-## Stage 2: Transport & RPC — Wire Protocol Completion
+## Stage 2: Transport & RPC — gRPC Migration (COMPLETE)
 
-> **STATUS: FUTURE** — Interface stubs and scaffolding only. Will be reworked after Stage 1 completion.
+> **STATUS: COMPLETE** — The hand-rolled TCP transport package has been replaced by gRPC. All file operations (Upload, Download, List, Delete, UploadDir, ListDir) are served via a generated `DPSFiles` gRPC service. An optional gRPC-Gateway proxy exposes the same service as HTTP/JSON on a second port.
 
-**Current state:** `TCPHandler` can accept TCP connections, encode/send RPCs via Protobuf, and push decoded RPCs into a channel. `DefaultCoder` handles Protobuf encode/decode with a 4-byte (uint32) length header supporting messages up to 4GB. `Send()` now correctly encodes via `Coder.Encode()`. `TransportHandler` interface signatures are consistent (`Send(*RPC)`, `Close() error`). `TCPHandler` has `Dial(addr)` with connection pooling for outbound connections. File operation commands (UPLOAD, DOWNLOAD, LIST, DELETE) added to protobuf. `ServerNode` dispatches RPCs via `HandleRPC` switch, with optional HTTP server. Tests verify listener, connect, and full send/receive round-trip. No UDP, no TLS.
+**Current state:** `src/api/transport/` package deleted entirely (tcp.go, encoding.go, transport.go, udp.go, rpc.proto, rpc.pb.go, tcp_handler_test.go). `NodeInfo` moved to `src/api/nodes/nodes.go`. `src/api/pb/` contains generated code from `dps.proto` (protoc-gen-go, protoc-gen-go-grpc, protoc-gen-grpc-gateway). `src/api/grpc/server.go` implements `pb.DPSFilesServer` backed by `ledgers.FileLedger`. `DefaultServerNode` holds `*grpc.Server` + `net.Listener`. `DefaultClientNode` holds one `*grpc.ClientConn`. Upload/Download use `io.Pipe` for streaming — no large in-memory buffers. Dial-back architecture eliminated. Proto parse errors eliminated.
 
 **Key files:**
-- `src/api/transport/transport.go` — `TransportHandler` interface (corrected signatures)
-- `src/api/transport/tcp.go` — `TCPHandler`: accept loop, connection handler, `Send()` uses encoder
-- `src/api/transport/encoding.go` — `Coder` interface, `DefaultCoder` (Protobuf + 2-byte header, smplog debug logging)
-- `src/api/transport/udp.go` — Empty placeholder
-- `src/api/transport/rpc.proto` — Protobuf definitions (RPC, RPCT, NodeInfo, Protocol, Command)
-- `src/api/transport/rpc.pb.go` — Generated Protobuf code
-- `src/api/transport/tcp_handler_test.go` — 2 tests: listener + connect, full send/receive round-trip
+- `src/api/pb/dps.proto` — `DPSFiles` service definition with HTTP annotations
+- `src/api/pb/dps.pb.go` — Generated message types
+- `src/api/pb/dps_grpc.pb.go` — Generated `DPSFilesClient`, `DPSFilesServer`, `RegisterDPSFilesServer`
+- `src/api/pb/dps.pb.gw.go` — Generated `RegisterDPSFilesHandlerFromEndpoint` (grpc-gateway)
+- `src/api/grpc/server.go` — `grpcserver.Server`: Upload, Download, Delete, List, UploadDir, ListDir
+- `src/api/grpc/server_test.go` — bufconn tests: upload+list, download by hash, delete
+- `src/api/nodes/server_node.go` — `DefaultServerNode` with `*grpc.Server`, `Addr()`, `WithHTTP`
+- `src/api/nodes/client_node.go` — `DefaultClientNode` with `activeConn`, `Stub()`, `LocalServer()`
+- `src/api/nodes/gateway.go` — `serveGateway`: HTTP/JSON reverse proxy via grpc-gateway
 
-### Phase 2A: Fix Existing TCP
-- [x] Fix `TCPHandler.Send()` — now encodes via `Coder.Encode()` and writes the result
-- [x] Fix `TransportHandler` interface signatures — `Send(*RPC)`, `Close() error`
-- [x] Upgrade length header from `uint16` (65KB max) to `uint32` (4GB max) to support chunk-sized messages
-- [x] Add `TCPHandler.Dial(addr)` method to initiate outbound connections (currently only accepts inbound)
-- [x] Add connection pooling or reuse — currently each `handleConnection` runs independently with no way to send responses back
-- [x] Replace remaining `fmt.Printf` / `fmt.Fprintf(os.Stderr, ...)` with `smplog` (project standard) — transport already uses smplog
+### Phase 2A: gRPC Migration
+- [x] Install proto plugins and add Go module dependencies (grpc, protobuf, grpc-gateway)
+- [x] Update `make build-protobuf` to invoke protoc with go, go-grpc, and grpc-gateway plugins targeting `src/api/pb/`
+- [x] Write `dps.proto` service definition with HTTP annotations for all six operations
+- [x] Generate `src/api/pb/` code (dps.pb.go, dps_grpc.pb.go, dps.pb.gw.go)
+- [x] Implement `grpcserver.Server` in `src/api/grpc/server.go` backed by `ledgers.FileLedger`
+- [x] Rewrite `DefaultServerNode` to hold `*grpc.Server` + `net.Listener`; `Start()` calls `grpcServer.Serve`; `WithHTTP` starts grpc-gateway; `Addr()` returns live listener address
+- [x] Simplify `DefaultNode` to identity only (address, pubKey, Router) — no TCPHandler, no exit channel
+- [x] Rewrite `DefaultClientNode` to hold `*grpc.ClientConn`; local mode connects to embedded server over gRPC; `Stub()` returns `pb.DPSFilesClient`; `LocalServer()` exposes embedded server
+- [x] Rewrite `cmd/client/remote.go` — `GRPCClient` replaces `FileServerClient`
+- [x] Delete `src/api/transport/` package entirely; move `NodeInfo` to `src/api/nodes/nodes.go`; remove `http_handlers.go` and `http_handlers_test.go`
+- [x] Update `cmd/server/main.go` for new node constructors
 
-### Phase 2B: RPC Dispatch
-- [ ] Implement an RPC handler registry: map `Command` enum → handler function
-- [ ] Implement request-response correlation: add a nonce/request-ID field to `rpc.proto`, match responses to pending requests
-- [ ] Implement `PING` / `ACK` handler as the first working RPC round-trip
-- [ ] Add RPC timeout: if no response within N seconds, return an error to the caller
+### Phase 2B: Testing
+- [x] Add grpc server tests via bufconn — `TestUploadAndList`, `TestDownloadByHash`, `TestDeleteFile`
+- [x] Update server_node_test.go — gRPC upload + list via real TCP listener
+- [x] Update client_node_test.go — local mode gRPC, remote mode, LocalServer() access, no-server error
 
-### Phase 2C: UDP Transport
-- [ ] Implement `UDPHandler` in `udp.go` — same `TransportHandler` interface as TCP
-- [ ] UDP is preferred for Kademlia RPCs (small messages, connectionless); TCP for Raft (reliable, ordered)
-- [ ] Add message size validation: reject messages larger than UDP-safe threshold (~1400 bytes)
-
-### Phase 2D: Security
-- [ ] Add TLS support to `TCPHandler` (required before Raft log replication carries real data)
-- [ ] Validate all inbound message sizes before allocating buffers (prevent memory exhaustion)
+### Phase 2C: Future Transport Work
+- [ ] Add TLS support to gRPC connections (required before Raft log replication carries real data)
+- [ ] Implement UDP transport for Kademlia RPCs (small messages, connectionless)
 - [ ] Add rate limiting on inbound connections per remote address
-
-### Phase 2E: Testing
-- [x] Add test: listener init and client connect — `TestTCPHandlerListenAndAccept`
-- [x] Add test: full encode/send/receive round-trip — `TestTCPHandlerSendReceive`
-- [ ] Add test: encode → decode round-trip for every `Command` type
-- [ ] Add test: oversized message is rejected cleanly
-- [ ] Add test: concurrent connections (10+ clients sending simultaneously)
-- [ ] Add test: clean shutdown — close exit channel, verify all goroutines exit and listener is released
 
 ---
 
@@ -154,12 +147,12 @@
 
 > **STATUS: FUTURE** — Interface stubs and scaffolding only. Will be reworked after Stage 1 completion.
 
-**Current state:** `KademliaRouter` struct exists with a `buckets` field (`[][]*NodeInfo`) but every method is a stub returning `nil` or `-1`. Interfaces are now consistent — `RoutingTable.Lookup` returns `(*transport.NodeInfo, error)`, `KademliaRouting` methods return typed values. `DefaultRouter` is a simple map-based router that works. `DefaultNode` returns `*DefaultNode` from constructor (no more panic). `DefaultNode.Send` signature matches `ClientNode.Send`. Empty method bodies for Kademlia RPCs.
+**Current state:** `KademliaRouter` struct exists with a `buckets` field (`[][]*NodeInfo`) but every method is a stub returning `nil` or `-1`. Interfaces are consistent — `RoutingTable.Lookup` returns `(*NodeInfo, error)`, `KademliaRouting` methods return typed values. `DefaultRouter` is a simple map-based router that works. `DefaultNode` is identity-only (no Start/Shutdown — lifecycle is on concrete node types). `NodeInfo` is now defined in `src/api/nodes/nodes.go` (moved from the deleted transport package). Empty method bodies for Kademlia RPCs.
 
 **Key files:**
-- `src/api/nodes/routing.go` — `RoutingTable`, `KademliaRouting` interfaces (corrected return types), `DefaultRouter`, `KademliaRouter` (stubs)
-- `src/api/nodes/nodes.go` — `Node`, `ClientNode`, `ServerNode`, `MasterNode` interfaces
-- `src/api/nodes/default.go` — `DefaultNode` struct (returns `*DefaultNode`, no panic), `Start()`, `Shutdown()`, `ID()`
+- `src/api/nodes/routing.go` — `RoutingTable`, `KademliaRouting` interfaces, `DefaultRouter`, `KademliaRouter` (stubs)
+- `src/api/nodes/nodes.go` — `Node`, `ClientNode`, `ServerNode` interfaces; `NodeInfo` struct
+- `src/api/nodes/default.go` — `DefaultNode` struct (identity only: address, pubKey, Router)
 - `src/api/nodes/routing_test.go` — 4 tests: creation, bad ID, start/shutdown, router type
 
 **Depends on:** Stage 2 (transport must work for RPCs)

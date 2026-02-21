@@ -21,7 +21,7 @@ Files are split into fixed-size chunks, each assigned a 20-byte SHA-1 DHT key (v
 
 ```
 cmd/
-  server/main.go      — ServerNode entry point (TCP binary + optional HTTP)
+  server/main.go      — ServerNode entry point (gRPC + optional gRPC-Gateway HTTP)
   client/main.go      — ClientNode entry point (interactive TUI, local or remote mode)
   chain/main.go       — Blockchain demo with AES-GCM encryption
   gen_file/main.go    — Test file generator (size-aware, reuses existing files)
@@ -29,8 +29,9 @@ cmd/
 
 src/
   api/
-    nodes/             — Node, ServerNode, ClientNode interfaces + DefaultServerNode, DefaultClientNode, DefaultRouter
-    transport/         — TransportHandler interface, TCPHandler (4-byte framing, Dial, connection pool), Protobuf encoding, rpc.proto
+    nodes/             — Node, ServerNode, ClientNode interfaces + DefaultServerNode, DefaultClientNode, DefaultRouter, gateway.go
+    pb/                — Generated gRPC + grpc-gateway code from dps.proto (DPSFilesClient, DPSFilesServer, all message types)
+    grpc/              — grpcserver.Server: implements pb.DPSFilesServer backed by ledgers.FileLedger
     ledgers/           — Interfaces for LogManager, MetadataStore, FileLedger, SnapshotManager, BackupLedger
   impl/                — Block, BlockData, crypto utilities (SHA, AES-GCM)
   key_store/           — KeyStore, KeyStoreLedger (FileLedger adapter), File, FileReference, MetaData, RemoteHandler, chunking pipeline
@@ -56,7 +57,7 @@ make client ARGS="--mode local --storage local/storage"               # run Clie
 make chain                                 # go run cmd/chain/main.go
 make gen-file SIZE=256MB FILE=local/upload/test.dat # generate test file
 make tidy                                  # go mod tidy
-make build-protobuf                        # protoc → src/api/transport/rpc.pb.go
+make build-protobuf                        # protoc → src/api/pb/ (go, go-grpc, grpc-gateway plugins)
 make clean                                 # rm -rf .build/
 ```
 
@@ -80,19 +81,23 @@ make clean                                 # rm -rf .build/
 - **`utils.go`** — `EncryptData()` / `DecryptData()` (AES-256-GCM), `CalculateHash()` (SHA-1/256/512), `ValidateHash()`. Handles both `*Block` and `Block` value types.
 
 ### `nodes` — Node Types & Routing (FUNCTIONAL)
-- **`nodes.go`** — Interfaces: `Node`, `ServerNode` (Storage/HandleRPC/ServeHTTP), `ClientNode` (Upload/Download/Delete/List). `NodeState` enum (Follower/Candidate/Leader).
-- **`default.go`** — `DefaultNode`: base implementation with address, ID, router, TCP handler. Constructor: `NewDefaultNode(id, addr)`.
-- **`server_node.go`** — `DefaultServerNode`: embeds DefaultNode, manages FileLedger storage, handles RPCs (PING/UPLOAD/DOWNLOAD/LIST/DELETE/UPLOAD_DIR/LIST_DIR), optional HTTP server. Constructor: `NewServerNode(id, addr, storageDir, opts...)`.
-- **`client_node.go`** — `DefaultClientNode`: embeds DefaultNode, supports local mode (embedded ServerNode) and remote mode. Constructor: `NewClientNode(id, opts...)` with `WithLocalStorage(dir)`, `WithRemotes(addrs...)`.
-- **`http_handlers.go`** — HTTP route handlers for ServerNode: PUT/GET/DELETE /files endpoints, GET /dirs/hash/{hex} and /dirs/hash/{hex}/tree for directory listing.
+- **`nodes.go`** — Interfaces: `Node`, `ServerNode` (Storage), `ClientNode` (Stub/LocalServer). `NodeInfo` struct (ID, Address — moved here from the former transport package). `NodeState` enum (Follower/Candidate/Leader).
+- **`default.go`** — `DefaultNode`: identity-only base (address, pubKey, Router). No TCPHandler, no exit channel, no Start()/Shutdown(). Constructor: `NewDefaultNode(id, addr)`.
+- **`server_node.go`** — `DefaultServerNode`: embeds DefaultNode, holds `*grpc.Server` + `net.Listener`. `Start()` binds TCP and calls `grpcServer.Serve`. `WithHTTP(addr)` option starts gRPC-Gateway on a second port. `Addr()` returns the live listener address. `RawKeyStore()` exposes the underlying KeyStore for TUI access. Constructor: `NewServerNode(id, addr, storageDir, opts...)`.
+- **`client_node.go`** — `DefaultClientNode`: embeds DefaultNode, holds one `*grpc.ClientConn` (`activeConn`). In local mode starts an embedded ServerNode and connects to it over gRPC on `localhost:0`. `Stub() (pb.DPSFilesClient, error)` returns the gRPC stub. `LocalServer() *DefaultServerNode` returns the embedded server (nil in remote mode). Constructor: `NewClientNode(id, opts...)` with `WithLocalStorage(dir)`, `WithRemotes(addrs...)`.
+- **`gateway.go`** — `serveGateway(httpAddr, grpcAddr)`: starts an HTTP/JSON reverse proxy using grpc-gateway that forwards to the gRPC server. Called by `DefaultServerNode.Start()` when `WithHTTP` is configured.
 - **`routing.go`** — `RoutingTable` and `KademliaRouting` interfaces. `DefaultRouter` (map-based, functional).
 
-### `transport` — Network & RPC (FUNCTIONAL)
-- **`transport.go`** — `TransportHandler` interface: `ListenAndAccept`, `Dial`, `Send(*RPC)`, `ProcessRPC`, `Close() error`.
-- **`tcp.go`** — `TCPHandler`: non-blocking accept, 4-byte length-prefixed Protobuf messages, `Dial()` with connection pool, `Addr()`, `ReadRPC()`.
-- **`encoding.go`** — `Coder` interface, `DefaultCoder` using Protobuf marshal/unmarshal with 4-byte big-endian length prefix.
-- **`rpc.proto`** — Defines `RPC`, `RPCT`, `NodeInfo`, `Protocol` (Raft/Kademlia), `Command` (PING/STORE/GET/FIND_NODE/FIND_VALUE/ACK/NODES/VALUE/REQUEST_VOTE/APPEND_ENTRIES/INSTALL_SNAPSHOT/UPLOAD/DOWNLOAD/LIST/DELETE/UPLOAD_DIR/LIST_DIR).
-- **`udp.go`** — Empty placeholder.
+### `pb` — Generated gRPC & Gateway Code (GENERATED)
+- **`dps.proto`** — Service definition for `DPSFiles`: `Upload` (client-streaming), `Download` (server-streaming), `Delete`, `List`, `UploadDir`, `ListDir`. HTTP annotations map each RPC to a REST route under `/v1/`. Message types: `UploadChunk`, `UploadResponse`, `DownloadRequest`, `DataChunk`, `DeleteRequest`, `DeleteResponse`, `ListRequest`, `ListResponse`, `FileEntry`, `UploadDirRequest`, `UploadDirResponse`, `ListDirRequest`, `ListDirResponse`, `DirEntry`.
+- **`dps.pb.go`** — Generated message types (protoc-gen-go).
+- **`dps_grpc.pb.go`** — Generated `DPSFilesClient`, `DPSFilesServer`, `RegisterDPSFilesServer`, `NewDPSFilesClient` (protoc-gen-go-grpc).
+- **`dps.pb.gw.go`** — Generated `RegisterDPSFilesHandlerFromEndpoint` HTTP/JSON gateway (protoc-gen-grpc-gateway).
+
+### `grpc` — gRPC Server Implementation (FUNCTIONAL)
+Package name: `grpcserver`.
+- **`server.go`** — `Server` struct: implements `pb.DPSFilesServer` backed by `ledgers.FileLedger`. Constructor: `grpcserver.New(storage ledgers.FileLedger) *Server`. Methods: `Upload` (client-streaming via `io.Pipe`, calls `StoreFromReader`), `Download` (server-streaming via `io.Pipe`, calls `StreamFile`/`StreamFileByName`), `Delete`, `List`, `UploadDir`, `ListDir`. Upload/Download use `io.Pipe` so no large in-memory buffers are needed for large files.
+- **`server_test.go`** — Tests using `bufconn` in-memory transport: `TestUploadAndList`, `TestDownloadByHash`, `TestDeleteFile`.
 
 ### `ledgers` — Consensus & Backup Interfaces (INTERFACES ONLY)
 - **`net_store.go`** — `LogManager`, `MetadataStore`, `FileLedger` interfaces (including directory operations). `FileID`, `ChunkID` typed aliases. `FileMetaSummary`, `DirectoryEntry` structs.
@@ -109,30 +114,29 @@ make clean                                 # rm -rf .build/
 - **DHT key derivation:** Always use `computeChunkKey(fileHash, chunkIndex)` — appends index as little-endian uint64, then SHA-1.
 - **File extensions:** `.kdht` for chunk data files, `.toml` for metadata.
 - **Chunk sizing:** Dynamic based on file size, bounded by `MinBlockSize` (64KB) and `MaxBlockSize` (4MB), targeting ~1000 chunks per file. Empty files produce 0 blocks.
-- **Serialization:** Protobuf for RPC messages, TOML for metadata persistence, gob for Block hashing.
-- **Dependencies:** Minimal — `BurntSushi/toml`, `google.golang.org/protobuf`, and `github.com/danmuck/smplog` (structured logging via zerolog).
+- **Serialization:** Protobuf for RPC messages (via gRPC), TOML for metadata persistence, gob for Block hashing.
+- **Dependencies:** Minimal — `BurntSushi/toml`, `google.golang.org/grpc`, `google.golang.org/protobuf`, `github.com/grpc-ecosystem/grpc-gateway/v2`, and `github.com/danmuck/smplog` (structured logging via zerolog).
 - **Logging:** Uses `github.com/danmuck/smplog` with shared config loaded via `cmd/internal/logcfg`. Config resolves `SMPLOG_CONFIG` env var, then `./smplog.config.toml`, then `./local/smplog.config.toml`.
 
 ## Architecture Patterns
 
 ### Node Hierarchy
 ```
-Node (base interface: ID, Address, Start, Shutdown, Peers)
-├── ServerNode (extends Node: Storage, HandleRPC, ServeHTTP)
-│   └── DefaultServerNode (KeyStore via FileLedger, TCP+HTTP, RPC dispatch)
-└── ClientNode (extends Node: Upload, Download, Delete, List)
-    └── DefaultClientNode (local mode with embedded ServerNode, or remote-only)
+Node (base interface: ID, Address, NodeInfo, Start, Shutdown, Peers)
+├── ServerNode (extends Node: Storage() FileLedger)
+│   └── DefaultServerNode (KeyStore via FileLedger, *grpc.Server + net.Listener, optional gRPC-Gateway)
+└── ClientNode (extends Node: Stub() DPSFilesClient, LocalServer() *DefaultServerNode)
+    └── DefaultClientNode (activeConn *grpc.ClientConn; local mode embeds ServerNode, remote mode dials directly)
 ```
 
 ### Interfaces to Implement
 When adding new node types or storage backends:
 
-- **`ServerNode`** — For storage servers: `Storage() FileLedger`, `HandleRPC(*RPC) (*RPC, error)`, `ServeHTTP(w, r)`.
-- **`ClientNode`** — For file operation clients: `Upload`, `Download`, `Delete`, `List`.
+- **`ServerNode`** — For storage servers: `Storage() FileLedger`.
+- **`ClientNode`** — For file operation clients: `Stub() (pb.DPSFilesClient, error)`, `LocalServer() *DefaultServerNode`.
 - **`FileLedger`** — For storage backends: wraps chunk storage with streaming, deletion, metadata listing.
 - **`RemoteHandler`** — For network chunk distribution: `StartReceiver`, `PassFileReference`, `Receive`.
 - **`KademliaRouting`** — For DHT routing (future): `K()`, `A()`, `GetBucket()`, `ClosestK()`, `Size()`.
-- **`TransportHandler`** — For new transport protocols: implement alongside `TCPHandler`.
 
 ### Future Extension Interfaces (not yet implemented)
 - **`RaftNode`** — Will extend `ServerNode` with: `ApplyCommand`, `CreateSnapshot`, `GetState`, `AddPeer`, `RemovePeer`.
@@ -157,11 +161,13 @@ Input file → calculate metadata (SHA-256, size, permissions)
 ### Working
 - File chunking, storage, and reassembly (`key_store` package)
 - FileLedger adapter (`KeyStoreLedger`) bridging KeyStore to the ledger interface
-- ServerNode with RPC dispatch (PING/UPLOAD/DOWNLOAD/LIST/DELETE) + optional HTTP server
-- ClientNode with local mode (embedded ServerNode) and remote mode
+- gRPC transport: Upload/Download/List/Delete/UploadDir/ListDir via `DPSFiles` service
+- gRPC-Gateway: HTTP/JSON proxy exposing gRPC service on a second port (`WithHTTP` option)
+- Streaming file transfer via `io.Pipe` — no in-memory buffering for large files (Upload + Download)
+- ServerNode backed by gRPC (`*grpc.Server` + `net.Listener`), graceful shutdown
+- ClientNode with local mode (embedded ServerNode connected over gRPC) and remote mode
 - Directory semantics: recursive store, list, reassemble for entire directory trees (manifests stored as MetaData entries)
 - Interactive TUI client (`cmd/client`) with upload, upload-dir, download, view, delete, verify, stats
-- Streaming file serving (TCP binary protocol + HTTP REST) via ServerNode
 - Crash recovery via intent files (write-ahead before chunking)
 - Deep integrity verification (`VerifyAll`, `VerifyFile`)
 - TTL-based expiry and cleanup (`CleanupExpired`)
@@ -171,7 +177,6 @@ Input file → calculate metadata (SHA-256, size, permissions)
 - Structured logging via smplog (project-wide)
 - AES-256-GCM encryption/decryption (`impl` package)
 - Blockchain block creation and chain validation (hash covers all exported fields)
-- TCP transport with 4-byte framing, Protobuf encoding, Dial + connection pool
 - Node creation, start/shutdown lifecycle with signal handling
 
 ### Future (Stubs)
@@ -179,18 +184,16 @@ Input file → calculate metadata (SHA-256, size, permissions)
 > These are interface stubs or empty scaffolding. Do not build on these without redesign.
 
 - Kademlia routing (interface defined, no XOR distance or bucket logic)
-- UDP transport (empty file)
+- UDP transport (no implementation)
 - RemoteHandler (placeholder, not wired to network)
 - Raft consensus (interfaces defined, no implementation)
 - Snapshot/backup scheduling (interfaces defined, no implementation)
 - Blockchain Chain struct (Block works, but no Chain/persistence/Append/Validate)
 - Log replication and leader election (not started)
-- Request-response correlation on transport (ServerNode dials back instead of responding on same connection)
 
 ### Remaining Known Issues
-- `TCPHandler` shutdown uses `time.Sleep` instead of context cancellation
-- No TLS on TCP connections
-- Transport responses use dial-back instead of same-connection response (no RequestID correlation yet)
+- No TLS on gRPC connections (insecure credentials used everywhere)
+- `DefaultClientNode` connects to the first remote address only (no load balancing or failover)
 
 For detailed per-module issue tracking, see `docs/progress/buildplan.md`.
 
@@ -203,10 +206,10 @@ For detailed per-module issue tracking, see `docs/progress/buildplan.md`.
 4. Add a `cmd/` entry point if needed.
 
 ### Add a New RPC Method
-1. Add the command to the `Command` enum in `src/api/transport/rpc.proto`.
-2. Run `make build-protobuf` to regenerate `rpc.pb.go`.
-3. Add handler logic in `DefaultServerNode.HandleRPC()`.
-4. Add client method in `DefaultClientNode` if needed.
+1. Add the RPC to the `DPSFiles` service in `src/api/pb/dps.proto` (with `google.api.http` annotation for gateway).
+2. Run `make build-protobuf` to regenerate `src/api/pb/` (go, go-grpc, grpc-gateway outputs).
+3. Implement the method in `grpcserver.Server` in `src/api/grpc/server.go`.
+4. Add a client helper using the generated `pb.DPSFilesClient` stub where needed.
 
 ### Generate Test Files
 ```sh
@@ -230,9 +233,10 @@ make server ARGS="--addr :9000 --http :8080 --storage local/storage"
 ```
 
 ### Add a New Transport Protocol
-1. Create a new file in `src/api/transport/` (e.g., `udp.go`).
-2. Implement the `TransportHandler` interface (including `Dial`).
-3. Follow `TCPHandler` patterns: channel-based inbound queue, 4-byte length-prefixed messages.
+The canonical transport layer is now gRPC. To add a parallel transport (e.g., for Kademlia UDP):
+1. Define a new interface or extend `src/api/nodes/nodes.go` for the new protocol.
+2. Implement send/receive using the same `ledgers.FileLedger` storage backend.
+3. Wire the new transport into the relevant node type.
 
 ## Testing
 
@@ -248,9 +252,8 @@ Test files follow `*_test.go` convention in their respective packages:
 - `src/key_store/config_test.go` — KeyStoreConfig defaults, configurable TTL
 - `src/key_store/file_ledger_test.go` — FileLedger adapter: interface satisfaction, store/list/reassemble/delete round-trip
 - `src/api/nodes/routing_test.go` — node creation, start/shutdown lifecycle, router type verification
-- `src/api/nodes/server_node_test.go` — ServerNode start/shutdown, HandleRPC for PING/UPLOAD/DOWNLOAD/LIST/DELETE
-- `src/api/nodes/client_node_test.go` — ClientNode local/remote modes, local upload/list
-- `src/api/nodes/http_handlers_test.go` — HTTP upload, list, download by name
-- `src/api/transport/tcp_handler_test.go` — listener init + connect, send/receive round-trip, Dial + 4-byte framing
+- `src/api/nodes/server_node_test.go` — ServerNode start/shutdown, gRPC upload + list round-trip
+- `src/api/nodes/client_node_test.go` — ClientNode local mode (gRPC to embedded server), remote mode, LocalServer() access, error on no-server
+- `src/api/grpc/server_test.go` — gRPC server via bufconn: upload+list, download by hash, delete
 
 Test data goes in `./local/upload/` (created by tests, reused across runs). The `local/storage/` directory is used at runtime and is gitignored.
