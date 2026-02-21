@@ -16,6 +16,7 @@ test-coverage:
 build:
 	@for dir in cmd/*/; do \
 		name=$$(basename $$dir); \
+		if [ "$$name" = "internal" ]; then continue; fi; \
 		mkdir -p .build/$$name; \
 		go build -o .build/$$name/$$name ./$$dir; \
 	done
