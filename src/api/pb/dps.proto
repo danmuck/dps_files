@@ -73,6 +73,42 @@ message ListDirResponse {
   repeated DirEntry entries = 1;
 }
 
+// --- Management RPCs ---
+
+message VerifyRequest {}
+message VerifyError {
+  uint64 chunk_index = 1;
+  string file_name   = 2;
+  string error       = 3;
+}
+message VerifyResponse {
+  repeated VerifyError errors = 1;
+}
+
+message ExpireRequest {}
+message ExpireResponse {
+  int64 removed = 1;
+}
+
+// deep=true removes .kdht + metadata + cache; false removes .kdht only.
+message CleanRequest {
+  bool deep = 1;
+}
+message CleanResponse {
+  int64 removed_kdht     = 1;
+  int64 removed_metadata = 2;
+  int64 removed_cache    = 3;
+}
+
+message StatsRequest {}
+message StatsResponse {
+  uint64 data_bytes     = 1;
+  uint64 metadata_bytes = 2;
+  uint64 cache_bytes    = 3;
+  uint64 total_bytes    = 4;
+  int64  file_count     = 5;
+}
+
 service DPSFiles {
 
   rpc Upload(stream UploadChunk) returns (UploadResponse) {
@@ -112,5 +148,21 @@ service DPSFiles {
     option (google.api.http) = {
       get: "/v1/dirs/{hash}"
     };
+  }
+
+  rpc Verify(VerifyRequest) returns (VerifyResponse) {
+    option (google.api.http) = { get: "/v1/admin/verify" };
+  }
+
+  rpc Expire(ExpireRequest) returns (ExpireResponse) {
+    option (google.api.http) = { post: "/v1/admin/expire" body: "*" };
+  }
+
+  rpc Clean(CleanRequest) returns (CleanResponse) {
+    option (google.api.http) = { post: "/v1/admin/clean" body: "*" };
+  }
+
+  rpc Stats(StatsRequest) returns (StatsResponse) {
+    option (google.api.http) = { get: "/v1/admin/stats" };
   }
 }
