@@ -92,6 +92,10 @@
 - [x] Make `VERIFY` a runtime field on `KeyStore` instead of a compile-time const (implemented via `KeyStoreConfig.VerifyOnWrite`)
 - [x] Make `PRINT_BLOCKS` a runtime field or remove progress printing from library code (move to cmd/) — removed, inlined
 - [x] Extract shared chunking logic from `StoreFileLocal` and `LoadAndStoreFileLocal` into a private helper to eliminate duplication
+- [x] Add directory semantics: `StoreDirectory`, `ListDirectory`, `ReassembleDirectory` on KeyStore and FileLedger, with `EntryType`/`ParentHash` on MetaData, `DirectoryEntry`/`DirectoryManifest` types, path normalization, edge-case tests (deep nesting, duplicate basenames, empty dirs)
+- [x] Add `UPLOAD_DIR` and `LIST_DIR` RPC commands to protobuf and ServerNode HandleRPC
+- [x] Add HTTP directory listing endpoints (`GET /dirs/hash/{hex}`, `GET /dirs/hash/{hex}/tree`)
+- [x] Add TUI directory upload action (`upload-dir`) and `[DIR]` display in view
 - [ ] Add `context.Context` parameter to `StoreFileLocal` and `LoadAndStoreFileLocal` for cancellation support
 - [x] Deduplicate: `existingFileByHash` is called at the top of all store entry points (`StoreFileLocal`, `LoadAndStoreFileLocal`, `LoadAndStoreFileRemote`, `StoreFromReader`) and short-circuits chunking when the hash is already stored
 

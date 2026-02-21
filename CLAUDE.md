@@ -67,7 +67,8 @@ make clean                                 # rm -rf .build/
 - **`file_ledger.go`** — `KeyStoreLedger` adapter: wraps `*KeyStore` to implement the `ledgers.FileLedger` interface. Converts between KeyStore's concrete types and FileLedger's `FileID`/`ChunkID` typed aliases.
 - **`files.go`** — `File` struct, `StoreFileLocal`, `LoadAndStoreFileLocal`, `LoadAndStoreFileRemote`, `StoreFromReader`, `ReassembleFileToBytes`, `ReassembleFileToPath`. Contains `computeChunkKey` — the canonical DHT key derivation.
 - **`file_reference.go`** — `FileReference` struct: per-chunk metadata (key, hash, index, location, protocol).
-- **`metadata.go`** — `MetaData` struct: per-file metadata. TOML serialization to `local/storage/metadata/`.
+- **`metadata.go`** — `MetaData` struct: per-file metadata (`EntryType`, `ParentHash` for directory support, `IsDirectory()` helper). TOML serialization to `local/storage/metadata/`.
+- **`directory.go`** — `DirectoryEntry`, `DirectoryManifest` types, `NormalizePath()`, `StoreDirectory()`, `ListDirectory()`, `ReassembleDirectory()` for recursive directory ingest/browse/download.
 - **`config.go`** — `KeyStoreConfig`, `DefaultConfig()`, `CalculateBlockSize()` with promotion logic, `HashFile()`, `CopyFile()`, `ValidateSHA256()`. Constants (`KeySize=20`, `HashSize=32`, `CryptoSize=64`, block size limits), `RemoteHandler` interface, `DefaultRemoteHandler`.
 - **`verify.go`** — `VerifyAll()`, `VerifyFile()`: deep integrity scanning of all stored chunks.
 - **`intent.go`** — Crash recovery via intent files (write-ahead before chunking).
@@ -81,20 +82,20 @@ make clean                                 # rm -rf .build/
 ### `nodes` — Node Types & Routing (FUNCTIONAL)
 - **`nodes.go`** — Interfaces: `Node`, `ServerNode` (Storage/HandleRPC/ServeHTTP), `ClientNode` (Upload/Download/Delete/List). `NodeState` enum (Follower/Candidate/Leader).
 - **`default.go`** — `DefaultNode`: base implementation with address, ID, router, TCP handler. Constructor: `NewDefaultNode(id, addr)`.
-- **`server_node.go`** — `DefaultServerNode`: embeds DefaultNode, manages FileLedger storage, handles RPCs (PING/UPLOAD/DOWNLOAD/LIST/DELETE), optional HTTP server. Constructor: `NewServerNode(id, addr, storageDir, opts...)`.
+- **`server_node.go`** — `DefaultServerNode`: embeds DefaultNode, manages FileLedger storage, handles RPCs (PING/UPLOAD/DOWNLOAD/LIST/DELETE/UPLOAD_DIR/LIST_DIR), optional HTTP server. Constructor: `NewServerNode(id, addr, storageDir, opts...)`.
 - **`client_node.go`** — `DefaultClientNode`: embeds DefaultNode, supports local mode (embedded ServerNode) and remote mode. Constructor: `NewClientNode(id, opts...)` with `WithLocalStorage(dir)`, `WithRemotes(addrs...)`.
-- **`http_handlers.go`** — HTTP route handlers for ServerNode: PUT/GET/DELETE /files endpoints.
+- **`http_handlers.go`** — HTTP route handlers for ServerNode: PUT/GET/DELETE /files endpoints, GET /dirs/hash/{hex} and /dirs/hash/{hex}/tree for directory listing.
 - **`routing.go`** — `RoutingTable` and `KademliaRouting` interfaces. `DefaultRouter` (map-based, functional).
 
 ### `transport` — Network & RPC (FUNCTIONAL)
 - **`transport.go`** — `TransportHandler` interface: `ListenAndAccept`, `Dial`, `Send(*RPC)`, `ProcessRPC`, `Close() error`.
 - **`tcp.go`** — `TCPHandler`: non-blocking accept, 4-byte length-prefixed Protobuf messages, `Dial()` with connection pool, `Addr()`, `ReadRPC()`.
 - **`encoding.go`** — `Coder` interface, `DefaultCoder` using Protobuf marshal/unmarshal with 4-byte big-endian length prefix.
-- **`rpc.proto`** — Defines `RPC`, `RPCT`, `NodeInfo`, `Protocol` (Raft/Kademlia), `Command` (PING/STORE/GET/FIND_NODE/FIND_VALUE/ACK/NODES/VALUE/REQUEST_VOTE/APPEND_ENTRIES/INSTALL_SNAPSHOT/UPLOAD/DOWNLOAD/LIST/DELETE).
+- **`rpc.proto`** — Defines `RPC`, `RPCT`, `NodeInfo`, `Protocol` (Raft/Kademlia), `Command` (PING/STORE/GET/FIND_NODE/FIND_VALUE/ACK/NODES/VALUE/REQUEST_VOTE/APPEND_ENTRIES/INSTALL_SNAPSHOT/UPLOAD/DOWNLOAD/LIST/DELETE/UPLOAD_DIR/LIST_DIR).
 - **`udp.go`** — Empty placeholder.
 
 ### `ledgers` — Consensus & Backup Interfaces (INTERFACES ONLY)
-- **`net_store.go`** — `LogManager`, `MetadataStore`, `FileLedger` interfaces. `FileID`, `ChunkID` typed aliases. `FileMetaSummary` struct.
+- **`net_store.go`** — `LogManager`, `MetadataStore`, `FileLedger` interfaces (including directory operations). `FileID`, `ChunkID` typed aliases. `FileMetaSummary`, `DirectoryEntry` structs.
 - **`snapshots.go`** — `SnapshotManager`, `BackupLedger` interfaces.
 
 ## Coding Conventions
@@ -158,7 +159,8 @@ Input file → calculate metadata (SHA-256, size, permissions)
 - FileLedger adapter (`KeyStoreLedger`) bridging KeyStore to the ledger interface
 - ServerNode with RPC dispatch (PING/UPLOAD/DOWNLOAD/LIST/DELETE) + optional HTTP server
 - ClientNode with local mode (embedded ServerNode) and remote mode
-- Interactive TUI client (`cmd/client`) with upload, download, view, delete, verify, stats
+- Directory semantics: recursive store, list, reassemble for entire directory trees (manifests stored as MetaData entries)
+- Interactive TUI client (`cmd/client`) with upload, upload-dir, download, view, delete, verify, stats
 - Streaming file serving (TCP binary protocol + HTTP REST) via ServerNode
 - Crash recovery via intent files (write-ahead before chunking)
 - Deep integrity verification (`VerifyAll`, `VerifyFile`)
