@@ -980,41 +980,45 @@ type DeepCleanResult struct {
 }
 
 // DeepClean removes all .kdht chunks, all metadata .toml files, and all cache
-// entries. Returns counts of what was removed. Recreates the directories so
-// the keystore remains usable afterward.
+// entries. Holds the write lock for the entire operation. Resets in-memory
+// indexes. Returns counts of files actually removed from disk.
 func (ks *KeyStore) DeepClean() (DeepCleanResult, error) {
+	ks.lock.Lock()
+	defer ks.lock.Unlock()
+
 	var result DeepCleanResult
 
-	// Count + remove .kdht files.
-	kdhtPattern := filepath.Join(ks.storageDir, "data", "*.kdht")
-	kdhtFiles, err := filepath.Glob(kdhtPattern)
-	if err != nil {
-		return result, fmt.Errorf("glob kdht: %w", err)
+	// Remove .kdht chunk files.
+	chunkDataDir := filepath.Join(ks.storageDir, "data")
+	chunkEntries, err := os.ReadDir(chunkDataDir)
+	if err != nil && !os.IsNotExist(err) {
+		return result, fmt.Errorf("read chunk data dir: %w", err)
 	}
-	result.RemovedKDHT = len(kdhtFiles)
-	if err := ks.CleanupKDHT(); err != nil {
-		return result, fmt.Errorf("cleanup kdht: %w", err)
+	for _, e := range chunkEntries {
+		if !e.IsDir() && filepath.Ext(e.Name()) == ".kdht" {
+			if removeErr := os.Remove(filepath.Join(chunkDataDir, e.Name())); removeErr != nil && !os.IsNotExist(removeErr) {
+				return result, fmt.Errorf("remove kdht %s: %w", e.Name(), removeErr)
+			}
+			result.RemovedKDHT++
+		}
 	}
 
-	// Count + remove metadata files.
+	// Remove metadata .toml files.
 	metaDir := filepath.Join(ks.storageDir, "metadata")
 	metaEntries, err := os.ReadDir(metaDir)
 	if err != nil && !os.IsNotExist(err) {
 		return result, fmt.Errorf("read metadata dir: %w", err)
 	}
 	for _, e := range metaEntries {
-		if !e.IsDir() {
+		if !e.IsDir() && filepath.Ext(e.Name()) == ".toml" {
+			if removeErr := os.Remove(filepath.Join(metaDir, e.Name())); removeErr != nil && !os.IsNotExist(removeErr) {
+				return result, fmt.Errorf("remove metadata %s: %w", e.Name(), removeErr)
+			}
 			result.RemovedMetadata++
 		}
 	}
-	if err := os.RemoveAll(metaDir); err != nil {
-		return result, fmt.Errorf("remove metadata dir: %w", err)
-	}
-	if err := os.MkdirAll(metaDir, 0o755); err != nil {
-		return result, fmt.Errorf("recreate metadata dir: %w", err)
-	}
 
-	// Count + remove cache files.
+	// Remove cache files.
 	cacheDir := filepath.Join(ks.storageDir, ".cache")
 	cacheEntries, err := os.ReadDir(cacheDir)
 	if err != nil && !os.IsNotExist(err) {
@@ -1022,15 +1026,17 @@ func (ks *KeyStore) DeepClean() (DeepCleanResult, error) {
 	}
 	for _, e := range cacheEntries {
 		if !e.IsDir() {
+			if removeErr := os.Remove(filepath.Join(cacheDir, e.Name())); removeErr != nil && !os.IsNotExist(removeErr) {
+				return result, fmt.Errorf("remove cache %s: %w", e.Name(), removeErr)
+			}
 			result.RemovedCache++
 		}
 	}
-	if err := os.RemoveAll(cacheDir); err != nil {
-		return result, fmt.Errorf("remove cache dir: %w", err)
-	}
-	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
-		return result, fmt.Errorf("recreate cache dir: %w", err)
-	}
+
+	// Reset in-memory indexes so state matches disk.
+	ks.chunkIndex = make(map[[KeySize]byte]chunkLoc)
+	ks.files = make(map[[HashSize]byte]*File)
+	ks.filesByName = make(map[string][HashSize]byte)
 
 	return result, nil
 }
