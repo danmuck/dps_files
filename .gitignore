@@ -33,3 +33,6 @@ local/data/
 .DS_Store
 main
 .prompt.md
+
+client
+storage
