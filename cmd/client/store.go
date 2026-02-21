@@ -34,7 +34,7 @@ func verifyChunks(ks *key_store.KeyStore, file *key_store.File) error {
 			return fmt.Errorf("chunk %d hash mismatch:\nstored: %x\ncomputed: %x", i, ref.DataHash, dataHash)
 		}
 
-		if i%key_store.PRINT_BLOCKS == 0 || i == int(file.MetaData.TotalBlocks-1) {
+		if i%500 == 0 || i == int(file.MetaData.TotalBlocks-1) {
 			logs.Dataf("Verified chunk %d/%d: size=%d index=%d hash=%x\n",
 				i, file.MetaData.TotalBlocks-1, len(chunkData), ref.FileIndex, dataHash)
 		}
