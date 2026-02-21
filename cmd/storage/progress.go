@@ -59,7 +59,7 @@ func (pt *PhaseTimer) Phases() []PhaseRecord {
 
 // beginPhase prints the current operation stage and starts timing that phase.
 func beginPhase(timer *PhaseTimer, operation, phaseName, stageLabel string, stageIndex, stageTotal int) {
-	fmt.Printf("\n[%s] Stage %d/%d: %s\n", operation, stageIndex, stageTotal, stageLabel)
+	logs.Printf("\n[%s] Stage %d/%d: %s\n", operation, stageIndex, stageTotal, stageLabel)
 	timer.Start(phaseName)
 }
 
@@ -203,20 +203,21 @@ func renderSummary(s OpSummary) {
 	}
 	totalElapsed := s.Timer.TotalElapsed()
 
-	fmt.Printf("\n--- %s summary: %s [%s] ---\n", s.Operation, s.FileName, status)
+	logs.Printf("\n")
+	logs.Titlef("--- %s summary: %s [%s] ---\n", s.Operation, s.FileName, status)
 	if s.FileSize > 0 {
-		fmt.Printf("  %-20s %s\n", "total size", formatBytes(s.FileSize))
+		logs.DataKV("total size", formatBytes(s.FileSize))
 	}
 	if s.Bytes > 0 {
-		fmt.Printf("  %-20s %s\n", "bytes transferred", formatBytes(s.Bytes))
+		logs.DataKV("bytes transferred", formatBytes(s.Bytes))
 	}
 	for _, ph := range s.Timer.Phases() {
-		fmt.Printf("  %-20s %s\n", ph.Name, formatDuration(ph.Elapsed))
+		logs.DataKV(ph.Name, formatDuration(ph.Elapsed))
 	}
-	fmt.Printf("  %-20s %s\n", "total", formatDuration(totalElapsed))
+	logs.DataKV("total", formatDuration(totalElapsed))
 	if s.Bytes > 0 && totalElapsed.Seconds() > 0 {
 		throughput := float64(s.Bytes) / totalElapsed.Seconds()
-		fmt.Printf("  %-20s %s/s\n", "avg throughput", formatBytes(uint64(throughput)))
+		logs.DataKV("avg throughput", formatBytes(uint64(throughput))+"/s")
 	}
 }
 

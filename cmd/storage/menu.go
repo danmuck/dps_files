@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/danmuck/dps_files/src/key_store"
+	logs "github.com/danmuck/smplog"
 )
 
 var errMenuBack = errors.New("menu back")
@@ -59,23 +60,24 @@ func promptAction(input io.Reader, cfg *RuntimeConfig, indexedFiles []string, me
 				modeLabel = "remote (no address)"
 			}
 		}
-		fmt.Printf("\n   --[ dps_files | %s ]--\n\n", modeLabel)
-		fmt.Println("  view (inspect metadata + reassemble)")
-		fmt.Println("  store (chunk/store explicit filepath)")
-		fmt.Println("  upload (chunk/store files from upload dir)")
-		fmt.Println("  delete (remove a single stored file + chunks)")
-		fmt.Println("  download (write a stored file to disk)")
-		fmt.Println()
-		fmt.Println("  verify (deep integrity scan of all chunks)")
-		fmt.Println("  expire (sweep and remove TTL-expired files)")
-		fmt.Println("  clean (.kdht only)")
-		fmt.Println("  deep clean (.kdht + metadata + cache)")
-		fmt.Println()
-		fmt.Println("  stats (storage + system)")
-		fmt.Println("  mode (toggle local / remote)")
-		fmt.Println("  exit")
-		fmt.Println()
-		fmt.Printf("Choose action (default: %s): ", cfg.Action)
+		logs.Printf("\n")
+		logs.Titlef("   --[ dps_files | %s ]--\n\n", modeLabel)
+		logs.Menuf("  view (inspect metadata + reassemble)\n")
+		logs.Menuf("  store (chunk/store explicit filepath)\n")
+		logs.Menuf("  upload (chunk/store files from upload dir)\n")
+		logs.Menuf("  delete (remove a single stored file + chunks)\n")
+		logs.Menuf("  download (write a stored file to disk)\n")
+		logs.Printf("\n")
+		logs.Menuf("  verify (deep integrity scan of all chunks)\n")
+		logs.Menuf("  expire (sweep and remove TTL-expired files)\n")
+		logs.Menuf("  clean (.kdht only)\n")
+		logs.Menuf("  deep clean (.kdht + metadata + cache)\n")
+		logs.Printf("\n")
+		logs.Menuf("  stats (storage + system)\n")
+		logs.Menuf("  mode (toggle local / remote)\n")
+		logs.Menuf("  exit\n")
+		logs.Printf("\n")
+		logs.Promptf("Choose action (default: %s): ", cfg.Action)
 
 		line, err := reader.ReadString('\n')
 		if err != nil {
@@ -89,27 +91,27 @@ func promptAction(input io.Reader, cfg *RuntimeConfig, indexedFiles []string, me
 		switch choice {
 		case "mode", "m":
 			if err := handleModeToggle(reader, cfg); err != nil && !errors.Is(err, errMenuBack) {
-				fmt.Printf("Mode toggle: %v\n", err)
+				logs.Printf("Mode toggle: %v\n", err)
 			}
 			continue
 
 		case "", string(ActionView), "vi":
 			if cfg.Mode != ModeRemote && metadataCount == 0 {
-				fmt.Println("No metadata entries found in storage/metadata.")
+				logs.Println("No metadata entries found in storage/metadata.")
 				continue
 			}
 			return ActionView, "view", nil
 
 		case string(ActionUpload), "u", "up":
 			if len(indexedFiles) == 0 {
-				fmt.Printf("No indexed files are available under %s.\n", cfg.UploadDirectory)
+				logs.Printf("No indexed files are available under %s.\n", cfg.UploadDirectory)
 				continue
 			}
 			return ActionUpload, "upload (from upload dir)", nil
 
 		case string(ActionDownload), "dl", "down", "stream", "st":
 			if cfg.Mode != ModeRemote && metadataCount == 0 {
-				fmt.Println("No stored files to download.")
+				logs.Println("No stored files to download.")
 				continue
 			}
 			return ActionDownload, "download", nil
@@ -119,7 +121,7 @@ func promptAction(input io.Reader, cfg *RuntimeConfig, indexedFiles []string, me
 
 		case string(ActionDelete), "del":
 			if cfg.Mode != ModeRemote && metadataCount == 0 {
-				fmt.Println("No stored files to delete.")
+				logs.Println("No stored files to delete.")
 				continue
 			}
 			return ActionDelete, "delete", nil
@@ -143,21 +145,22 @@ func promptAction(input io.Reader, cfg *RuntimeConfig, indexedFiles []string, me
 			return "", "", errMenuExit
 
 		default:
-			fmt.Printf("Invalid action %q.\n\n", choice)
-			fmt.Println("  Action         Shorthand   Description")
-			fmt.Println("  ─────────────────────────────────────────────────────────────")
-			fmt.Println("  mode           m           	toggle local / remote")
-			fmt.Println("  view           vi          	inspect metadata + reassemble")
-			fmt.Println("  upload         u, up          	store files from upload dir")
-			fmt.Println("  download       dl         		write a stored file to disk (legacy alias: stream)")
-			fmt.Println("  store          s           	store explicit filepath")
-			fmt.Println("  delete         del		     	remove a stored file + chunks")
-			fmt.Println("  verify         ve          	deep integrity scan of all chunks")
-			fmt.Println("  expire         exp, ex     	sweep and remove TTL-expired files")
-			fmt.Println("  clean          cl          	remove .kdht chunk files only")
-			fmt.Println("  deep clean     dc, cleand  	remove .kdht + metadata + cache")
-			fmt.Println("  stats          stat	   		storage + system info")
-			fmt.Println("  exit           e, q        	quit")
+			logs.Printf("Invalid action %q.\n\n", choice)
+			logs.Dataf("  %-14s %-12s %s\n", "Action", "Shorthand", "Description")
+			logs.Divider(61)
+			logs.Printf("\n")
+			logs.Dataf("  %-14s %-12s %s\n", "mode", "m", "toggle local / remote")
+			logs.Dataf("  %-14s %-12s %s\n", "view", "vi", "inspect metadata + reassemble")
+			logs.Dataf("  %-14s %-12s %s\n", "upload", "u, up", "store files from upload dir")
+			logs.Dataf("  %-14s %-12s %s\n", "download", "dl", "write a stored file to disk")
+			logs.Dataf("  %-14s %-12s %s\n", "store", "s", "store explicit filepath")
+			logs.Dataf("  %-14s %-12s %s\n", "delete", "del", "remove a stored file + chunks")
+			logs.Dataf("  %-14s %-12s %s\n", "verify", "ve", "deep integrity scan of all chunks")
+			logs.Dataf("  %-14s %-12s %s\n", "expire", "exp, ex", "sweep and remove TTL-expired files")
+			logs.Dataf("  %-14s %-12s %s\n", "clean", "cl", "remove .kdht chunk files only")
+			logs.Dataf("  %-14s %-12s %s\n", "deep clean", "dc, cleand", "remove .kdht + metadata + cache")
+			logs.Dataf("  %-14s %-12s %s\n", "stats", "stat", "storage + system info")
+			logs.Dataf("  %-14s %-12s %s\n", "exit", "e, q", "quit")
 		}
 	}
 }
@@ -168,7 +171,7 @@ func handleModeToggle(reader *bufio.Reader, cfg *RuntimeConfig) error {
 	if cfg.Mode == ModeRemote {
 		cfg.Mode = ModeRun
 		cfg.RemoteAddr = ""
-		fmt.Println("Switched to local mode.")
+		logs.Println("Switched to local mode.")
 		return nil
 	}
 	addr, err := promptRemoteAddress(reader, *cfg)
@@ -177,20 +180,20 @@ func handleModeToggle(reader *bufio.Reader, cfg *RuntimeConfig) error {
 	}
 	cfg.Mode = ModeRemote
 	cfg.RemoteAddr = addr
-	fmt.Printf("Switched to remote mode @ %s\n", addr)
+	logs.Printf("Switched to remote mode @ %s\n", addr)
 	return nil
 }
 
 // promptRemoteAddress displays known remotes and lets the user pick one or enter a custom address.
 func promptRemoteAddress(reader *bufio.Reader, cfg RuntimeConfig) (string, error) {
 	if len(cfg.KnownRemotes) > 0 {
-		fmt.Println("\nKnown remotes:")
+		logs.Titlef("\nKnown remotes:\n")
 		for i, r := range cfg.KnownRemotes {
-			fmt.Printf("  [%d] %s (%s)\n", i, r.Name, r.Address)
+			logs.Dataf("  [%d] %s (%s)\n", i, r.Name, r.Address)
 		}
-		fmt.Printf("  [%d] Enter custom address\n", len(cfg.KnownRemotes))
+		logs.Dataf("  [%d] Enter custom address\n", len(cfg.KnownRemotes))
 	}
-	fmt.Print("\nSelect remote or enter address directly: ")
+	logs.Prompt("\nSelect remote or enter address directly: ")
 	line, err := reader.ReadString('\n')
 	if err != nil {
 		if err == io.EOF {
@@ -213,7 +216,7 @@ func promptRemoteAddress(reader *bufio.Reader, cfg RuntimeConfig) (string, error
 		return choice, nil
 	}
 	// Custom address prompt
-	fmt.Print("Enter remote address (host:port): ")
+	logs.Prompt("Enter remote address (host:port): ")
 	line, err = reader.ReadString('\n')
 	if err != nil {
 		if err == io.EOF {
@@ -247,14 +250,14 @@ func promptUploadSelection(indexedFiles []string, input io.Reader, cfg RuntimeCo
 			fmt.Sprintf("index %d (%q) [non-interactive default]", cfg.DefaultFileIndex, indexedFiles[cfg.DefaultFileIndex]), nil
 	}
 
-	fmt.Printf("\nUpload options from %s:\n", cfg.UploadDirectory)
+	logs.Titlef("\nUpload options from %s:\n", cfg.UploadDirectory)
 	for idx, file := range indexedFiles {
-		fmt.Printf("  %d) %s\n", idx, file)
+		logs.Dataf("  %d) %s\n", idx, file)
 	}
 
 	reader := getBufferedReader(input)
 	for {
-		fmt.Printf("\nSelect upload file [0-%d] or 'all' (default: %d): ", len(indexedFiles)-1, cfg.DefaultFileIndex)
+		logs.Promptf("\nSelect upload file [0-%d] or 'all' (default: %d): ", len(indexedFiles)-1, cfg.DefaultFileIndex)
 
 		line, err := reader.ReadString('\n')
 		if err != nil {
@@ -280,12 +283,12 @@ func promptUploadSelection(indexedFiles []string, input io.Reader, cfg RuntimeCo
 
 		idx, convErr := strconv.Atoi(choice)
 		if convErr != nil {
-			fmt.Printf("Invalid selection %q. Enter a numeric index or 'all'.\n", choice)
+			logs.Printf("Invalid selection %q. Enter a numeric index or 'all'.\n", choice)
 			continue
 		}
 
 		if idx < 0 || idx >= len(indexedFiles) {
-			fmt.Printf("Index %d out of range. Valid range is 0-%d.\n", idx, len(indexedFiles)-1)
+			logs.Printf("Index %d out of range. Valid range is 0-%d.\n", idx, len(indexedFiles)-1)
 			continue
 		}
 
@@ -305,7 +308,7 @@ func resolveStorePath(input io.Reader, cfg RuntimeConfig) (string, string, error
 
 	reader := getBufferedReader(input)
 	for {
-		fmt.Print("\nEnter file path to store: ")
+		logs.Prompt("\nEnter file path to store: ")
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			if err == io.EOF {
@@ -316,7 +319,7 @@ func resolveStorePath(input io.Reader, cfg RuntimeConfig) (string, string, error
 
 		candidate := strings.TrimSpace(line)
 		if candidate == "" {
-			fmt.Println("Path cannot be empty.")
+			logs.Println("Path cannot be empty.")
 			continue
 		}
 		if strings.EqualFold(candidate, "e") {
@@ -339,7 +342,7 @@ func promptMetadataReassemblySelection(metadata []key_store.MetaData, input io.R
 
 	reader := getBufferedReader(input)
 	for {
-		fmt.Printf("\nReassemble which metadata entry [0-%d], 'all', or 'none' (default: none): ", len(metadata)-1)
+		logs.Promptf("\nReassemble which metadata entry [0-%d], 'all', or 'none' (default: none): ", len(metadata)-1)
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			if err == io.EOF {
@@ -359,11 +362,11 @@ func promptMetadataReassemblySelection(metadata []key_store.MetaData, input io.R
 		default:
 			idx, convErr := strconv.Atoi(choice)
 			if convErr != nil {
-				fmt.Printf("Invalid selection %q. Enter numeric index, 'all', or 'none'.\n", choice)
+				logs.Printf("Invalid selection %q. Enter numeric index, 'all', or 'none'.\n", choice)
 				continue
 			}
 			if idx < 0 || idx >= len(metadata) {
-				fmt.Printf("Index %d out of range. Valid range is 0-%d.\n", idx, len(metadata)-1)
+				logs.Printf("Index %d out of range. Valid range is 0-%d.\n", idx, len(metadata)-1)
 				continue
 			}
 			return []key_store.MetaData{metadata[idx]}, fmt.Sprintf("index %d (%q)", idx, metadata[idx].FileName), nil

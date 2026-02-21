@@ -41,7 +41,7 @@ func main() {
 	if err != nil {
 		logs.Fatalf(err, "Failed to initialize keystore")
 	}
-	fmt.Printf("KeyStore initialized: %d file(s) loaded.\n", len(keystore.ListKnownFiles()))
+	logs.Printf("KeyStore initialized: %d file(s) loaded.\n", len(keystore.ListKnownFiles()))
 
 	if cfg.CleanKDHTOnExit {
 		defer func() {
@@ -85,7 +85,7 @@ func main() {
 	printRuntimeSummary(cfg, actionSource)
 	if err := executeActionOnce(cfg, keystore, os.Stdin, indexedFiles); err != nil {
 		if errors.Is(err, errMenuBack) {
-			fmt.Println("Action cancelled.")
+			logs.Println("Action cancelled.")
 			return
 		}
 		logs.Fatalf(err, "Action %q failed", cfg.Action)
@@ -109,7 +109,7 @@ func runInteractiveSession(cfg RuntimeConfig, keystore *key_store.KeyStore, inpu
 		action, actionSource, err := promptAction(reader, &cfg, indexedFiles, metadataCount)
 		if errors.Is(err, errMenuExit) {
 			clearTerminalIfInteractive(input)
-			fmt.Println("Exited keystore menu.")
+			logs.Println("Exited keystore menu.")
 			return nil
 		}
 		if err != nil {
@@ -121,7 +121,7 @@ func runInteractiveSession(cfg RuntimeConfig, keystore *key_store.KeyStore, inpu
 		printRuntimeSummary(cfg, actionSource)
 		err = executeActionOnce(cfg, keystore, reader, indexedFiles)
 		if err != nil && !errors.Is(err, errMenuBack) {
-			fmt.Printf("\nAction %q failed: %v\n", cfg.Action, err)
+			logs.Printf("\nAction %q failed: %v\n", cfg.Action, err)
 		}
 		if errors.Is(err, errMenuBack) {
 			clearTerminalIfInteractive(input)
@@ -147,11 +147,12 @@ func refreshMenuContext(cfg RuntimeConfig, keystore *key_store.KeyStore) ([]stri
 }
 
 func printRuntimeSummary(cfg RuntimeConfig, actionSource string) {
-	fmt.Printf("\nExecution mode: %s\n", cfg.Mode)
-	fmt.Printf("TTL seconds: %d\n", cfg.TTLSeconds)
-	fmt.Printf("Reassembly enabled: %v\n", cfg.ReassembleEnabled)
-	fmt.Printf("Action: %s\n", actionSource)
-	fmt.Printf("Storage root path: %s\n", cfg.KeyStore.StorageDir)
+	logs.Printf("\n")
+	logs.DataKV("Execution mode", cfg.Mode)
+	logs.DataKV("TTL seconds", cfg.TTLSeconds)
+	logs.DataKV("Reassembly enabled", cfg.ReassembleEnabled)
+	logs.DataKV("Action", actionSource)
+	logs.DataKV("Storage root path", cfg.KeyStore.StorageDir)
 }
 
 func executeActionOnce(cfg RuntimeConfig, keystore *key_store.KeyStore, input io.Reader, indexedFiles []string) error {
@@ -160,7 +161,7 @@ func executeActionOnce(cfg RuntimeConfig, keystore *key_store.KeyStore, input io
 	switch cfg.Action {
 	case ActionClean, ActionDeepClean, ActionVerify, ActionExpire:
 		if cfg.Mode == ModeRemote {
-			fmt.Printf("Action %q is local-only. Switch to local mode to use it.\n", cfg.Action)
+			logs.Printf("Action %q is local-only. Switch to local mode to use it.\n", cfg.Action)
 			return nil
 		}
 	}
@@ -171,14 +172,14 @@ func executeActionOnce(cfg RuntimeConfig, keystore *key_store.KeyStore, input io
 		if err != nil {
 			return fmt.Errorf("failed to clean .kdht files: %w", err)
 		}
-		fmt.Printf("Clean complete: removed %d .kdht file(s) from %s\n", removed, filepath.Join(cfg.KeyStore.StorageDir, "data"))
+		logs.Printf("Clean complete: removed %d .kdht file(s) from %s\n", removed, filepath.Join(cfg.KeyStore.StorageDir, "data"))
 		return nil
 	case ActionDeepClean:
 		result, err := deepCleanStorage(cfg.KeyStore.StorageDir)
 		if err != nil {
 			return fmt.Errorf("failed to deep clean storage: %w", err)
 		}
-		fmt.Printf("Deep clean complete: removed %d .kdht, %d metadata file(s), %d cache file(s).\n",
+		logs.Printf("Deep clean complete: removed %d .kdht, %d metadata file(s), %d cache file(s).\n",
 			result.RemovedKDHT,
 			result.RemovedMetadata,
 			result.RemovedCache,
@@ -202,7 +203,7 @@ func executeActionOnce(cfg RuntimeConfig, keystore *key_store.KeyStore, input io
 		if err != nil {
 			return err
 		}
-		fmt.Printf("Selection: %s\n", selection)
+		logs.Printf("Selection: %s\n", selection)
 
 		selectedTargets = make([]string, 0, len(selectedUploads))
 		for _, name := range selectedUploads {
@@ -213,7 +214,7 @@ func executeActionOnce(cfg RuntimeConfig, keystore *key_store.KeyStore, input io
 		if err != nil {
 			return err
 		}
-		fmt.Printf("Selection: %s\n", selection)
+		logs.Printf("Selection: %s\n", selection)
 		selectedTargets = []string{storePath}
 	}
 
@@ -249,7 +250,7 @@ func executeActionOnce(cfg RuntimeConfig, keystore *key_store.KeyStore, input io
 		if err != nil {
 			logs.Warnf("failed to count .kdht files: %v", err)
 		} else {
-			fmt.Printf("\nStored .kdht files currently present: %d\n", kdhtCount)
+			logs.Printf("\nStored .kdht files currently present: %d\n", kdhtCount)
 		}
 	}
 
