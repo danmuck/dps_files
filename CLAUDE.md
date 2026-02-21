@@ -21,25 +21,23 @@ Files are split into fixed-size chunks, each assigned a 20-byte SHA-1 DHT key (v
 
 ```
 cmd/
-  server/main.go      — Server node entry point (TCP listener demo)
-  client/main.go      — Client node entry point (Protobuf RPC demo)
+  server/main.go      — ServerNode entry point (TCP binary + optional HTTP)
+  client/main.go      — ClientNode entry point (interactive TUI, local or remote mode)
   chain/main.go       — Blockchain demo with AES-GCM encryption
-  storage/             — File chunking integration flow (interactive CLI)
   gen_file/main.go    — Test file generator (size-aware, reuses existing files)
-  fileserver/          — TCP file server (4-byte length-prefixed binary protocol)
-  httpserver/          — HTTP file server (PUT/GET/Range/DELETE)
   internal/logcfg/    — Shared smplog config loader
 
 src/
   api/
-    nodes/             — Node interfaces (ServerNode, ClientNode, MasterNode), DefaultNode, routing tables
-    transport/         — TransportHandler interface, TCPHandler, Protobuf encoding, rpc.proto
+    nodes/             — Node, ServerNode, ClientNode interfaces + DefaultServerNode, DefaultClientNode, DefaultRouter
+    transport/         — TransportHandler interface, TCPHandler (4-byte framing, Dial, connection pool), Protobuf encoding, rpc.proto
     ledgers/           — Interfaces for LogManager, MetadataStore, FileLedger, SnapshotManager, BackupLedger
   impl/                — Block, BlockData, crypto utilities (SHA, AES-GCM)
-  key_store/           — KeyStore, File, FileReference, MetaData, RemoteHandler, chunking pipeline
+  key_store/           — KeyStore, KeyStoreLedger (FileLedger adapter), File, FileReference, MetaData, RemoteHandler, chunking pipeline
 
 tools/gen_text/        — Python test file generator (legacy, outputs should target local/upload)
 docs/progress/         — Build plan and progress tracking
+docs/plans/            — Design documents and implementation plans
 local/upload/          — Upload/test input files
 local/storage/         — Runtime data (gitignored): data/*.kdht, .cache/, metadata/
 local/logs/            — Operation logs from transfer workflows
@@ -53,12 +51,9 @@ All commands are in the `Makefile`:
 make test                                  # build, go test -v ./..., clean .build/
 make test-coverage                         # build, go test -v ./... -cover, clean .build/
 make build                                 # go build each cmd/* into .build/<name>/
-make server                                # go run cmd/server/main.go
-make client                                # go run cmd/client/main.go
+make server ARGS="--addr :9000 --http :8080 --storage local/storage"  # run ServerNode
+make client ARGS="--mode local --storage local/storage"               # run ClientNode TUI
 make chain                                 # go run cmd/chain/main.go
-make storage ARGS="..."                    # go run ./cmd/storage (interactive CLI)
-make fileserver ARGS="..."                 # go run ./cmd/fileserver (TCP file server)
-make httpserver ARGS="..."                 # go run ./cmd/httpserver (HTTP file server)
 make gen-file SIZE=256MB FILE=local/upload/test.dat # generate test file
 make tidy                                  # go mod tidy
 make build-protobuf                        # protoc → src/api/transport/rpc.pb.go
@@ -69,6 +64,7 @@ make clean                                 # rm -rf .build/
 
 ### `key_store` — Local File Storage Pipeline (FUNCTIONAL)
 - **`key_store.go`** — `KeyStore` struct: manages chunk storage directory, metadata persistence, file operations, verification. Includes streaming (`StreamFile`, `StreamFileByName`, `StreamChunkRange`), TTL expiry (`CleanupExpired`), cache management, and `StoreFromReader`.
+- **`file_ledger.go`** — `KeyStoreLedger` adapter: wraps `*KeyStore` to implement the `ledgers.FileLedger` interface. Converts between KeyStore's concrete types and FileLedger's `FileID`/`ChunkID` typed aliases.
 - **`files.go`** — `File` struct, `StoreFileLocal`, `LoadAndStoreFileLocal`, `LoadAndStoreFileRemote`, `StoreFromReader`, `ReassembleFileToBytes`, `ReassembleFileToPath`. Contains `computeChunkKey` — the canonical DHT key derivation.
 - **`file_reference.go`** — `FileReference` struct: per-chunk metadata (key, hash, index, location, protocol).
 - **`metadata.go`** — `MetaData` struct: per-file metadata. TOML serialization to `local/storage/metadata/`.
@@ -82,20 +78,23 @@ make clean                                 # rm -rf .build/
 - **`block_data.go`** — `BlockData` struct (Hash, Data, IV).
 - **`utils.go`** — `EncryptData()` / `DecryptData()` (AES-256-GCM), `CalculateHash()` (SHA-1/256/512), `ValidateHash()`. Handles both `*Block` and `Block` value types.
 
-### `nodes` — Node Types & Routing (SCAFFOLDING)
-- **`nodes.go`** — Interfaces: `Node`, `ServerNode`, `ClientNode`, `MasterNode`. `NodeState` enum (Follower/Candidate/Leader).
-- **`default.go`** — `DefaultNode`: basic implementation with address, ID, peers list, transport binding. Returns `*DefaultNode` (pointer).
-- **`routing.go`** — `RoutingTable` and `KademliaRouting` interfaces (return `*transport.NodeInfo`). `DefaultRouter` (map-based) works; `KademliaRouter` is a stub.
+### `nodes` — Node Types & Routing (FUNCTIONAL)
+- **`nodes.go`** — Interfaces: `Node`, `ServerNode` (Storage/HandleRPC/ServeHTTP), `ClientNode` (Upload/Download/Delete/List). `NodeState` enum (Follower/Candidate/Leader).
+- **`default.go`** — `DefaultNode`: base implementation with address, ID, router, TCP handler. Constructor: `NewDefaultNode(id, addr)`.
+- **`server_node.go`** — `DefaultServerNode`: embeds DefaultNode, manages FileLedger storage, handles RPCs (PING/UPLOAD/DOWNLOAD/LIST/DELETE), optional HTTP server. Constructor: `NewServerNode(id, addr, storageDir, opts...)`.
+- **`client_node.go`** — `DefaultClientNode`: embeds DefaultNode, supports local mode (embedded ServerNode) and remote mode. Constructor: `NewClientNode(id, opts...)` with `WithLocalStorage(dir)`, `WithRemotes(addrs...)`.
+- **`http_handlers.go`** — HTTP route handlers for ServerNode: PUT/GET/DELETE /files endpoints.
+- **`routing.go`** — `RoutingTable` and `KademliaRouting` interfaces. `DefaultRouter` (map-based, functional).
 
-### `transport` — Network & RPC (PARTIAL)
-- **`transport.go`** — `TransportHandler` interface: `ListenAndAccept`, `Send(*RPC)`, `ProcessRPC`, `Close() error`.
-- **`tcp.go`** — `TCPHandler`: non-blocking accept, 2-byte length-prefixed Protobuf messages, `Send()` encodes via `Coder.Encode()`.
-- **`encoding.go`** — `Coder` interface, `DefaultCoder` using Protobuf marshal/unmarshal.
-- **`rpc.proto`** — Defines `RPC`, `RPCT`, `NodeInfo`, `Protocol` (Raft/Kademlia), `Command` (PING/STORE/GET/FIND_NODE/FIND_VALUE/ACK/NODES/VALUE).
+### `transport` — Network & RPC (FUNCTIONAL)
+- **`transport.go`** — `TransportHandler` interface: `ListenAndAccept`, `Dial`, `Send(*RPC)`, `ProcessRPC`, `Close() error`.
+- **`tcp.go`** — `TCPHandler`: non-blocking accept, 4-byte length-prefixed Protobuf messages, `Dial()` with connection pool, `Addr()`, `ReadRPC()`.
+- **`encoding.go`** — `Coder` interface, `DefaultCoder` using Protobuf marshal/unmarshal with 4-byte big-endian length prefix.
+- **`rpc.proto`** — Defines `RPC`, `RPCT`, `NodeInfo`, `Protocol` (Raft/Kademlia), `Command` (PING/STORE/GET/FIND_NODE/FIND_VALUE/ACK/NODES/VALUE/REQUEST_VOTE/APPEND_ENTRIES/INSTALL_SNAPSHOT/UPLOAD/DOWNLOAD/LIST/DELETE).
 - **`udp.go`** — Empty placeholder.
 
 ### `ledgers` — Consensus & Backup Interfaces (INTERFACES ONLY)
-- **`net_store.go`** — `LogManager`, `MetadataStore`, `FileLedger` interfaces.
+- **`net_store.go`** — `LogManager`, `MetadataStore`, `FileLedger` interfaces. `FileID`, `ChunkID` typed aliases. `FileMetaSummary` struct.
 - **`snapshots.go`** — `SnapshotManager`, `BackupLedger` interfaces.
 
 ## Coding Conventions
@@ -115,14 +114,28 @@ make clean                                 # rm -rf .build/
 
 ## Architecture Patterns
 
-### Interfaces to Implement
-When adding new node types or storage backends, implement these interfaces:
+### Node Hierarchy
+```
+Node (base interface: ID, Address, Start, Shutdown, Peers)
+├── ServerNode (extends Node: Storage, HandleRPC, ServeHTTP)
+│   └── DefaultServerNode (KeyStore via FileLedger, TCP+HTTP, RPC dispatch)
+└── ClientNode (extends Node: Upload, Download, Delete, List)
+    └── DefaultClientNode (local mode with embedded ServerNode, or remote-only)
+```
 
-- **`ServerNode`** — For Raft cluster participants: `ApplyCommand`, `CreateSnapshot`, `GetState`, `AddPeer`, `RemovePeer`.
-- **`ClientNode`** — For DHT participants: `Send`, `Ping`, `Store`, `FindNode`, `FindValue`.
+### Interfaces to Implement
+When adding new node types or storage backends:
+
+- **`ServerNode`** — For storage servers: `Storage() FileLedger`, `HandleRPC(*RPC) (*RPC, error)`, `ServeHTTP(w, r)`.
+- **`ClientNode`** — For file operation clients: `Upload`, `Download`, `Delete`, `List`.
+- **`FileLedger`** — For storage backends: wraps chunk storage with streaming, deletion, metadata listing.
 - **`RemoteHandler`** — For network chunk distribution: `StartReceiver`, `PassFileReference`, `Receive`.
-- **`KademliaRouting`** — For DHT routing: `K() int`, `A() int`, `GetBucket(int) []*NodeInfo`, `ClosestK([]byte) []*NodeInfo`, `Size() int`.
+- **`KademliaRouting`** — For DHT routing (future): `K()`, `A()`, `GetBucket()`, `ClosestK()`, `Size()`.
 - **`TransportHandler`** — For new transport protocols: implement alongside `TCPHandler`.
+
+### Future Extension Interfaces (not yet implemented)
+- **`RaftNode`** — Will extend `ServerNode` with: `ApplyCommand`, `CreateSnapshot`, `GetState`, `AddPeer`, `RemovePeer`.
+- **`KademliaNode`** — Will extend `ClientNode` with: `FindNode`, `FindValue`, `Store` (DHT operations).
 
 ### Dual-Ledger Model
 1. **Raft log** — Authoritative, replicated metadata store for the root cluster.
@@ -142,7 +155,11 @@ Input file → calculate metadata (SHA-256, size, permissions)
 
 ### Working
 - File chunking, storage, and reassembly (`key_store` package)
-- Streaming file serving (TCP binary protocol + HTTP REST)
+- FileLedger adapter (`KeyStoreLedger`) bridging KeyStore to the ledger interface
+- ServerNode with RPC dispatch (PING/UPLOAD/DOWNLOAD/LIST/DELETE) + optional HTTP server
+- ClientNode with local mode (embedded ServerNode) and remote mode
+- Interactive TUI client (`cmd/client`) with upload, download, view, delete, verify, stats
+- Streaming file serving (TCP binary protocol + HTTP REST) via ServerNode
 - Crash recovery via intent files (write-ahead before chunking)
 - Deep integrity verification (`VerifyAll`, `VerifyFile`)
 - TTL-based expiry and cleanup (`CleanupExpired`)
@@ -152,12 +169,12 @@ Input file → calculate metadata (SHA-256, size, permissions)
 - Structured logging via smplog (project-wide)
 - AES-256-GCM encryption/decryption (`impl` package)
 - Blockchain block creation and chain validation (hash covers all exported fields)
-- TCP transport with Protobuf encoding and Send/Receive
-- Basic node creation, start/shutdown lifecycle
+- TCP transport with 4-byte framing, Protobuf encoding, Dial + connection pool
+- Node creation, start/shutdown lifecycle with signal handling
 
 ### Future (Stubs)
 
-> These are interface stubs or empty scaffolding. They will be reworked once key_store is fully complete. Do not build on these without redesign.
+> These are interface stubs or empty scaffolding. Do not build on these without redesign.
 
 - Kademlia routing (interface defined, no XOR distance or bucket logic)
 - UDP transport (empty file)
@@ -166,12 +183,12 @@ Input file → calculate metadata (SHA-256, size, permissions)
 - Snapshot/backup scheduling (interfaces defined, no implementation)
 - Blockchain Chain struct (Block works, but no Chain/persistence/Append/Validate)
 - Log replication and leader election (not started)
+- Request-response correlation on transport (ServerNode dials back instead of responding on same connection)
 
 ### Remaining Known Issues
 - `TCPHandler` shutdown uses `time.Sleep` instead of context cancellation
 - No TLS on TCP connections
-- Hardcoded addresses and node IDs in `cmd/` entry points
-- 2-byte message length header limits messages to 65KB
+- Transport responses use dial-back instead of same-connection response (no RequestID correlation yet)
 
 For detailed per-module issue tracking, see `docs/progress/buildplan.md`.
 
@@ -180,13 +197,14 @@ For detailed per-module issue tracking, see `docs/progress/buildplan.md`.
 ### Add a New Node Type
 1. Define a struct in `src/api/nodes/` that embeds `*DefaultNode`.
 2. Implement `ServerNode` or `ClientNode` interface.
-3. Add a constructor following `NewDefaultNode(id, addr, k, a)` pattern — returns `(*DefaultNode, error)`.
+3. Add a constructor following `NewServerNode` or `NewClientNode` patterns.
 4. Add a `cmd/` entry point if needed.
 
 ### Add a New RPC Method
 1. Add the command to the `Command` enum in `src/api/transport/rpc.proto`.
 2. Run `make build-protobuf` to regenerate `rpc.pb.go`.
-3. Add handler logic in the node's RPC processing loop.
+3. Add handler logic in `DefaultServerNode.HandleRPC()`.
+4. Add client method in `DefaultClientNode` if needed.
 
 ### Generate Test Files
 ```sh
@@ -196,16 +214,23 @@ make gen-file SIZE=256MB FILE=local/upload/test_256mb.dat
 ```
 Files are reused if they already exist with the matching size.
 
-### Run the File Storage Test
+### Run the Interactive Client
 ```sh
-make storage
-# Chunks appear in local/storage/data/, metadata in local/storage/metadata/
+make client
+# Or with flags:
+make client ARGS="--mode local --storage local/storage"
+make client ARGS="--mode remote --remotes localhost:9000"
+```
+
+### Run a Server Node
+```sh
+make server ARGS="--addr :9000 --http :8080 --storage local/storage"
 ```
 
 ### Add a New Transport Protocol
 1. Create a new file in `src/api/transport/` (e.g., `udp.go`).
-2. Implement the `TransportHandler` interface.
-3. Follow `TCPHandler` patterns: channel-based inbound queue, length-prefixed messages.
+2. Implement the `TransportHandler` interface (including `Dial`).
+3. Follow `TCPHandler` patterns: channel-based inbound queue, 4-byte length-prefixed messages.
 
 ## Testing
 
@@ -215,11 +240,15 @@ go test -short ./... # Skip large file test
 make test-coverage   # Run with coverage report
 ```
 
-Test files follow `*_test.go` convention in their respective packages (62 tests across 5 files):
-- `src/key_store/store_test.go` — 26 tests: chunking (1KB-256MB), empty file, single chunk, exact block size, persistence, corruption detection, cleanup, key consistency, streaming, TTL, deletion, cache dedup, utility functions, and more
-- `src/key_store/hardening_test.go` — 28 tests: concurrent stores/reads/deletes, crash recovery intents, integrity verification, error injection cleanup, stale cache pruning, non-destructive startup, reupload after restart
-- `src/key_store/config_test.go` — 2 tests: KeyStoreConfig defaults, configurable TTL
-- `src/api/nodes/routing_test.go` — 4 tests: node creation, bad ID rejection, start/shutdown lifecycle, router type verification
-- `src/api/transport/tcp_handler_test.go` — 2 tests: listener init + connect, full send/receive round-trip
+Test files follow `*_test.go` convention in their respective packages:
+- `src/key_store/store_test.go` — chunking (1KB-256MB), empty file, single chunk, exact block size, persistence, corruption detection, cleanup, key consistency, streaming, TTL, deletion, cache dedup, utility functions
+- `src/key_store/hardening_test.go` — concurrent stores/reads/deletes, crash recovery intents, integrity verification, error injection cleanup, stale cache pruning, non-destructive startup, reupload after restart
+- `src/key_store/config_test.go` — KeyStoreConfig defaults, configurable TTL
+- `src/key_store/file_ledger_test.go` — FileLedger adapter: interface satisfaction, store/list/reassemble/delete round-trip
+- `src/api/nodes/routing_test.go` — node creation, start/shutdown lifecycle, router type verification
+- `src/api/nodes/server_node_test.go` — ServerNode start/shutdown, HandleRPC for PING/UPLOAD/DOWNLOAD/LIST/DELETE
+- `src/api/nodes/client_node_test.go` — ClientNode local/remote modes, local upload/list
+- `src/api/nodes/http_handlers_test.go` — HTTP upload, list, download by name
+- `src/api/transport/tcp_handler_test.go` — listener init + connect, send/receive round-trip, Dial + 4-byte framing
 
 Test data goes in `./local/upload/` (created by tests, reused across runs). The `local/storage/` directory is used at runtime and is gitignored.
