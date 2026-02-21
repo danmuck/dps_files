@@ -37,7 +37,7 @@ func GenerateKey() []byte {
 func main() {
 	logs.Configure(logcfg.Load())
 
-	n, err := nodes.NewDefaultNode(GenerateKey(), "localhost:3000", 5, 5)
+	n, err := nodes.NewDefaultNode(GenerateKey(), "localhost:3000")
 	if err != nil {
 		logs.Errorf(err, "failed to create node")
 		return

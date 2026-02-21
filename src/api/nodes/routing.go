@@ -3,7 +3,6 @@ package nodes
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"sync"
 
 	"github.com/danmuck/dps_files/src/api/transport"
@@ -83,72 +82,3 @@ func (r *DefaultRouter) Lookup(id []byte) (*transport.NodeInfo, error) {
 	return nil, errors.New("node not found")
 }
 
-////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////////////////
-
-type KademliaRouter struct {
-	id        []byte
-	localhost string
-
-	k       int
-	a       int
-	size    int
-	buckets [][]*transport.NodeInfo // max length of 160 			PLACEHOLDER
-
-	mu sync.Mutex
-}
-
-func NewKademliaRouter(node *transport.NodeInfo, k int, a int) (*KademliaRouter, error) {
-	nodeID := node.Id
-	if len(nodeID) != 20 || nodeID == nil {
-		return nil, fmt.Errorf("bad node id: %+v", nodeID)
-	}
-	if k <= 0 {
-		return nil, fmt.Errorf("bad k value: %d", k)
-	}
-	if a <= 0 || a > k {
-		return nil, fmt.Errorf("bad a value: %d (k=%d)", a, k)
-	}
-	return &KademliaRouter{
-		id:        nodeID,
-		localhost: node.Address,
-		k:         k,
-		a:         a,
-		size:      0,
-		buckets:   make([][]*transport.NodeInfo, 0, 160),
-	}, nil
-}
-
-func (r *KademliaRouter) InsertNode(node Node) error {
-	return nil
-}
-
-func (r *KademliaRouter) RemoveNode(node Node) error {
-	return nil
-}
-
-func (r *KademliaRouter) Lookup(id []byte) (*transport.NodeInfo, error) {
-	return nil, nil
-}
-
-func (r *KademliaRouter) K() int {
-	return r.k
-}
-
-func (r *KademliaRouter) A() int {
-	return r.a
-}
-
-func (r *KademliaRouter) GetBucket(index int) []*transport.NodeInfo {
-	return nil
-}
-
-func (r *KademliaRouter) ClosestK(key []byte) []*transport.NodeInfo {
-	return nil
-}
-
-func (r *KademliaRouter) Size() int {
-	return r.size
-}

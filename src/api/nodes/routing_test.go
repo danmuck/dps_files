@@ -15,7 +15,7 @@ func generateTestKey() []byte {
 }
 
 func TestNewDefaultNode(t *testing.T) {
-	node, err := NewDefaultNode(generateTestKey(), "localhost:0", 5, 3)
+	node, err := NewDefaultNode(generateTestKey(), "localhost:0")
 	if err != nil {
 		t.Fatalf("NewDefaultNode failed: %v", err)
 	}
@@ -34,15 +34,8 @@ func TestNewDefaultNode(t *testing.T) {
 	}
 }
 
-func TestNewDefaultNodeBadID(t *testing.T) {
-	_, err := NewDefaultNode([]byte{1, 2, 3}, "localhost:0", 5, 3)
-	if err == nil {
-		t.Error("Expected error for bad node ID, got nil")
-	}
-}
-
 func TestDefaultNodeStartShutdown(t *testing.T) {
-	node, err := NewDefaultNode(generateTestKey(), "localhost:0", 5, 3)
+	node, err := NewDefaultNode(generateTestKey(), "localhost:0")
 	if err != nil {
 		t.Fatalf("NewDefaultNode failed: %v", err)
 	}
@@ -59,21 +52,14 @@ func TestDefaultNodeStartShutdown(t *testing.T) {
 	}
 }
 
-func TestKademliaRouterCreation(t *testing.T) {
-	node, err := NewDefaultNode(generateTestKey(), "localhost:0", 20, 3)
+func TestDefaultRouterCreation(t *testing.T) {
+	node, err := NewDefaultNode(generateTestKey(), "localhost:0")
 	if err != nil {
 		t.Fatalf("NewDefaultNode failed: %v", err)
 	}
 
-	router, ok := node.Router.(*KademliaRouter)
+	_, ok := node.Router.(*DefaultRouter)
 	if !ok {
-		t.Fatal("Router is not a KademliaRouter")
-	}
-
-	if router.k != 20 {
-		t.Errorf("Expected k=20, got %d", router.k)
-	}
-	if router.a != 3 {
-		t.Errorf("Expected a=3, got %d", router.a)
+		t.Fatal("Router is not a DefaultRouter")
 	}
 }
