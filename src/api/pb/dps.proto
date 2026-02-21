@@ -1,0 +1,116 @@
+syntax = "proto3";
+
+package dps;
+option go_package = "github.com/danmuck/dps_files/src/api/pb";
+
+import "google/api/annotations.proto";
+
+// UploadChunk is sent in a client-streaming Upload RPC.
+// The first message sets name and size; subsequent messages carry data only.
+message UploadChunk {
+  string name = 1;
+  uint64 size = 2;
+  bytes  data = 3;
+}
+
+message UploadResponse {
+  bytes  hash = 1;
+  string name = 2;
+  uint64 size = 3;
+}
+
+// DownloadRequest identifies a file by hash (preferred) or by name.
+message DownloadRequest {
+  bytes  hash = 1;
+  string name = 2;
+}
+
+// DataChunk is one piece of a server-streamed Download.
+message DataChunk {
+  bytes data = 1;
+}
+
+message DeleteRequest {
+  bytes hash = 1;
+}
+
+message DeleteResponse {}
+
+message ListRequest {}
+
+message FileEntry {
+  string name       = 1;
+  bytes  hash       = 2;
+  uint64 size       = 3;
+  string entry_type = 4;
+}
+
+message ListResponse {
+  repeated FileEntry files = 1;
+}
+
+message UploadDirRequest {
+  string root_path = 1;
+}
+
+message UploadDirResponse {
+  bytes hash = 1;
+}
+
+message ListDirRequest {
+  bytes hash = 1;
+}
+
+message DirEntry {
+  string name = 1;
+  string path = 2;
+  bytes  hash = 3;
+  string type = 4;
+  uint64 size = 5;
+}
+
+message ListDirResponse {
+  repeated DirEntry entries = 1;
+}
+
+service DPSFiles {
+
+  rpc Upload(stream UploadChunk) returns (UploadResponse) {
+    option (google.api.http) = {
+      post: "/v1/files"
+      body: "*"
+    };
+  }
+
+  rpc Download(DownloadRequest) returns (stream DataChunk) {
+    option (google.api.http) = {
+      get: "/v1/files/{hash}"
+      additional_bindings { get: "/v1/files/name/{name}" }
+    };
+  }
+
+  rpc Delete(DeleteRequest) returns (DeleteResponse) {
+    option (google.api.http) = {
+      delete: "/v1/files/{hash}"
+    };
+  }
+
+  rpc List(ListRequest) returns (ListResponse) {
+    option (google.api.http) = {
+      get: "/v1/files"
+    };
+  }
+
+  rpc UploadDir(UploadDirRequest) returns (UploadDirResponse) {
+    option (google.api.http) = {
+      post: "/v1/dirs"
+      body: "*"
+    };
+  }
+
+  rpc ListDir(ListDirRequest) returns (ListDirResponse) {
+    option (google.api.http) = {
+      get: "/v1/dirs/{hash}"
+    };
+  }
+}
