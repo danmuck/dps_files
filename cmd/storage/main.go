@@ -8,12 +8,13 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/danmuck/dps_files/cmd/internal/logcfg"
 	"github.com/danmuck/dps_files/src/key_store"
 	logs "github.com/danmuck/smplog"
 )
 
 func main() {
-	logs.Configure(logs.DefaultConfig())
+	logs.Configure(logcfg.Load())
 
 	cfg, err := parseCLI(os.Args[1:], defaultRuntimeConfig)
 	if err != nil {
@@ -148,11 +149,16 @@ func refreshMenuContext(cfg RuntimeConfig, keystore *key_store.KeyStore) ([]stri
 
 func printRuntimeSummary(cfg RuntimeConfig, actionSource string) {
 	logs.Printf("\n")
-	logs.DataKV("Execution mode", cfg.Mode)
-	logs.DataKV("TTL seconds", cfg.TTLSeconds)
-	logs.DataKV("Reassembly enabled", cfg.ReassembleEnabled)
-	logs.DataKV("Action", actionSource)
-	logs.DataKV("Storage root path", cfg.KeyStore.StorageDir)
+	logs.Field("Execution mode", cfg.Mode)
+	logs.Printf("\n")
+	logs.Field("TTL seconds", cfg.TTLSeconds)
+	logs.Printf("\n")
+	logs.Field("Reassembly enabled", cfg.ReassembleEnabled)
+	logs.Printf("\n")
+	logs.Field("Action", actionSource)
+	logs.Printf("\n")
+	logs.Field("Storage root path", cfg.KeyStore.StorageDir)
+	logs.Printf("\n")
 }
 
 func executeActionOnce(cfg RuntimeConfig, keystore *key_store.KeyStore, input io.Reader, indexedFiles []string) error {

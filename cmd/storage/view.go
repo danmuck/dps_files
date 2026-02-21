@@ -29,7 +29,8 @@ func executeRemoteViewAction(cfg RuntimeConfig) error {
 		if len(shortHash) > 16 {
 			shortHash = shortHash[:16]
 		}
-		logs.Dataf("  [%d] %-30s  hash: %s...  size: %s\n", i, e.Name, shortHash, formatBytes(e.Size))
+		logs.MenuItem(i, logs.PadRight(30, e.Name)+"  hash: "+shortHash+"...  size: "+formatBytes(e.Size), false)
+		logs.Printf("\n")
 	}
 	return nil
 }
@@ -61,7 +62,8 @@ func executeViewAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.Reade
 			shortHash = shortHash[:16]
 		}
 
-		logs.Dataf("  [%d] %s\n", i, md.FileName)
+		logs.MenuItem(i, md.FileName, false)
+		logs.Printf("\n")
 		logs.Dataf("      hash: %s...  size: %s  chunks: %d\n", shortHash, formatBytes(md.TotalSize), md.TotalBlocks)
 		logs.Dataf("      chunk_size: %s  last_chunk: %s  modified: %s  ttl: %s\n",
 			formatBytes(chunkSize),

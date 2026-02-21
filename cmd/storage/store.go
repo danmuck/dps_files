@@ -91,9 +91,9 @@ func executeStoreTargets(cfg RuntimeConfig, ks *key_store.KeyStore, filePaths []
 		summary.FileSize = sourceSize
 
 		logs.Printf("\n")
-		logs.DataKV("Source", sourcePath)
-		logs.DataKV("Original file size", fmt.Sprintf("%d bytes", originalSize))
-		logs.DataKV("Original file hash", fmt.Sprintf("%x", originalHash))
+		logs.Field("Source", sourcePath); logs.Printf("\n")
+		logs.Field("Original file size", fmt.Sprintf("%d bytes", originalSize)); logs.Printf("\n")
+		logs.Field("Original file hash", fmt.Sprintf("%x", originalHash)); logs.Printf("\n")
 
 		var file *key_store.File
 		switch cfg.Mode {
@@ -164,19 +164,20 @@ func executeStoreTargets(cfg RuntimeConfig, ks *key_store.KeyStore, filePaths []
 
 		logs.Printf("\n")
 		logs.Titlef("Stored metadata:\n")
-		logs.DataKV("File name", file.MetaData.FileName)
-		logs.DataKV("Total size", fmt.Sprintf("%d bytes", file.MetaData.TotalSize))
-		logs.DataKV("Chunk size", fmt.Sprintf("%d bytes", file.MetaData.BlockSize))
-		logs.DataKV("Total chunks", file.MetaData.TotalBlocks)
+		logs.Field("File name", file.MetaData.FileName); logs.Printf("\n")
+		logs.Field("Total size", fmt.Sprintf("%d bytes", file.MetaData.TotalSize)); logs.Printf("\n")
+		logs.Field("Chunk size", fmt.Sprintf("%d bytes", file.MetaData.BlockSize)); logs.Printf("\n")
+		logs.Field("Total chunks", file.MetaData.TotalBlocks); logs.Printf("\n")
 		if file.MetaData.TotalBlocks > 0 {
-			logs.DataKV("Last chunk size", fmt.Sprintf("%d bytes",
+			logs.Field("Last chunk size", fmt.Sprintf("%d bytes",
 				file.MetaData.TotalSize-uint64(file.MetaData.BlockSize*(file.MetaData.TotalBlocks-1))))
+			logs.Printf("\n")
 		}
 		if len(file.References) > 0 {
 			first := file.References[0]
 			last := file.References[len(file.References)-1]
-			logs.DataKV("First chunk", first.Location)
-			logs.DataKV("Last chunk", last.Location)
+			logs.Field("First chunk", first.Location); logs.Printf("\n")
+			logs.Field("Last chunk", last.Location); logs.Printf("\n")
 		}
 
 		if cfg.Mode != ModeRun {
@@ -237,10 +238,10 @@ func executeStoreTargets(cfg RuntimeConfig, ks *key_store.KeyStore, filePaths []
 
 		logs.Printf("\n")
 		logs.Titlef("Reassembly complete:\n")
-		logs.DataKV("Original size", fmt.Sprintf("%d bytes", file.MetaData.TotalSize))
-		logs.DataKV("Original hash", fmt.Sprintf("%x", file.MetaData.FileHash))
-		logs.DataKV("Reassembled size", fmt.Sprintf("%d bytes", length))
-		logs.DataKV("Reassembled hash", fmt.Sprintf("%x", reassembledHash))
+		logs.Field("Original size", fmt.Sprintf("%d bytes", file.MetaData.TotalSize)); logs.Printf("\n")
+		logs.Field("Original hash", fmt.Sprintf("%x", file.MetaData.FileHash)); logs.Printf("\n")
+		logs.Field("Reassembled size", fmt.Sprintf("%d bytes", length)); logs.Printf("\n")
+		logs.Field("Reassembled hash", fmt.Sprintf("%x", reassembledHash)); logs.Printf("\n")
 
 		if file.MetaData.FileHash != reassembledHash {
 			hashErr := fmt.Errorf("hash mismatch after reassembly for %s", sourcePath)

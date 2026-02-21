@@ -38,8 +38,8 @@ func executeStatsAction(cfg RuntimeConfig) error {
 	}
 
 	logs.Titlef("\nSystem Stats\n")
-	logs.DataKV("Generated at", time.Now().Format(time.RFC3339))
-	logs.DataKV("Go version", runtimeStats.GoVersion)
+	logs.Field("Generated at", time.Now().Format(time.RFC3339)); logs.Printf("\n")
+	logs.Field("Go version", runtimeStats.GoVersion); logs.Printf("\n")
 	logs.Dataf("CPUs: %d  Goroutines: %d\n", runtimeStats.NumCPU, runtimeStats.NumGoroutine)
 	logs.Dataf("Memory: alloc=%s  total_alloc=%s  sys=%s  num_gc=%d\n",
 		formatBytes(runtimeStats.AllocBytes),
@@ -49,12 +49,12 @@ func executeStatsAction(cfg RuntimeConfig) error {
 	)
 
 	logs.Titlef("\nStorage Usage\n")
-	logs.DataKV("Root", storageStats.RootPath)
-	logs.DataKV("data/", formatBytes(storageStats.DataBytes))
-	logs.DataKV("metadata/", formatBytes(storageStats.MetadataBytes))
-	logs.DataKV(".cache/", formatBytes(storageStats.CacheBytes))
-	logs.DataKV("other in storage/", formatBytes(storageStats.OtherBytes))
-	logs.DataKV("total storage/", formatBytes(storageStats.TotalBytes))
+	logs.Field("Root", storageStats.RootPath); logs.Printf("\n")
+	logs.Field("data/", formatBytes(storageStats.DataBytes)); logs.Printf("\n")
+	logs.Field("metadata/", formatBytes(storageStats.MetadataBytes)); logs.Printf("\n")
+	logs.Field(".cache/", formatBytes(storageStats.CacheBytes)); logs.Printf("\n")
+	logs.Field("other in storage/", formatBytes(storageStats.OtherBytes)); logs.Printf("\n")
+	logs.Field("total storage/", formatBytes(storageStats.TotalBytes)); logs.Printf("\n")
 
 	if cfg.Mode == ModeRemote && cfg.RemoteAddr != "" {
 		logs.Titlef("\nRemote Server: %s\n", cfg.RemoteAddr)

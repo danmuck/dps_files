@@ -34,7 +34,8 @@ func executeRemoteDownloadAction(cfg RuntimeConfig, input io.Reader) error {
 		if len(shortHash) > 16 {
 			shortHash = shortHash[:16]
 		}
-		logs.Dataf("  [%d] %s  hash: %s...  size: %s\n", i, e.Name, shortHash, formatBytes(e.Size))
+		logs.MenuItem(i, e.Name+"  hash: "+shortHash+"...  size: "+formatBytes(e.Size), false)
+		logs.Printf("\n")
 	}
 
 	reader := getBufferedReader(input)
@@ -54,7 +55,7 @@ func executeRemoteDownloadAction(cfg RuntimeConfig, input io.Reader) error {
 		}
 		idx, convErr := strconv.Atoi(choice)
 		if convErr != nil || idx < 0 || idx >= len(entries) {
-			logs.Printf("Invalid selection %q.\n", choice)
+			logs.StatusWarn(fmt.Sprintf("Invalid selection %q.", choice)); logs.Printf("\n")
 			continue
 		}
 		selected = entries[idx]
@@ -116,8 +117,8 @@ func executeDownloadAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.R
 		if len(shortHash) > 16 {
 			shortHash = shortHash[:16]
 		}
-		logs.Dataf("  [%d] %s  hash: %s...  chunks: %d  size: %s\n",
-			i, md.FileName, shortHash, md.TotalBlocks, formatBytes(md.TotalSize))
+		logs.MenuItem(i, md.FileName+"  hash: "+shortHash+"...  chunks: "+fmt.Sprintf("%d", md.TotalBlocks)+"  size: "+formatBytes(md.TotalSize), false)
+		logs.Printf("\n")
 	}
 
 	reader := getBufferedReader(input)
@@ -141,11 +142,11 @@ func executeDownloadAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.R
 
 		idx, convErr := strconv.Atoi(choice)
 		if convErr != nil {
-			logs.Printf("Invalid selection %q. Enter a numeric index or e.\n", choice)
+			logs.StatusWarn(fmt.Sprintf("Invalid selection %q. Enter a numeric index or e.", choice)); logs.Printf("\n")
 			continue
 		}
 		if idx < 0 || idx >= len(metadata) {
-			logs.Printf("Index %d out of range. Valid range is 0-%d.\n", idx, len(metadata)-1)
+			logs.StatusWarn(fmt.Sprintf("Index %d out of range. Valid range is 0-%d.", idx, len(metadata)-1)); logs.Printf("\n")
 			continue
 		}
 

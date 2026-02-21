@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/danmuck/dps_files/cmd/internal/logcfg"
 	"github.com/danmuck/dps_files/src/api/transport"
 	logs "github.com/danmuck/smplog"
 
@@ -15,7 +16,7 @@ import (
 )
 
 func main() {
-	logs.Configure(logs.DefaultConfig())
+	logs.Configure(logcfg.Load())
 
 	address := "localhost:3000" // Replace with your server address
 	logs.Infof("Connecting to server at %s...", address)

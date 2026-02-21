@@ -206,18 +206,18 @@ func renderSummary(s OpSummary) {
 	logs.Printf("\n")
 	logs.Titlef("--- %s summary: %s [%s] ---\n", s.Operation, s.FileName, status)
 	if s.FileSize > 0 {
-		logs.DataKV("total size", formatBytes(s.FileSize))
+		logs.Field("total size", formatBytes(s.FileSize)); logs.Printf("\n")
 	}
 	if s.Bytes > 0 {
-		logs.DataKV("bytes transferred", formatBytes(s.Bytes))
+		logs.Field("bytes transferred", formatBytes(s.Bytes)); logs.Printf("\n")
 	}
 	for _, ph := range s.Timer.Phases() {
-		logs.DataKV(ph.Name, formatDuration(ph.Elapsed))
+		logs.Field(ph.Name, formatDuration(ph.Elapsed)); logs.Printf("\n")
 	}
-	logs.DataKV("total", formatDuration(totalElapsed))
+	logs.Field("total", formatDuration(totalElapsed)); logs.Printf("\n")
 	if s.Bytes > 0 && totalElapsed.Seconds() > 0 {
 		throughput := float64(s.Bytes) / totalElapsed.Seconds()
-		logs.DataKV("avg throughput", formatBytes(uint64(throughput))+"/s")
+		logs.Field("avg throughput", formatBytes(uint64(throughput))+"/s"); logs.Printf("\n")
 	}
 }
 

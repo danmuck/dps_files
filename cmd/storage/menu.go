@@ -61,7 +61,7 @@ func promptAction(input io.Reader, cfg *RuntimeConfig, indexedFiles []string, me
 			}
 		}
 		logs.Printf("\n")
-		logs.Titlef("   --[ dps_files | %s ]--\n\n", modeLabel)
+		logs.Titlef("--[ dps_files | %s ]--\n\n", modeLabel)
 		logs.Menuf("  view (inspect metadata + reassemble)\n")
 		logs.Menuf("  store (chunk/store explicit filepath)\n")
 		logs.Menuf("  upload (chunk/store files from upload dir)\n")
@@ -97,21 +97,24 @@ func promptAction(input io.Reader, cfg *RuntimeConfig, indexedFiles []string, me
 
 		case "", string(ActionView), "vi":
 			if cfg.Mode != ModeRemote && metadataCount == 0 {
-				logs.Println("No metadata entries found in storage/metadata.")
+				logs.StatusWarn("No metadata entries found in storage/metadata.")
+				logs.Printf("\n")
 				continue
 			}
 			return ActionView, "view", nil
 
 		case string(ActionUpload), "u", "up":
 			if len(indexedFiles) == 0 {
-				logs.Printf("No indexed files are available under %s.\n", cfg.UploadDirectory)
+				logs.StatusWarn("No indexed files are available under " + cfg.UploadDirectory + ".")
+				logs.Printf("\n")
 				continue
 			}
 			return ActionUpload, "upload (from upload dir)", nil
 
 		case string(ActionDownload), "dl", "down", "stream", "st":
 			if cfg.Mode != ModeRemote && metadataCount == 0 {
-				logs.Println("No stored files to download.")
+				logs.StatusWarn("No stored files to download.")
+				logs.Printf("\n")
 				continue
 			}
 			return ActionDownload, "download", nil
@@ -121,7 +124,8 @@ func promptAction(input io.Reader, cfg *RuntimeConfig, indexedFiles []string, me
 
 		case string(ActionDelete), "del":
 			if cfg.Mode != ModeRemote && metadataCount == 0 {
-				logs.Println("No stored files to delete.")
+				logs.StatusWarn("No stored files to delete.")
+				logs.Printf("\n")
 				continue
 			}
 			return ActionDelete, "delete", nil
@@ -146,21 +150,32 @@ func promptAction(input io.Reader, cfg *RuntimeConfig, indexedFiles []string, me
 
 		default:
 			logs.Printf("Invalid action %q.\n\n", choice)
-			logs.Dataf("  %-14s %-12s %s\n", "Action", "Shorthand", "Description")
-			logs.Divider(61)
+			logs.Divider(0)
 			logs.Printf("\n")
-			logs.Dataf("  %-14s %-12s %s\n", "mode", "m", "toggle local / remote")
-			logs.Dataf("  %-14s %-12s %s\n", "view", "vi", "inspect metadata + reassemble")
-			logs.Dataf("  %-14s %-12s %s\n", "upload", "u, up", "store files from upload dir")
-			logs.Dataf("  %-14s %-12s %s\n", "download", "dl", "write a stored file to disk")
-			logs.Dataf("  %-14s %-12s %s\n", "store", "s", "store explicit filepath")
-			logs.Dataf("  %-14s %-12s %s\n", "delete", "del", "remove a stored file + chunks")
-			logs.Dataf("  %-14s %-12s %s\n", "verify", "ve", "deep integrity scan of all chunks")
-			logs.Dataf("  %-14s %-12s %s\n", "expire", "exp, ex", "sweep and remove TTL-expired files")
-			logs.Dataf("  %-14s %-12s %s\n", "clean", "cl", "remove .kdht chunk files only")
-			logs.Dataf("  %-14s %-12s %s\n", "deep clean", "dc, cleand", "remove .kdht + metadata + cache")
-			logs.Dataf("  %-14s %-12s %s\n", "stats", "stat", "storage + system info")
-			logs.Dataf("  %-14s %-12s %s\n", "exit", "e, q", "quit")
+			logs.KeyHint("m", "mode — toggle local / remote")
+			logs.Printf("\n")
+			logs.KeyHint("vi", "view — inspect metadata + reassemble")
+			logs.Printf("\n")
+			logs.KeyHint("u, up", "upload — store files from upload dir")
+			logs.Printf("\n")
+			logs.KeyHint("dl", "download — write a stored file to disk")
+			logs.Printf("\n")
+			logs.KeyHint("s", "store — store explicit filepath")
+			logs.Printf("\n")
+			logs.KeyHint("del", "delete — remove a stored file + chunks")
+			logs.Printf("\n")
+			logs.KeyHint("ve", "verify — deep integrity scan of all chunks")
+			logs.Printf("\n")
+			logs.KeyHint("exp, ex", "expire — sweep and remove TTL-expired files")
+			logs.Printf("\n")
+			logs.KeyHint("cl", "clean — remove .kdht chunk files only")
+			logs.Printf("\n")
+			logs.KeyHint("dc, cleand", "deep clean — remove .kdht + metadata + cache")
+			logs.Printf("\n")
+			logs.KeyHint("stat", "stats — storage + system info")
+			logs.Printf("\n")
+			logs.KeyHint("e, q", "exit — quit")
+			logs.Printf("\n")
 		}
 	}
 }

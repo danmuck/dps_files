@@ -4,7 +4,7 @@ go 1.25.6
 
 require (
 	github.com/BurntSushi/toml v1.6.0
-	github.com/danmuck/smplog v0.0.0-20260221023934-ecdbc33282a0
+	github.com/danmuck/smplog v0.0.0-20260221034628-4717b92dce5c
 	google.golang.org/protobuf v1.36.0
 )
 

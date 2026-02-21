@@ -29,7 +29,8 @@ func executeRemoteDeleteAction(cfg RuntimeConfig, input io.Reader) error {
 		if len(shortHash) > 16 {
 			shortHash = shortHash[:16]
 		}
-		logs.Dataf("  [%d] %s  hash: %s...  size: %s\n", i, e.Name, shortHash, formatBytes(e.Size))
+		logs.MenuItem(i, e.Name+"  hash: "+shortHash+"...  size: "+formatBytes(e.Size), false)
+		logs.Printf("\n")
 	}
 
 	reader := getBufferedReader(input)
@@ -48,7 +49,7 @@ func executeRemoteDeleteAction(cfg RuntimeConfig, input io.Reader) error {
 		}
 		idx, convErr := strconv.Atoi(choice)
 		if convErr != nil || idx < 0 || idx >= len(entries) {
-			logs.Printf("Invalid selection %q.\n", choice)
+			logs.StatusWarn(fmt.Sprintf("Invalid selection %q.", choice)); logs.Printf("\n")
 			continue
 		}
 		hash, err := hexToHash(entries[idx].Hash)
@@ -58,7 +59,7 @@ func executeRemoteDeleteAction(cfg RuntimeConfig, input io.Reader) error {
 		if err := client.Delete(hash); err != nil {
 			return fmt.Errorf("delete %q: %w", entries[idx].Name, err)
 		}
-		logs.Printf("Deleted %q from remote server.\n", entries[idx].Name)
+		logs.StatusInfo(fmt.Sprintf("Deleted %q from remote server.", entries[idx].Name)); logs.Printf("\n")
 		return nil
 	}
 }
@@ -87,8 +88,8 @@ func executeDeleteAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.Rea
 		if len(shortHash) > 16 {
 			shortHash = shortHash[:16]
 		}
-		logs.Dataf("  [%d] %s  hash: %s...  chunks: %d  size: %s\n",
-			i, md.FileName, shortHash, md.TotalBlocks, formatBytes(md.TotalSize))
+		logs.MenuItem(i, md.FileName+"  hash: "+shortHash+"...  chunks: "+fmt.Sprintf("%d", md.TotalBlocks)+"  size: "+formatBytes(md.TotalSize), false)
+		logs.Printf("\n")
 	}
 
 	reader := getBufferedReader(input)
@@ -109,11 +110,11 @@ func executeDeleteAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.Rea
 
 		idx, convErr := strconv.Atoi(choice)
 		if convErr != nil {
-			logs.Printf("Invalid selection %q. Enter a numeric index or e.\n", choice)
+			logs.StatusWarn(fmt.Sprintf("Invalid selection %q. Enter a numeric index or e.", choice)); logs.Printf("\n")
 			continue
 		}
 		if idx < 0 || idx >= len(metadata) {
-			logs.Printf("Index %d out of range. Valid range is 0-%d.\n", idx, len(metadata)-1)
+			logs.StatusWarn(fmt.Sprintf("Index %d out of range. Valid range is 0-%d.", idx, len(metadata)-1)); logs.Printf("\n")
 			continue
 		}
 
@@ -121,7 +122,7 @@ func executeDeleteAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.Rea
 		if err := ks.DeleteFile(md.FileHash); err != nil {
 			return fmt.Errorf("failed to delete %q: %w", md.FileName, err)
 		}
-		logs.Printf("Deleted %q (%d chunk(s) removed).\n", md.FileName, md.TotalBlocks)
+		logs.StatusInfo(fmt.Sprintf("Deleted %q (%d chunk(s) removed).", md.FileName, md.TotalBlocks)); logs.Printf("\n")
 		return nil
 	}
 }

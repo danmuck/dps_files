@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/danmuck/dps_files/cmd/internal/logcfg"
 	"github.com/danmuck/dps_files/src/impl"
 	logs "github.com/danmuck/smplog"
 )
@@ -92,7 +93,7 @@ func InitializeBlockchain(encryptionKey []byte) *Blockchain {
 }
 
 func main() {
-	logs.Configure(logs.DefaultConfig())
+	logs.Configure(logcfg.Load())
 
 	// Initialize the blockchain
 	encryptionKey := []byte("examplekey123456")

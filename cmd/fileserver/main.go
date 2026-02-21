@@ -4,12 +4,13 @@ import (
 	"flag"
 	"net"
 
+	"github.com/danmuck/dps_files/cmd/internal/logcfg"
 	"github.com/danmuck/dps_files/src/key_store"
 	logs "github.com/danmuck/smplog"
 )
 
 func main() {
-	logs.Configure(logs.DefaultConfig())
+	logs.Configure(logcfg.Load())
 
 	addr := flag.String("addr", ":9000", "TCP listen address")
 	storageDir := flag.String("storage", "local/storage", "storage directory")

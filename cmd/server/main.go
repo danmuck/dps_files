@@ -4,6 +4,7 @@ import (
 	"math/rand"
 	"time"
 
+	"github.com/danmuck/dps_files/cmd/internal/logcfg"
 	"github.com/danmuck/dps_files/src/api/nodes"
 	"github.com/danmuck/dps_files/src/api/transport"
 	logs "github.com/danmuck/smplog"
@@ -34,7 +35,7 @@ func GenerateKey() []byte {
 	return b
 }
 func main() {
-	logs.Configure(logs.DefaultConfig())
+	logs.Configure(logcfg.Load())
 
 	n, err := nodes.NewDefaultNode(GenerateKey(), "localhost:3000", 5, 5)
 	if err != nil {

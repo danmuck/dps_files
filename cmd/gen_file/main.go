@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/danmuck/dps_files/cmd/internal/logcfg"
 	logs "github.com/danmuck/smplog"
 )
 
@@ -61,7 +62,7 @@ func defaultSizeLabel(size int64) string {
 }
 
 func main() {
-	logs.Configure(logs.DefaultConfig())
+	logs.Configure(logcfg.Load())
 
 	if len(os.Args) < 2 {
 		logs.Warnf("Usage: gen_file <size> [filename]")

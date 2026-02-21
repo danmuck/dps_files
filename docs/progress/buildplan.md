@@ -47,6 +47,7 @@
 - [x] Restore `cmd/gen_file` default filename size-labeling (`test_<n>B|KB|MB|GB.dat`) so generated names use abbreviated units instead of raw byte-only labels
 - [x] Fix `existingFileByHash` — re-upload of an expired file (TTL elapsed, chunks still on disk) now refreshes `Modified` timestamp and resets TTL to `DefaultTTLSeconds` via `fileToMemory`, so subsequent reassembly does not fail with "file expired"; all four upload paths (`StoreFileLocal`, `LoadAndStoreFileLocal`, `LoadAndStoreFileRemote`, `StoreFromReader`) are covered at the single dedup guard
 - [x] Fix `Cleanup` — scans `chunkDataDir` on disk and removes every `.kdht` file found (not just in-memory tracked chunks), covering orphaned files left by crashed mid-store operations
+- [x] Normalize `smplog` config discovery across all `cmd/*` entrypoints with shared loader (`cmd/internal/logcfg`) that resolves `SMPLOG_CONFIG`, `./smplog.config.toml`, then `./local/smplog.config.toml`
 
 ### Phase 1B: Testing
 - [x] Fix `TestLargeFileChunking` — now generates a 256MB test file and reuses it if present

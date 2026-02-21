@@ -3,6 +3,8 @@ github.com/BurntSushi/toml v1.6.0/go.mod h1:ukJfTF/6rtPPRCnwkur4qwRxa8vTRFBF0uk2
 github.com/coreos/go-systemd/v22 v22.5.0/go.mod h1:Y58oyj3AT4RCenI/lSvhwexgC+NSVTIJ3seZv2GcEnc=
 github.com/danmuck/smplog v0.0.0-20260221023934-ecdbc33282a0 h1:w/mvUbVRBh0nhpjfQjQHnL4cRC6UIWVQ8Ymt8LNRr0Y=
 github.com/danmuck/smplog v0.0.0-20260221023934-ecdbc33282a0/go.mod h1:TEAf6qXjOl0z+UCsnwwSv5iKQHh/Xfg1LhMZ9Kh+jDc=
+github.com/danmuck/smplog v0.0.0-20260221034628-4717b92dce5c h1:FdcRyh10/Z5+qvTYwiwf9WgKBroqTBokx2hiq0W9vQ0=
+github.com/danmuck/smplog v0.0.0-20260221034628-4717b92dce5c/go.mod h1:TEAf6qXjOl0z+UCsnwwSv5iKQHh/Xfg1LhMZ9Kh+jDc=
 github.com/godbus/dbus/v5 v5.0.4/go.mod h1:xhWf0FNVPg57R7Z0UbKHbJfkEywrmjJnf7w5xrFpKfA=
 github.com/google/go-cmp v0.5.5 h1:Khx7svrCpmxxtHBq5j2mp/xVjsi8hQMfNLvJFAlrGgU=
 github.com/google/go-cmp v0.5.5/go.mod h1:v8dTdLbMG2kIc/vJvl+f65V22dbkXbowE6jgT/gNBxE=
