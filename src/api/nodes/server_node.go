@@ -58,6 +58,15 @@ func (s *DefaultServerNode) Storage() ledgers.FileLedger {
 	return s.storage
 }
 
+// RawKeyStore returns the underlying KeyStore for direct access.
+// Used by the TUI for operations not yet in the FileLedger interface.
+func (s *DefaultServerNode) RawKeyStore() *key_store.KeyStore {
+	if ksl, ok := s.storage.(*key_store.KeyStoreLedger); ok {
+		return ksl.KeyStore()
+	}
+	return nil
+}
+
 // Start begins the TCP listener, RPC dispatch loop, and optional HTTP server.
 // It does NOT call DefaultNode.Start() to avoid a duplicate RPC consumer.
 func (s *DefaultServerNode) Start() error {

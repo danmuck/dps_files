@@ -16,6 +16,12 @@ func NewFileLedger(ks *KeyStore) *KeyStoreLedger {
 	return &KeyStoreLedger{ks: ks}
 }
 
+// KeyStore returns the underlying KeyStore for direct access.
+// Used by the TUI for operations not yet exposed through the FileLedger interface.
+func (l *KeyStoreLedger) KeyStore() *KeyStore {
+	return l.ks
+}
+
 func (l *KeyStoreLedger) VerifyReferences() error {
 	errs := l.ks.VerifyAll()
 	if len(errs) > 0 {

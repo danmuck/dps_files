@@ -28,6 +28,18 @@ type KeyStore struct {
 
 var ErrFileHashCached = errors.New("file hash already present in cache")
 
+// ApplyConfig updates the mutable configuration fields (Verbose, DefaultTTLSeconds,
+// VerifyOnWrite) on a running KeyStore. StorageDir is not changed.
+func (ks *KeyStore) ApplyConfig(cfg KeyStoreConfig) {
+	ks.lock.Lock()
+	defer ks.lock.Unlock()
+	ks.config.Verbose = cfg.Verbose
+	ks.config.VerifyOnWrite = cfg.VerifyOnWrite
+	if cfg.DefaultTTLSeconds > 0 {
+		ks.config.DefaultTTLSeconds = cfg.DefaultTTLSeconds
+	}
+}
+
 // InitKeyStore creates a KeyStore with default config (verbose, no verify-on-write).
 func InitKeyStore(storageDir string) (*KeyStore, error) {
 	return InitKeyStoreWithConfig(DefaultConfig(storageDir))
