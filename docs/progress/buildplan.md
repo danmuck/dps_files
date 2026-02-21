@@ -88,10 +88,10 @@
 - [x] Add tests: VerifyAll detects corruption and passes on clean store — `TestVerifyAllDetectsCorruption`, `TestVerifyAllCleanStore`
 
 ### Phase 1C: Cleanup & Performance
-- [ ] Ensure all key_store library code uses `smplog` consistently (smplog adopted project-wide; remaining work is auditing library-level code for any stray fmt.Printf or log/slog calls)
+- [x] Ensure all key_store library code uses `smplog` consistently (smplog adopted project-wide; remaining work is auditing library-level code for any stray fmt.Printf or log/slog calls)
 - [x] Make `VERIFY` a runtime field on `KeyStore` instead of a compile-time const (implemented via `KeyStoreConfig.VerifyOnWrite`)
-- [ ] Make `PRINT_BLOCKS` a runtime field or remove progress printing from library code (move to cmd/)
-- [ ] Extract shared chunking logic from `StoreFileLocal` and `LoadAndStoreFileLocal` into a private helper to eliminate duplication
+- [x] Make `PRINT_BLOCKS` a runtime field or remove progress printing from library code (move to cmd/) — removed, inlined
+- [x] Extract shared chunking logic from `StoreFileLocal` and `LoadAndStoreFileLocal` into a private helper to eliminate duplication
 - [ ] Add `context.Context` parameter to `StoreFileLocal` and `LoadAndStoreFileLocal` for cancellation support
 - [x] Deduplicate: `existingFileByHash` is called at the top of all store entry points (`StoreFileLocal`, `LoadAndStoreFileLocal`, `LoadAndStoreFileRemote`, `StoreFromReader`) and short-circuits chunking when the hash is already stored
 
@@ -101,7 +101,7 @@
 
 > **STATUS: FUTURE** — Interface stubs and scaffolding only. Will be reworked after Stage 1 completion.
 
-**Current state:** `TCPHandler` can accept TCP connections, encode/send RPCs via Protobuf, and push decoded RPCs into a channel. `DefaultCoder` handles Protobuf encode/decode with a 2-byte (uint16) length header, limiting messages to 65KB. `Send()` now correctly encodes via `Coder.Encode()`. `TransportHandler` interface signatures are consistent (`Send(*RPC)`, `Close() error`). Tests verify listener, connect, and full send/receive round-trip. No RPC dispatch, no UDP, no TLS.
+**Current state:** `TCPHandler` can accept TCP connections, encode/send RPCs via Protobuf, and push decoded RPCs into a channel. `DefaultCoder` handles Protobuf encode/decode with a 4-byte (uint32) length header supporting messages up to 4GB. `Send()` now correctly encodes via `Coder.Encode()`. `TransportHandler` interface signatures are consistent (`Send(*RPC)`, `Close() error`). `TCPHandler` has `Dial(addr)` with connection pooling for outbound connections. File operation commands (UPLOAD, DOWNLOAD, LIST, DELETE) added to protobuf. `ServerNode` dispatches RPCs via `HandleRPC` switch, with optional HTTP server. Tests verify listener, connect, and full send/receive round-trip. No UDP, no TLS.
 
 **Key files:**
 - `src/api/transport/transport.go` — `TransportHandler` interface (corrected signatures)
@@ -115,10 +115,10 @@
 ### Phase 2A: Fix Existing TCP
 - [x] Fix `TCPHandler.Send()` — now encodes via `Coder.Encode()` and writes the result
 - [x] Fix `TransportHandler` interface signatures — `Send(*RPC)`, `Close() error`
-- [ ] Upgrade length header from `uint16` (65KB max) to `uint32` (4GB max) to support chunk-sized messages
-- [ ] Add `TCPHandler.Dial(addr)` method to initiate outbound connections (currently only accepts inbound)
-- [ ] Add connection pooling or reuse — currently each `handleConnection` runs independently with no way to send responses back
-- [ ] Replace remaining `fmt.Printf` / `fmt.Fprintf(os.Stderr, ...)` with `smplog` (project standard)
+- [x] Upgrade length header from `uint16` (65KB max) to `uint32` (4GB max) to support chunk-sized messages
+- [x] Add `TCPHandler.Dial(addr)` method to initiate outbound connections (currently only accepts inbound)
+- [x] Add connection pooling or reuse — currently each `handleConnection` runs independently with no way to send responses back
+- [x] Replace remaining `fmt.Printf` / `fmt.Fprintf(os.Stderr, ...)` with `smplog` (project standard) — transport already uses smplog
 
 ### Phase 2B: RPC Dispatch
 - [ ] Implement an RPC handler registry: map `Command` enum → handler function
