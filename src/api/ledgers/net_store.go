@@ -1,36 +1,36 @@
 package ledgers
 
-// FileID is the canonical typed file identifier (SHA-256).
-type FileID [32]byte
+import "io"
 
-// ChunkID is the canonical typed chunk identifier (SHA-1 routing key).
+type FileID [32]byte
 type ChunkID [20]byte
 
 type LogEntry struct {
-	Index   uint64 // Log index
-	Term    uint64 // Term in which the entry was added
-	Command []byte // Command data
+	Index   uint64
+	Term    uint64
+	Command []byte
 }
 
-// Future: LogManager is the surface API for managing raft snapshots
+type FileMetaSummary struct {
+	Name string `json:"name"`
+	Hash FileID `json:"hash"`
+	Size uint64 `json:"size"`
+}
+
 type LogManager interface {
-	Append(entry LogEntry) error             // Append a new log entry
-	GetEntry(index uint64) (LogEntry, error) // Retrieve a log entry
-	LastLogIndex() uint64                    // Get the last log index
-	Commit(index uint64) error               // Commit an entry
+	Append(entry LogEntry) error
+	GetEntry(index uint64) (LogEntry, error)
+	LastLogIndex() uint64
+	Commit(index uint64) error
 }
 
-// MetadataStore is the surface API for managing local metadata
 type MetadataStore interface {
-	UpsertFile(fileID FileID, chunks []ChunkID) error // Add/update metadata for a file
-	GetFile(fileID FileID) ([]ChunkID, error)         // Retrieve metadata for a file
-	DeleteFile(fileID FileID) error                   // Delete metadata for a file
-	ListFiles() ([]FileID, error)                     // List all known file IDs
+	UpsertFile(fileID FileID, chunks []ChunkID) error
+	GetFile(fileID FileID) ([]ChunkID, error)
+	DeleteFile(fileID FileID) error
+	ListFiles() ([]FileID, error)
 }
 
-// The FileLedger is the surface API for managing local file references and data
-//
-//	note: relies on MetadataStore for local routing
 type FileLedger interface {
 	VerifyReferences() error
 	StoreFileLocal(name string, fileData []byte) (FileID, error)
@@ -41,4 +41,11 @@ type FileLedger interface {
 	ListKnownFileReferences(fileID FileID) ([]ChunkID, error)
 	ListKnownFiles() ([]FileID, error)
 	Cleanup() error
+
+	// Streaming operations for ServerNode
+	StoreFromReader(name string, r io.Reader, size uint64) (FileID, error)
+	StreamFile(fileID FileID, w io.Writer) error
+	StreamFileByName(name string, w io.Writer) error
+	DeleteFile(fileID FileID) error
+	ListKnownFilesMetadata() []FileMetaSummary
 }
