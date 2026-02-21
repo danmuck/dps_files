@@ -34,5 +34,5 @@ local/data/
 main
 .prompt.md
 
-client
-storage
+/client
+/storage
