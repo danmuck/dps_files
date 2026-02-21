@@ -16,6 +16,8 @@ func (s *DefaultServerNode) registerHTTPRoutes() {
 	s.mux.HandleFunc("DELETE /files/hash/{hex}", s.handleDeleteByHash)
 	s.mux.HandleFunc("GET /files/{name}", s.handleDownloadByName)
 	s.mux.HandleFunc("GET /files", s.handleListFiles)
+	s.mux.HandleFunc("GET /dirs/hash/{hex}", s.handleListDir)
+	s.mux.HandleFunc("GET /dirs/hash/{hex}/tree", s.handleListDirTree)
 }
 
 func (s *DefaultServerNode) handleUpload(w http.ResponseWriter, r *http.Request) {
@@ -90,6 +92,65 @@ func (s *DefaultServerNode) handleDeleteByHash(w http.ResponseWriter, r *http.Re
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *DefaultServerNode) handleListDir(w http.ResponseWriter, r *http.Request) {
+	hexStr := r.PathValue("hex")
+	hashBytes, err := hex.DecodeString(hexStr)
+	if err != nil || len(hashBytes) != 32 {
+		http.Error(w, "invalid hash", http.StatusBadRequest)
+		return
+	}
+	var fid ledgers.FileID
+	copy(fid[:], hashBytes)
+
+	entries, err := s.storage.ListDirectory(fid)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(entries)
+}
+
+func (s *DefaultServerNode) handleListDirTree(w http.ResponseWriter, r *http.Request) {
+	hexStr := r.PathValue("hex")
+	hashBytes, err := hex.DecodeString(hexStr)
+	if err != nil || len(hashBytes) != 32 {
+		http.Error(w, "invalid hash", http.StatusBadRequest)
+		return
+	}
+	var fid ledgers.FileID
+	copy(fid[:], hashBytes)
+
+	tree, err := s.buildTree(fid)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(tree)
+}
+
+func (s *DefaultServerNode) buildTree(fid ledgers.FileID) ([]ledgers.DirectoryEntry, error) {
+	entries, err := s.storage.ListDirectory(fid)
+	if err != nil {
+		return nil, err
+	}
+	var all []ledgers.DirectoryEntry
+	for _, e := range entries {
+		all = append(all, e)
+		if e.Type == "directory" {
+			sub, err := s.buildTree(e.Hash)
+			if err != nil {
+				return nil, err
+			}
+			all = append(all, sub...)
+		}
+	}
+	return all, nil
 }
 
 func (s *DefaultServerNode) handleListFiles(w http.ResponseWriter, r *http.Request) {
