@@ -46,6 +46,7 @@ func NewServerNode(id []byte, addr string, storageDir string, opts ...ServerOpti
 		storage:     key_store.NewFileLedger(ks),
 		mux:         http.NewServeMux(),
 	}
+	sn.registerHTTPRoutes()
 	for _, opt := range opts {
 		opt(sn)
 	}
