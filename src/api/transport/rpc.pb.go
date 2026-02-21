@@ -85,6 +85,8 @@ const (
 	Command_DOWNLOAD         Command = 12
 	Command_LIST             Command = 13
 	Command_DELETE           Command = 14
+	Command_UPLOAD_DIR       Command = 15
+	Command_LIST_DIR         Command = 16
 )
 
 // Enum value maps for Command.
@@ -105,6 +107,8 @@ var (
 		12: "DOWNLOAD",
 		13: "LIST",
 		14: "DELETE",
+		15: "UPLOAD_DIR",
+		16: "LIST_DIR",
 	}
 	Command_value = map[string]int32{
 		"PING":             0,
@@ -122,6 +126,8 @@ var (
 		"DOWNLOAD":         12,
 		"LIST":             13,
 		"DELETE":           14,
+		"UPLOAD_DIR":       15,
+		"LIST_DIR":         16,
 	}
 )
 
@@ -387,7 +393,7 @@ const file_src_api_transport_rpc_proto_rawDesc = "" +
 	"\aTraceID\x18\b \x01(\tR\aTraceID*\"\n" +
 	"\bProtocol\x12\b\n" +
 	"\x04Raft\x10\x00\x12\f\n" +
-	"\bKademlia\x10\x01*\xd1\x01\n" +
+	"\bKademlia\x10\x01*\xef\x01\n" +
 	"\aCommand\x12\b\n" +
 	"\x04PING\x10\x00\x12\t\n" +
 	"\x05STORE\x10\x01\x12\a\n" +
@@ -407,7 +413,10 @@ const file_src_api_transport_rpc_proto_rawDesc = "" +
 	"\bDOWNLOAD\x10\f\x12\b\n" +
 	"\x04LIST\x10\r\x12\n" +
 	"\n" +
-	"\x06DELETE\x10\x0eB0Z.github.com/danmuck/dps_files/src/api/transportb\x06proto3"
+	"\x06DELETE\x10\x0e\x12\x0e\n" +
+	"\n" +
+	"UPLOAD_DIR\x10\x0f\x12\f\n" +
+	"\bLIST_DIR\x10\x10B0Z.github.com/danmuck/dps_files/src/api/transportb\x06proto3"
 
 var (
 	file_src_api_transport_rpc_proto_rawDescOnce sync.Once

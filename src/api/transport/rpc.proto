@@ -25,6 +25,8 @@ enum Command {
     DOWNLOAD = 12;
     LIST = 13;
     DELETE = 14;
+    UPLOAD_DIR = 15;
+    LIST_DIR = 16;
 }
 
 message NodeInfo {

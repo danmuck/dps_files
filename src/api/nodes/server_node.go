@@ -179,6 +179,38 @@ func (s *DefaultServerNode) HandleRPC(rpc *transport.RPC) (*transport.RPC, error
 			Sender: s.nodeInfo(),
 		}, nil
 
+	case transport.Command_UPLOAD_DIR:
+		dirPath := string(rpc.Key)
+		fid, err := s.storage.StoreDirectory(dirPath)
+		if err != nil {
+			return nil, fmt.Errorf("store directory: %w", err)
+		}
+		return &transport.RPC{
+			Meta:   &transport.RPCT{Command: transport.Command_ACK},
+			Sender: s.nodeInfo(),
+			Key:    fid[:],
+		}, nil
+
+	case transport.Command_LIST_DIR:
+		if len(rpc.Key) != 32 {
+			return nil, fmt.Errorf("LIST_DIR requires 32-byte directory hash key")
+		}
+		var fid ledgers.FileID
+		copy(fid[:], rpc.Key)
+		entries, err := s.storage.ListDirectory(fid)
+		if err != nil {
+			return nil, fmt.Errorf("list directory: %w", err)
+		}
+		data, err := json.Marshal(entries)
+		if err != nil {
+			return nil, fmt.Errorf("marshal directory listing: %w", err)
+		}
+		return &transport.RPC{
+			Meta:    &transport.RPCT{Command: transport.Command_ACK},
+			Sender:  s.nodeInfo(),
+			Payload: data,
+		}, nil
+
 	default:
 		return nil, fmt.Errorf("unhandled command: %v", rpc.Meta.Command)
 	}
