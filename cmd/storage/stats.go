@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"time"
+
+	logs "github.com/danmuck/smplog"
 )
 
 type RuntimeStats struct {
@@ -35,38 +37,38 @@ func executeStatsAction(cfg RuntimeConfig) error {
 		return err
 	}
 
-	fmt.Println("\nSystem Stats")
-	fmt.Printf("Generated at: %s\n", time.Now().Format(time.RFC3339))
-	fmt.Printf("Go version: %s\n", runtimeStats.GoVersion)
-	fmt.Printf("CPUs: %d  Goroutines: %d\n", runtimeStats.NumCPU, runtimeStats.NumGoroutine)
-	fmt.Printf("Memory: alloc=%s  total_alloc=%s  sys=%s  num_gc=%d\n",
+	logs.Titlef("\nSystem Stats\n")
+	logs.DataKV("Generated at", time.Now().Format(time.RFC3339))
+	logs.DataKV("Go version", runtimeStats.GoVersion)
+	logs.Dataf("CPUs: %d  Goroutines: %d\n", runtimeStats.NumCPU, runtimeStats.NumGoroutine)
+	logs.Dataf("Memory: alloc=%s  total_alloc=%s  sys=%s  num_gc=%d\n",
 		formatBytes(runtimeStats.AllocBytes),
 		formatBytes(runtimeStats.TotalAlloc),
 		formatBytes(runtimeStats.SysBytes),
 		runtimeStats.NumGC,
 	)
 
-	fmt.Println("\nStorage Usage")
-	fmt.Printf("Root: %s\n", storageStats.RootPath)
-	fmt.Printf("data/: %s\n", formatBytes(storageStats.DataBytes))
-	fmt.Printf("metadata/: %s\n", formatBytes(storageStats.MetadataBytes))
-	fmt.Printf(".cache/: %s\n", formatBytes(storageStats.CacheBytes))
-	fmt.Printf("other in storage/: %s\n", formatBytes(storageStats.OtherBytes))
-	fmt.Printf("total storage/: %s\n", formatBytes(storageStats.TotalBytes))
+	logs.Titlef("\nStorage Usage\n")
+	logs.DataKV("Root", storageStats.RootPath)
+	logs.DataKV("data/", formatBytes(storageStats.DataBytes))
+	logs.DataKV("metadata/", formatBytes(storageStats.MetadataBytes))
+	logs.DataKV(".cache/", formatBytes(storageStats.CacheBytes))
+	logs.DataKV("other in storage/", formatBytes(storageStats.OtherBytes))
+	logs.DataKV("total storage/", formatBytes(storageStats.TotalBytes))
 
 	if cfg.Mode == ModeRemote && cfg.RemoteAddr != "" {
-		fmt.Printf("\nRemote Server: %s\n", cfg.RemoteAddr)
+		logs.Titlef("\nRemote Server: %s\n", cfg.RemoteAddr)
 		client := NewFileServerClient(cfg.RemoteAddr)
 		entries, err := client.List()
 		if err != nil {
-			fmt.Printf("  Status: unreachable (%v)\n", err)
+			logs.Dataf("  Status: unreachable (%v)\n", err)
 		} else {
 			var totalSize uint64
 			for _, e := range entries {
 				totalSize += e.Size
 			}
-			fmt.Printf("  Status: reachable\n")
-			fmt.Printf("  Files: %d  Total size: %s\n", len(entries), formatBytes(totalSize))
+			logs.Dataf("  Status: reachable\n")
+			logs.Dataf("  Files: %d  Total size: %s\n", len(entries), formatBytes(totalSize))
 		}
 	}
 

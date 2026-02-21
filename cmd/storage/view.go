@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/danmuck/dps_files/src/key_store"
+	logs "github.com/danmuck/smplog"
 )
 
 func executeRemoteViewAction(cfg RuntimeConfig) error {
@@ -18,17 +19,17 @@ func executeRemoteViewAction(cfg RuntimeConfig) error {
 		return fmt.Errorf("list remote files: %w", err)
 	}
 	if len(entries) == 0 {
-		fmt.Println("No files on remote server.")
+		logs.Println("No files on remote server.")
 		return nil
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
-	fmt.Printf("\nRemote files (%d):\n", len(entries))
+	logs.Titlef("\nRemote files (%d):\n", len(entries))
 	for i, e := range entries {
 		shortHash := e.Hash
 		if len(shortHash) > 16 {
 			shortHash = shortHash[:16]
 		}
-		fmt.Printf("  [%d] %-30s  hash: %s...  size: %s\n", i, e.Name, shortHash, formatBytes(e.Size))
+		logs.Dataf("  [%d] %-30s  hash: %s...  size: %s\n", i, e.Name, shortHash, formatBytes(e.Size))
 	}
 	return nil
 }
@@ -39,7 +40,7 @@ func executeViewAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.Reade
 	}
 	metadata := ks.ListKnownFiles()
 	if len(metadata) == 0 {
-		fmt.Println("No metadata entries found in storage.")
+		logs.Println("No metadata entries found in storage.")
 		return nil
 	}
 
@@ -50,7 +51,7 @@ func executeViewAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.Reade
 		return metadata[i].FileName < metadata[j].FileName
 	})
 
-	fmt.Printf("\nStored metadata entries (%d):\n", len(metadata))
+	logs.Titlef("\nStored metadata entries (%d):\n", len(metadata))
 	for i, md := range metadata {
 		lastChunk := calculateLastChunkSize(md)
 		chunkSize := uint64(md.BlockSize)
@@ -60,9 +61,9 @@ func executeViewAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.Reade
 			shortHash = shortHash[:16]
 		}
 
-		fmt.Printf("  [%d] %s\n", i, md.FileName)
-		fmt.Printf("      hash: %s...  size: %s  chunks: %d\n", shortHash, formatBytes(md.TotalSize), md.TotalBlocks)
-		fmt.Printf("      chunk_size: %s  last_chunk: %s  modified: %s  ttl: %s\n",
+		logs.Dataf("  [%d] %s\n", i, md.FileName)
+		logs.Dataf("      hash: %s...  size: %s  chunks: %d\n", shortHash, formatBytes(md.TotalSize), md.TotalBlocks)
+		logs.Dataf("      chunk_size: %s  last_chunk: %s  modified: %s  ttl: %s\n",
 			formatBytes(chunkSize),
 			formatBytes(lastChunk),
 			formatUnixNano(md.Modified),
@@ -74,7 +75,7 @@ func executeViewAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.Reade
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Selection: %s\n", selection)
+	logs.Printf("Selection: %s\n", selection)
 	if len(selected) == 0 {
 		return nil
 	}
@@ -85,11 +86,11 @@ func executeViewAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.Reade
 			return fmt.Errorf("failed to ensure output directory: %w", err)
 		}
 
-		fmt.Printf("\nReassembling %q to %s\n", md.FileName, outputPath)
+		logs.Printf("\nReassembling %q to %s\n", md.FileName, outputPath)
 		if err := ks.ReassembleFileToPath(md.FileHash, outputPath); err != nil {
 			return fmt.Errorf("failed to reassemble %q: %w", md.FileName, err)
 		}
-		fmt.Printf("Reassembled: %s\n", outputPath)
+		logs.Printf("Reassembled: %s\n", outputPath)
 	}
 
 	return nil

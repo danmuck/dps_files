@@ -9,10 +9,11 @@ import (
 	"time"
 
 	"github.com/danmuck/dps_files/src/key_store"
+	logs "github.com/danmuck/smplog"
 )
 
 func verifyChunks(ks *key_store.KeyStore, file *key_store.File) error {
-	fmt.Printf("\nVerifying stored chunks: %d\n", len(file.References))
+	logs.Printf("\nVerifying stored chunks: %d\n", len(file.References))
 
 	for i, ref := range file.References {
 		if ref == nil {
@@ -34,7 +35,7 @@ func verifyChunks(ks *key_store.KeyStore, file *key_store.File) error {
 		}
 
 		if i%key_store.PRINT_BLOCKS == 0 || i == int(file.MetaData.TotalBlocks-1) {
-			fmt.Printf("Verified chunk %d/%d: size=%d index=%d hash=%x\n",
+			logs.Dataf("Verified chunk %d/%d: size=%d index=%d hash=%x\n",
 				i, file.MetaData.TotalBlocks-1, len(chunkData), ref.FileIndex, dataHash)
 		}
 	}
@@ -89,9 +90,10 @@ func executeStoreTargets(cfg RuntimeConfig, ks *key_store.KeyStore, filePaths []
 		sourceSize := uint64(originalSize)
 		summary.FileSize = sourceSize
 
-		fmt.Printf("\nSource: %s\n", sourcePath)
-		fmt.Printf("Original file size: %d bytes\n", originalSize)
-		fmt.Printf("Original file hash: %x\n", originalHash)
+		logs.Printf("\n")
+		logs.DataKV("Source", sourcePath)
+		logs.DataKV("Original file size", fmt.Sprintf("%d bytes", originalSize))
+		logs.DataKV("Original file hash", fmt.Sprintf("%x", originalHash))
 
 		var file *key_store.File
 		switch cfg.Mode {
@@ -133,7 +135,7 @@ func executeStoreTargets(cfg RuntimeConfig, ks *key_store.KeyStore, filePaths []
 				writeOpLog(summary)
 				return fmt.Errorf("remote upload %s: %w", sourcePath, uploadErr)
 			}
-			fmt.Printf("Remote upload complete. Server hash: %x\n", hash)
+			logs.Printf("Remote upload complete. Server hash: %x\n", hash)
 			renderSummary(summary)
 			writeOpLog(summary)
 			continue
@@ -146,7 +148,7 @@ func executeStoreTargets(cfg RuntimeConfig, ks *key_store.KeyStore, filePaths []
 		}
 
 		if errors.Is(err, key_store.ErrFileHashCached) {
-			fmt.Printf("Skipping store for %q: %v\n", displayName, err)
+			logs.Printf("Skipping store for %q: %v\n", displayName, err)
 			renderSummary(summary)
 			writeOpLog(summary)
 			continue
@@ -160,21 +162,21 @@ func executeStoreTargets(cfg RuntimeConfig, ks *key_store.KeyStore, filePaths []
 
 		summary.Bytes = file.MetaData.TotalSize
 
-		fmt.Printf("\nStored metadata:\n")
-		fmt.Printf("File name: %s\n", file.MetaData.FileName)
-		fmt.Printf("Total size: %d bytes\n", file.MetaData.TotalSize)
-		fmt.Printf("Chunk size: %d bytes\n", file.MetaData.BlockSize)
-		fmt.Printf("Total chunks: %d\n", file.MetaData.TotalBlocks)
+		logs.Printf("\n")
+		logs.Titlef("Stored metadata:\n")
+		logs.DataKV("File name", file.MetaData.FileName)
+		logs.DataKV("Total size", fmt.Sprintf("%d bytes", file.MetaData.TotalSize))
+		logs.DataKV("Chunk size", fmt.Sprintf("%d bytes", file.MetaData.BlockSize))
+		logs.DataKV("Total chunks", file.MetaData.TotalBlocks)
 		if file.MetaData.TotalBlocks > 0 {
-			fmt.Printf("Last chunk size: %d bytes\n",
-				file.MetaData.TotalSize-uint64(file.MetaData.BlockSize*(file.MetaData.TotalBlocks-1)))
+			logs.DataKV("Last chunk size", fmt.Sprintf("%d bytes",
+				file.MetaData.TotalSize-uint64(file.MetaData.BlockSize*(file.MetaData.TotalBlocks-1))))
 		}
 		if len(file.References) > 0 {
 			first := file.References[0]
 			last := file.References[len(file.References)-1]
-			fmt.Printf("Chunk files written:\n")
-			fmt.Printf("  first: %s\n", first.Location)
-			fmt.Printf("  last:  %s\n", last.Location)
+			logs.DataKV("First chunk", first.Location)
+			logs.DataKV("Last chunk", last.Location)
 		}
 
 		if cfg.Mode != ModeRun {
@@ -195,7 +197,7 @@ func executeStoreTargets(cfg RuntimeConfig, ks *key_store.KeyStore, filePaths []
 		}
 
 		if !cfg.ReassembleEnabled {
-			fmt.Printf("Reassembly skipped (set %q to enable)\n", REASSEMBLE_FLAG)
+			logs.Printf("Reassembly skipped (set %q to enable)\n", REASSEMBLE_FLAG)
 			renderSummary(summary)
 			writeOpLog(summary)
 			continue
@@ -209,7 +211,7 @@ func executeStoreTargets(cfg RuntimeConfig, ks *key_store.KeyStore, filePaths []
 			return fmt.Errorf("failed to ensure output directory: %w", err)
 		}
 
-		fmt.Printf("\nReassembling file to: %s\n", outputPath)
+		logs.Printf("\nReassembling file to: %s\n", outputPath)
 
 		// Phase: reassemble
 		startPhase("reassemble", "reassemble output file")
@@ -233,11 +235,12 @@ func executeStoreTargets(cfg RuntimeConfig, ks *key_store.KeyStore, filePaths []
 			return fmt.Errorf("failed to verify reassembled file %s: %w", outputPath, err)
 		}
 
-		fmt.Printf("\nReassembly complete:\n")
-		fmt.Printf("Original size: %d bytes\n", file.MetaData.TotalSize)
-		fmt.Printf("Original hash: %x\n", file.MetaData.FileHash)
-		fmt.Printf("Reassembled size: %d bytes\n", length)
-		fmt.Printf("Reassembled hash: %x\n", reassembledHash)
+		logs.Printf("\n")
+		logs.Titlef("Reassembly complete:\n")
+		logs.DataKV("Original size", fmt.Sprintf("%d bytes", file.MetaData.TotalSize))
+		logs.DataKV("Original hash", fmt.Sprintf("%x", file.MetaData.FileHash))
+		logs.DataKV("Reassembled size", fmt.Sprintf("%d bytes", length))
+		logs.DataKV("Reassembled hash", fmt.Sprintf("%x", reassembledHash))
 
 		if file.MetaData.FileHash != reassembledHash {
 			hashErr := fmt.Errorf("hash mismatch after reassembly for %s", sourcePath)
@@ -247,7 +250,7 @@ func executeStoreTargets(cfg RuntimeConfig, ks *key_store.KeyStore, filePaths []
 			return hashErr
 		}
 
-		fmt.Printf("Successfully reassembled file to: %s\n", outputPath)
+		logs.Printf("Successfully reassembled file to: %s\n", outputPath)
 		renderSummary(summary)
 		writeOpLog(summary)
 	}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/danmuck/dps_files/src/key_store"
+	logs "github.com/danmuck/smplog"
 )
 
 func executeRemoteDownloadAction(cfg RuntimeConfig, input io.Reader) error {
@@ -22,24 +23,24 @@ func executeRemoteDownloadAction(cfg RuntimeConfig, input io.Reader) error {
 		return fmt.Errorf("list remote files: %w", err)
 	}
 	if len(entries) == 0 {
-		fmt.Println("No files on remote server.")
+		logs.Println("No files on remote server.")
 		return nil
 	}
 
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
-	fmt.Printf("\nRemote files (%d):\n", len(entries))
+	logs.Titlef("\nRemote files (%d):\n", len(entries))
 	for i, e := range entries {
 		shortHash := e.Hash
 		if len(shortHash) > 16 {
 			shortHash = shortHash[:16]
 		}
-		fmt.Printf("  [%d] %s  hash: %s...  size: %s\n", i, e.Name, shortHash, formatBytes(e.Size))
+		logs.Dataf("  [%d] %s  hash: %s...  size: %s\n", i, e.Name, shortHash, formatBytes(e.Size))
 	}
 
 	reader := getBufferedReader(input)
 	var selected RemoteFileEntry
 	for {
-		fmt.Printf("\nSelect file to download [0-%d] (or e to cancel): ", len(entries)-1)
+		logs.Promptf("\nSelect file to download [0-%d] (or e to cancel): ", len(entries)-1)
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			if err == io.EOF {
@@ -53,7 +54,7 @@ func executeRemoteDownloadAction(cfg RuntimeConfig, input io.Reader) error {
 		}
 		idx, convErr := strconv.Atoi(choice)
 		if convErr != nil || idx < 0 || idx >= len(entries) {
-			fmt.Printf("Invalid selection %q.\n", choice)
+			logs.Printf("Invalid selection %q.\n", choice)
 			continue
 		}
 		selected = entries[idx]
@@ -61,7 +62,7 @@ func executeRemoteDownloadAction(cfg RuntimeConfig, input io.Reader) error {
 	}
 
 	outputPath := copyOutputPath(cfg.KeyStore.StorageDir, selected.Name)
-	fmt.Printf("\nDownloading %q to %s\n", selected.Name, outputPath)
+	logs.Printf("\nDownloading %q to %s\n", selected.Name, outputPath)
 
 	showBar := !cfg.KeyStore.Verbose
 	summary := OpSummary{
@@ -85,7 +86,7 @@ func executeRemoteDownloadAction(cfg RuntimeConfig, input io.Reader) error {
 		return fmt.Errorf("download %q: %w", selected.Name, downloadErr)
 	}
 
-	fmt.Printf("Downloaded %s to %s\n", formatBytes(written), outputPath)
+	logs.Printf("Downloaded %s to %s\n", formatBytes(written), outputPath)
 	renderSummary(summary)
 	writeOpLog(summary)
 	return nil
@@ -97,7 +98,7 @@ func executeDownloadAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.R
 	}
 	metadata := ks.ListKnownFiles()
 	if len(metadata) == 0 {
-		fmt.Println("No stored files to download.")
+		logs.Println("No stored files to download.")
 		return nil
 	}
 
@@ -108,14 +109,14 @@ func executeDownloadAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.R
 		return metadata[i].FileName < metadata[j].FileName
 	})
 
-	fmt.Printf("\nStored files (%d):\n", len(metadata))
+	logs.Titlef("\nStored files (%d):\n", len(metadata))
 	for i, md := range metadata {
 		hashHex := fmt.Sprintf("%x", md.FileHash)
 		shortHash := hashHex
 		if len(shortHash) > 16 {
 			shortHash = shortHash[:16]
 		}
-		fmt.Printf("  [%d] %s  hash: %s...  chunks: %d  size: %s\n",
+		logs.Dataf("  [%d] %s  hash: %s...  chunks: %d  size: %s\n",
 			i, md.FileName, shortHash, md.TotalBlocks, formatBytes(md.TotalSize))
 	}
 
@@ -124,7 +125,7 @@ func executeDownloadAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.R
 	// Select file
 	var selectedMD key_store.MetaData
 	for {
-		fmt.Printf("\nSelect file to download [0-%d] (or e to cancel): ", len(metadata)-1)
+		logs.Promptf("\nSelect file to download [0-%d] (or e to cancel): ", len(metadata)-1)
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			if err == io.EOF {
@@ -140,11 +141,11 @@ func executeDownloadAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.R
 
 		idx, convErr := strconv.Atoi(choice)
 		if convErr != nil {
-			fmt.Printf("Invalid selection %q. Enter a numeric index or e.\n", choice)
+			logs.Printf("Invalid selection %q. Enter a numeric index or e.\n", choice)
 			continue
 		}
 		if idx < 0 || idx >= len(metadata) {
-			fmt.Printf("Index %d out of range. Valid range is 0-%d.\n", idx, len(metadata)-1)
+			logs.Printf("Index %d out of range. Valid range is 0-%d.\n", idx, len(metadata)-1)
 			continue
 		}
 
@@ -157,7 +158,7 @@ func executeDownloadAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.R
 	var chunkStart, chunkEnd uint32
 	useRange := false
 
-	fmt.Printf("\nChunk range (total: %d chunks). Enter start end (e.g. '0 10') or press Enter for full file: ", totalChunks)
+	logs.Promptf("\nChunk range (total: %d chunks). Enter start end (e.g. '0 10') or press Enter for full file: ", totalChunks)
 	line, err := reader.ReadString('\n')
 	if err != nil && err != io.EOF {
 		return fmt.Errorf("failed to read chunk range: %w", err)
@@ -169,14 +170,14 @@ func executeDownloadAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.R
 			start64, e1 := strconv.ParseUint(parts[0], 10, 32)
 			end64, e2 := strconv.ParseUint(parts[1], 10, 32)
 			if e1 != nil || e2 != nil {
-				fmt.Println("Invalid range; downloading full file instead.")
+				logs.Println("Invalid range; downloading full file instead.")
 			} else {
 				chunkStart = uint32(start64)
 				chunkEnd = uint32(end64)
 				useRange = true
 			}
 		} else {
-			fmt.Println("Expected two numbers; downloading full file instead.")
+			logs.Println("Expected two numbers; downloading full file instead.")
 		}
 	}
 	if useRange {
@@ -185,7 +186,7 @@ func executeDownloadAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.R
 			effectiveEnd = totalChunks
 		}
 		if chunkStart >= effectiveEnd {
-			fmt.Printf("Invalid range [%d, %d); downloading full file instead.\n", chunkStart, chunkEnd)
+			logs.Printf("Invalid range [%d, %d); downloading full file instead.\n", chunkStart, chunkEnd)
 			useRange = false
 		} else {
 			chunkEnd = effectiveEnd
@@ -235,7 +236,7 @@ func executeDownloadAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.R
 	}
 	beginPhase(&summary.Timer, summary.Operation, "download", stageLabel, 1, 1)
 	if useRange {
-		fmt.Printf("\nDownloading chunks [%d, %d) of %q to %s\n", chunkStart, chunkEnd, selectedMD.FileName, outputPath)
+		logs.Printf("\nDownloading chunks [%d, %d) of %q to %s\n", chunkStart, chunkEnd, selectedMD.FileName, outputPath)
 		_, downloadErr := ks.StreamChunkRange(selectedMD.FileHash, chunkStart, chunkEnd, pw)
 		pw.Finish()
 		summary.Timer.Stop(downloadErr != nil)
@@ -246,9 +247,9 @@ func executeDownloadAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.R
 			writeOpLog(summary)
 			return fmt.Errorf("download failed: %w", downloadErr)
 		}
-		fmt.Printf("Downloaded %s to %s\n", formatBytes(summary.Bytes), outputPath)
+		logs.Printf("Downloaded %s to %s\n", formatBytes(summary.Bytes), outputPath)
 	} else {
-		fmt.Printf("\nDownloading %q to %s\n", selectedMD.FileName, outputPath)
+		logs.Printf("\nDownloading %q to %s\n", selectedMD.FileName, outputPath)
 		downloadErr := ks.StreamFile(selectedMD.FileHash, pw)
 		pw.Finish()
 		summary.Timer.Stop(downloadErr != nil)
@@ -259,7 +260,7 @@ func executeDownloadAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.R
 			writeOpLog(summary)
 			return fmt.Errorf("download failed: %w", downloadErr)
 		}
-		fmt.Printf("Downloaded %s to %s\n", formatBytes(summary.Bytes), outputPath)
+		logs.Printf("Downloaded %s to %s\n", formatBytes(summary.Bytes), outputPath)
 	}
 
 	renderSummary(summary)
