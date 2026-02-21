@@ -1,5 +1,7 @@
 package ledgers
 
+// Future: --
+
 // Snapshots represent ledger backups for a raft ledger
 type Snapshot struct {
 	Term     uint64

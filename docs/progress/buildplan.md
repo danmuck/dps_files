@@ -7,16 +7,20 @@
 
 ## Stage 1: KeyStore — Verification, Hardening & Performance
 
-**Current state:** The most complete module. File chunking (local), metadata persistence (TOML), reassembly, hash verification, and cleanup all work. Tests cover 1KB–256MB files plus edge cases (empty, single chunk, corruption). `StoreFileLocal` and `LoadAndStoreFileLocal` now produce identical DHT keys via `computeChunkKey`. `DefaultRemoteHandler` is a placeholder that prints to stdout but has correct synchronization. Empty files are handled correctly (0 blocks).
+**Current state:** The most complete module. File chunking (local), metadata persistence (TOML), reassembly, hash verification, streaming, TTL expiry, crash recovery, deep integrity verification, cache management with deduplication, and concurrent access safety all work. 62 tests across 3 files (store_test.go: 26, hardening_test.go: 28, config_test.go: 2) cover 1KB–256MB files plus edge cases (empty, single chunk, corruption, concurrent access, crash recovery). `StoreFileLocal` and `LoadAndStoreFileLocal` now produce identical DHT keys via `computeChunkKey`. `DefaultRemoteHandler` is a placeholder with smplog debug logging and correct synchronization. Empty files are handled correctly (0 blocks). Logging uses `github.com/danmuck/smplog` via shared config loader (`cmd/internal/logcfg`).
 
 **Key files:**
 - `src/key_store/key_store.go` — KeyStore struct, init, memory/disk persistence, cleanup, verification
 - `src/key_store/files.go` — File struct, StoreFileLocal, LoadAndStoreFileLocal, LoadAndStoreFileRemote, reassembly, `computeChunkKey`
 - `src/key_store/file_reference.go` — FileReference struct, StoreFileReference, LoadFileReferenceData, DeleteFileReference
 - `src/key_store/metadata.go` — MetaData struct, PrepareMetaData, TOML serialization
-- `src/key_store/config.go` — Constants, RemoteHandler interface, DefaultRemoteHandler, utility functions
+- `src/key_store/config.go` — KeyStoreConfig, DefaultConfig(), CalculateBlockSize() with promotion logic, HashFile(), CopyFile(), ValidateSHA256(), constants, RemoteHandler interface, DefaultRemoteHandler
+- `src/key_store/verify.go` — VerifyAll(), VerifyFile(): deep integrity scanning
+- `src/key_store/intent.go` — Crash recovery via intent files (write-ahead before chunking)
 - `src/key_store/string.go` — String formatting helpers
-- `src/key_store/store_test.go` — 10 tests: large file, small parametric, empty, single chunk, exact block, persistence, corruption, cleanup, key consistency
+- `src/key_store/store_test.go` — 26 tests: large file, small parametric, empty, single chunk, exact block, persistence, corruption, cleanup, key consistency, streaming, TTL, deletion, cache dedup, utility functions
+- `src/key_store/hardening_test.go` — 28 tests: concurrent stores/reads/deletes, crash recovery, integrity verification, error injection, stale cache pruning, non-destructive startup
+- `src/key_store/config_test.go` — 2 tests: KeyStoreConfig defaults, configurable TTL
 
 ### Phase 1A: Bug Fixes & Correctness
 - [x] Fix `StoreFileLocal` vs `LoadAndStoreFileLocal` DHT key calculation mismatch — unified via `computeChunkKey`
@@ -84,7 +88,7 @@
 - [x] Add tests: VerifyAll detects corruption and passes on clean store — `TestVerifyAllDetectsCorruption`, `TestVerifyAllCleanStore`
 
 ### Phase 1C: Cleanup & Performance
-- [ ] Replace all `fmt.Printf` in key_store with `log/slog` structured logging (file hash, chunk index, operation as context fields)
+- [ ] Ensure all key_store library code uses `smplog` consistently (smplog adopted project-wide; remaining work is auditing library-level code for any stray fmt.Printf or log/slog calls)
 - [x] Make `VERIFY` a runtime field on `KeyStore` instead of a compile-time const (implemented via `KeyStoreConfig.VerifyOnWrite`)
 - [ ] Make `PRINT_BLOCKS` a runtime field or remove progress printing from library code (move to cmd/)
 - [ ] Extract shared chunking logic from `StoreFileLocal` and `LoadAndStoreFileLocal` into a private helper to eliminate duplication
@@ -95,12 +99,14 @@
 
 ## Stage 2: Transport & RPC — Wire Protocol Completion
 
+> **STATUS: FUTURE** — Interface stubs and scaffolding only. Will be reworked after Stage 1 completion.
+
 **Current state:** `TCPHandler` can accept TCP connections, encode/send RPCs via Protobuf, and push decoded RPCs into a channel. `DefaultCoder` handles Protobuf encode/decode with a 2-byte (uint16) length header, limiting messages to 65KB. `Send()` now correctly encodes via `Coder.Encode()`. `TransportHandler` interface signatures are consistent (`Send(*RPC)`, `Close() error`). Tests verify listener, connect, and full send/receive round-trip. No RPC dispatch, no UDP, no TLS.
 
 **Key files:**
 - `src/api/transport/transport.go` — `TransportHandler` interface (corrected signatures)
 - `src/api/transport/tcp.go` — `TCPHandler`: accept loop, connection handler, `Send()` uses encoder
-- `src/api/transport/encoding.go` — `Coder` interface, `DefaultCoder` (Protobuf + 2-byte header)
+- `src/api/transport/encoding.go` — `Coder` interface, `DefaultCoder` (Protobuf + 2-byte header, smplog debug logging)
 - `src/api/transport/udp.go` — Empty placeholder
 - `src/api/transport/rpc.proto` — Protobuf definitions (RPC, RPCT, NodeInfo, Protocol, Command)
 - `src/api/transport/rpc.pb.go` — Generated Protobuf code
@@ -112,7 +118,7 @@
 - [ ] Upgrade length header from `uint16` (65KB max) to `uint32` (4GB max) to support chunk-sized messages
 - [ ] Add `TCPHandler.Dial(addr)` method to initiate outbound connections (currently only accepts inbound)
 - [ ] Add connection pooling or reuse — currently each `handleConnection` runs independently with no way to send responses back
-- [ ] Replace `fmt.Printf` / `fmt.Fprintf(os.Stderr, ...)` with `log/slog`
+- [ ] Replace remaining `fmt.Printf` / `fmt.Fprintf(os.Stderr, ...)` with `smplog` (project standard)
 
 ### Phase 2B: RPC Dispatch
 - [ ] Implement an RPC handler registry: map `Command` enum → handler function
@@ -141,6 +147,8 @@
 ---
 
 ## Stage 3: Kademlia DHT — Routing & Distributed Storage
+
+> **STATUS: FUTURE** — Interface stubs and scaffolding only. Will be reworked after Stage 1 completion.
 
 **Current state:** `KademliaRouter` struct exists with a `buckets` field (`[][]*NodeInfo`) but every method is a stub returning `nil` or `-1`. Interfaces are now consistent — `RoutingTable.Lookup` returns `(*transport.NodeInfo, error)`, `KademliaRouting` methods return typed values. `DefaultRouter` is a simple map-based router that works. `DefaultNode` returns `*DefaultNode` from constructor (no more panic). `DefaultNode.Send` signature matches `ClientNode.Send`. Empty method bodies for Kademlia RPCs.
 
@@ -192,6 +200,8 @@
 
 ## Stage 4: Raft Consensus — Leader Election & Log Replication
 
+> **STATUS: FUTURE** — Interface stubs and scaffolding only. Will be reworked after Stage 1 completion.
+
 **Current state:** Only interfaces exist. `ServerNode` defines `ApplyCommand`, `CreateSnapshot`, `GetState`, `AddPeer`, `RemovePeer` but nothing implements them. `NodeState` enum (Follower/Candidate/Leader) is defined. `LogManager` interface defines `Append`, `GetEntry`, `LastLogIndex`, `Commit` with no implementation. `LogEntry` struct has `Index`, `Term`, `Command`. `SnapshotManager` interface defines `CreateSnapshot`, `PersistSnapshot`, `LoadSnapshot`, `VerifySnapshot` with no implementation. There is zero Raft code.
 
 **Key files:**
@@ -233,6 +243,8 @@
 ---
 
 ## Stage 5: Chain & Ledgers — Blockchain Backup System
+
+> **STATUS: FUTURE** — Interface stubs and scaffolding only. Will be reworked after Stage 1 completion.
 
 **Current state:** `Block` struct works with all fields exported (Data, Time, Nonce) so gob encoding covers full content. `CalculateHash` and `ValidateHash` handle both `*Block` and `Block` value types. AES-GCM encryption/decryption is functional. `cmd/chain/main.go` demo works with correct hash size (32) and no nil-pointer crash on validation. `BackupLedger` interface is defined but not implemented. No chain struct or persistence.
 

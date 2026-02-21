@@ -24,8 +24,11 @@ cmd/
   server/main.go      — Server node entry point (TCP listener demo)
   client/main.go      — Client node entry point (Protobuf RPC demo)
   chain/main.go       — Blockchain demo with AES-GCM encryption
-  key_store/main.go   — File chunking integration test
+  storage/             — File chunking integration flow (interactive CLI)
   gen_file/main.go    — Test file generator (size-aware, reuses existing files)
+  fileserver/          — TCP file server (4-byte length-prefixed binary protocol)
+  httpserver/          — HTTP file server (PUT/GET/Range/DELETE)
+  internal/logcfg/    — Shared smplog config loader
 
 src/
   api/
@@ -39,6 +42,7 @@ tools/gen_text/        — Python test file generator (legacy, outputs should ta
 docs/progress/         — Build plan and progress tracking
 local/upload/          — Upload/test input files
 local/storage/         — Runtime data (gitignored): data/*.kdht, .cache/, metadata/
+local/logs/            — Operation logs from transfer workflows
 ```
 
 ## Build & Run Commands
@@ -46,28 +50,32 @@ local/storage/         — Runtime data (gitignored): data/*.kdht, .cache/, meta
 All commands are in the `Makefile`:
 
 ```sh
-make test                                  # go test -v ./...
-make test-coverage                         # go test -v ./... -cover
-make build                                 # go build -o bin/project ./...
+make test                                  # build, go test -v ./..., clean .build/
+make test-coverage                         # build, go test -v ./... -cover, clean .build/
+make build                                 # go build each cmd/* into .build/<name>/
 make server                                # go run cmd/server/main.go
 make client                                # go run cmd/client/main.go
 make chain                                 # go run cmd/chain/main.go
+make storage ARGS="..."                    # go run ./cmd/storage (interactive CLI)
+make fileserver ARGS="..."                 # go run ./cmd/fileserver (TCP file server)
+make httpserver ARGS="..."                 # go run ./cmd/httpserver (HTTP file server)
 make gen-file SIZE=256MB FILE=local/upload/test.dat # generate test file
 make tidy                                  # go mod tidy
 make build-protobuf                        # protoc → src/api/transport/rpc.pb.go
-make clean                                 # rm -rf bin/
+make clean                                 # rm -rf .build/
 ```
-
-The key_store demo is run directly: `go run cmd/storage/main.go`
 
 ## Key Packages & Files
 
 ### `key_store` — Local File Storage Pipeline (FUNCTIONAL)
-- **`key_store.go`** — `KeyStore` struct: manages chunk storage directory, metadata persistence, file operations, verification.
-- **`files.go`** — `File` struct, `StoreFileLocal`, `LoadAndStoreFileLocal`, `LoadAndStoreFileRemote`, `ReassembleFileToBytes`, `ReassembleFileToPath`. Contains `computeChunkKey` — the canonical DHT key derivation.
+- **`key_store.go`** — `KeyStore` struct: manages chunk storage directory, metadata persistence, file operations, verification. Includes streaming (`StreamFile`, `StreamFileByName`, `StreamChunkRange`), TTL expiry (`CleanupExpired`), cache management, and `StoreFromReader`.
+- **`files.go`** — `File` struct, `StoreFileLocal`, `LoadAndStoreFileLocal`, `LoadAndStoreFileRemote`, `StoreFromReader`, `ReassembleFileToBytes`, `ReassembleFileToPath`. Contains `computeChunkKey` — the canonical DHT key derivation.
 - **`file_reference.go`** — `FileReference` struct: per-chunk metadata (key, hash, index, location, protocol).
 - **`metadata.go`** — `MetaData` struct: per-file metadata. TOML serialization to `local/storage/metadata/`.
-- **`config.go`** — Constants (`KeySize=20`, `HashSize=32`, `CryptoSize=64`, block size limits), `RemoteHandler` interface, `DefaultRemoteHandler`.
+- **`config.go`** — `KeyStoreConfig`, `DefaultConfig()`, `CalculateBlockSize()` with promotion logic, `HashFile()`, `CopyFile()`, `ValidateSHA256()`. Constants (`KeySize=20`, `HashSize=32`, `CryptoSize=64`, block size limits), `RemoteHandler` interface, `DefaultRemoteHandler`.
+- **`verify.go`** — `VerifyAll()`, `VerifyFile()`: deep integrity scanning of all stored chunks.
+- **`intent.go`** — Crash recovery via intent files (write-ahead before chunking).
+- **`string.go`** — String/formatting helpers.
 
 ### `impl` — Blockchain & Crypto (FUNCTIONAL)
 - **`block.go`** — `Block` struct (all fields exported for gob encoding) with `NewBlock()` / `NewBlockEncrypt()`, hash validation, chain verification.
@@ -102,7 +110,8 @@ The key_store demo is run directly: `go run cmd/storage/main.go`
 - **File extensions:** `.kdht` for chunk data files, `.toml` for metadata.
 - **Chunk sizing:** Dynamic based on file size, bounded by `MinBlockSize` (64KB) and `MaxBlockSize` (4MB), targeting ~1000 chunks per file. Empty files produce 0 blocks.
 - **Serialization:** Protobuf for RPC messages, TOML for metadata persistence, gob for Block hashing.
-- **Dependencies:** Minimal — only `BurntSushi/toml` and `google.golang.org/protobuf`.
+- **Dependencies:** Minimal — `BurntSushi/toml`, `google.golang.org/protobuf`, and `github.com/danmuck/smplog` (structured logging via zerolog).
+- **Logging:** Uses `github.com/danmuck/smplog` with shared config loaded via `cmd/internal/logcfg`. Config resolves `SMPLOG_CONFIG` env var, then `./smplog.config.toml`, then `./local/smplog.config.toml`.
 
 ## Architecture Patterns
 
@@ -133,22 +142,32 @@ Input file → calculate metadata (SHA-256, size, permissions)
 
 ### Working
 - File chunking, storage, and reassembly (`key_store` package)
+- Streaming file serving (TCP binary protocol + HTTP REST)
+- Crash recovery via intent files (write-ahead before chunking)
+- Deep integrity verification (`VerifyAll`, `VerifyFile`)
+- TTL-based expiry and cleanup (`CleanupExpired`)
+- Cache management with deduplication
+- Concurrent access safety (RWMutex)
 - Metadata persistence and loading (TOML)
+- Structured logging via smplog (project-wide)
 - AES-256-GCM encryption/decryption (`impl` package)
 - Blockchain block creation and chain validation (hash covers all exported fields)
 - TCP transport with Protobuf encoding and Send/Receive
 - Basic node creation, start/shutdown lifecycle
 
-### Scaffolding Only
+### Future (Stubs)
+
+> These are interface stubs or empty scaffolding. They will be reworked once key_store is fully complete. Do not build on these without redesign.
+
 - Kademlia routing (interface defined, no XOR distance or bucket logic)
 - UDP transport (empty file)
-- RemoteHandler (placeholder that prints to stdout, not wired to network)
+- RemoteHandler (placeholder, not wired to network)
 - Raft consensus (interfaces defined, no implementation)
 - Snapshot/backup scheduling (interfaces defined, no implementation)
+- Blockchain Chain struct (Block works, but no Chain/persistence/Append/Validate)
 - Log replication and leader election (not started)
 
 ### Remaining Known Issues
-- `fmt.Printf` used for logging everywhere — no structured logging
 - `TCPHandler` shutdown uses `time.Sleep` instead of context cancellation
 - No TLS on TCP connections
 - Hardcoded addresses and node IDs in `cmd/` entry points
@@ -179,7 +198,7 @@ Files are reused if they already exist with the matching size.
 
 ### Run the File Storage Test
 ```sh
-go run cmd/storage/main.go
+make storage
 # Chunks appear in local/storage/data/, metadata in local/storage/metadata/
 ```
 
@@ -196,8 +215,10 @@ go test -short ./... # Skip large file test
 make test-coverage   # Run with coverage report
 ```
 
-Test files follow `*_test.go` convention in their respective packages:
-- `src/key_store/store_test.go` — 10 tests: chunking (1KB-256MB), empty file, single chunk, exact block size, persistence, corruption detection, cleanup, key consistency
+Test files follow `*_test.go` convention in their respective packages (62 tests across 5 files):
+- `src/key_store/store_test.go` — 26 tests: chunking (1KB-256MB), empty file, single chunk, exact block size, persistence, corruption detection, cleanup, key consistency, streaming, TTL, deletion, cache dedup, utility functions, and more
+- `src/key_store/hardening_test.go` — 28 tests: concurrent stores/reads/deletes, crash recovery intents, integrity verification, error injection cleanup, stale cache pruning, non-destructive startup, reupload after restart
+- `src/key_store/config_test.go` — 2 tests: KeyStoreConfig defaults, configurable TTL
 - `src/api/nodes/routing_test.go` — 4 tests: node creation, bad ID rejection, start/shutdown lifecycle, router type verification
 - `src/api/transport/tcp_handler_test.go` — 2 tests: listener init + connect, full send/receive round-trip
 

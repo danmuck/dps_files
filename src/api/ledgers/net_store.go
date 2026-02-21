@@ -12,6 +12,7 @@ type LogEntry struct {
 	Command []byte // Command data
 }
 
+// Future: LogManager is the surface API for managing raft snapshots
 type LogManager interface {
 	Append(entry LogEntry) error             // Append a new log entry
 	GetEntry(index uint64) (LogEntry, error) // Retrieve a log entry
@@ -19,6 +20,7 @@ type LogManager interface {
 	Commit(index uint64) error               // Commit an entry
 }
 
+// MetadataStore is the surface API for managing local metadata
 type MetadataStore interface {
 	UpsertFile(fileID FileID, chunks []ChunkID) error // Add/update metadata for a file
 	GetFile(fileID FileID) ([]ChunkID, error)         // Retrieve metadata for a file
@@ -26,7 +28,9 @@ type MetadataStore interface {
 	ListFiles() ([]FileID, error)                     // List all known file IDs
 }
 
-// The Ledger is the local key-store as per the kademlia distribution
+// The FileLedger is the surface API for managing local file references and data
+//
+//	note: relies on MetadataStore for local routing
 type FileLedger interface {
 	VerifyReferences() error
 	StoreFileLocal(name string, fileData []byte) (FileID, error)

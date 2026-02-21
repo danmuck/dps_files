@@ -139,17 +139,16 @@ func (ks *KeyStore) ReloadLocalState() error {
 	return nil
 }
 
-// store file to memory and write metadata toml to file system
-// NOTE: this does not store data to disk, only metadata
+// fileToMemory indexes a File in the in-memory maps (files, filesByName, chunkIndex)
+// and persists its metadata as a TOML file on disk. It also updates the cache entry.
+// Does not write chunk data — only metadata and index state.
 func (ks *KeyStore) fileToMemory(file *File) error {
 	ks.lock.Lock()
 	defer ks.lock.Unlock()
 
-	// store in memory
 	ks.files[file.MetaData.FileHash] = file
 	ks.filesByName[file.MetaData.FileName] = file.MetaData.FileHash
 
-	// build chunk index entries
 	for i, ref := range file.References {
 		if ref != nil {
 			ks.chunkIndex[ref.Key] = chunkLoc{
@@ -159,28 +158,23 @@ func (ks *KeyStore) fileToMemory(file *File) error {
 		}
 	}
 
-	// create metadata directory if it doesn't exist
 	metadataDir := filepath.Join(ks.storageDir, "metadata")
 	if err := os.MkdirAll(metadataDir, 0755); err != nil {
 		return fmt.Errorf("failed to create metadata directory: %w", err)
 	}
 
-	// create metadata file path
 	filename := fmt.Sprintf("%x.toml", file.MetaData.FileHash)
 	metadataPath := filepath.Join(metadataDir, filename)
 
-	// open file for writing
 	f, err := os.Create(metadataPath)
 	if err != nil {
 		return fmt.Errorf("failed to create metadata file: %w", err)
 	}
 	defer f.Close()
 
-	// create toml encoder
 	encoder := toml.NewEncoder(f)
 	encoder.Indent = "    "
 
-	// encode the complete file structure
 	if err := encoder.Encode(file); err != nil {
 		return fmt.Errorf("failed to encode file: %w", err)
 	}
@@ -192,8 +186,9 @@ func (ks *KeyStore) fileToMemory(file *File) error {
 	return nil
 }
 
-// return a copy of file from memory
-// NOTE: this does not return data
+// fileFromMemory looks up a File by its SHA-256 hash, checks TTL expiry,
+// optionally logs reference details, and returns a shallow copy to avoid
+// concurrent modification of the stored pointer.
 func (ks *KeyStore) fileFromMemory(key [HashSize]byte) (*File, error) {
 	ks.lock.RLock()
 	defer ks.lock.RUnlock()
@@ -217,7 +212,6 @@ func (ks *KeyStore) fileFromMemory(key [HashSize]byte) (*File, error) {
 			}
 		}
 	}
-	// return a copy to prevent concurrent modification issues
 	fileCopy := *file
 	return &fileCopy, nil
 }
@@ -232,7 +226,8 @@ func (ks *KeyStore) isExpired(file *File) bool {
 	return time.Now().Unix() > modifiedSec+int64(file.MetaData.TTL)
 }
 
-// return copies in slice of all file references
+// ListStoredFileReferences returns a flat list of copies of every chunk reference
+// across all tracked files, dereferenced through the chunkIndex.
 func (ks *KeyStore) ListStoredFileReferences() []FileReference {
 	ks.lock.RLock()
 	defer ks.lock.RUnlock()
@@ -250,7 +245,7 @@ func (ks *KeyStore) ListStoredFileReferences() []FileReference {
 	return blocks
 }
 
-// return copies in slice
+// ListKnownFiles returns a copy of every file's MetaData currently held in memory.
 func (ks *KeyStore) ListKnownFiles() []MetaData {
 	ks.lock.RLock()
 	defer ks.lock.RUnlock()
@@ -262,6 +257,10 @@ func (ks *KeyStore) ListKnownFiles() []MetaData {
 	return entries
 }
 
+// existingFileByHash looks up a file by hash and validates it is still usable.
+// If any local chunk files are missing on disk, the stale entry is dropped.
+// If the file is expired, its TTL and Modified timestamp are refreshed so a
+// re-upload of identical bytes can skip re-chunking.
 func (ks *KeyStore) existingFileByHash(key [HashSize]byte) (*File, bool) {
 	ks.lock.RLock()
 	file, exists := ks.files[key]
@@ -294,6 +293,8 @@ func (ks *KeyStore) existingFileByHash(key [HashSize]byte) (*File, bool) {
 	return &fileCopy, true
 }
 
+// fileHasMissingLocalReferences returns true if any reference is nil or points
+// to a local chunk file that no longer exists on disk.
 func (ks *KeyStore) fileHasMissingLocalReferences(file *File) bool {
 	for _, ref := range file.References {
 		if ref == nil {
@@ -306,6 +307,8 @@ func (ks *KeyStore) fileHasMissingLocalReferences(file *File) bool {
 	return false
 }
 
+// dropFileFromMemory removes a file and all its chunk index entries from the
+// in-memory maps. Does not touch disk.
 func (ks *KeyStore) dropFileFromMemory(key [HashSize]byte) {
 	ks.lock.Lock()
 	defer ks.lock.Unlock()
@@ -456,11 +459,12 @@ func (ks *KeyStore) StreamChunkRange(key [HashSize]byte, start, end uint32, w io
 	return bytesWritten, nil
 }
 
+// Cleanup deletes all chunk data files (.kdht), orphaned chunks, and metadata
+// from disk, then resets all in-memory indexes to empty.
 func (ks *KeyStore) Cleanup() error {
 	ks.lock.Lock()
 	defer ks.lock.Unlock()
 
-	// clean up tracked chunk files via chunkIndex → file → reference → location
 	for key, loc := range ks.chunkIndex {
 		file, exists := ks.files[loc.FileHash]
 		if !exists {
@@ -501,27 +505,29 @@ func (ks *KeyStore) Cleanup() error {
 	return nil
 }
 
+// CleanupKDHT deletes all .kdht chunk data files and resets in-memory indexes.
 func (ks *KeyStore) CleanupKDHT() error {
 	err := ks.CleanupExtensions(".kdht")
 	return err
 }
 
+// CleanupMetaData deletes all .toml metadata files and resets in-memory indexes.
 func (ks *KeyStore) CleanupMetaData() error {
 	err := ks.CleanupExtensions(".toml")
 	return err
 }
 
+// CleanupExtensions deletes all tracked chunk files and metadata files whose
+// extensions match any in the provided list, then resets all in-memory indexes.
 func (ks *KeyStore) CleanupExtensions(extensions ...string) error {
 	ks.lock.Lock()
 	defer ks.lock.Unlock()
 
-	// create a map for quick extension lookup
 	validExt := make(map[string]bool)
 	for _, ext := range extensions {
 		validExt[ext] = true
 	}
 
-	// clean up chunk files via chunkIndex
 	for key, loc := range ks.chunkIndex {
 		file, exists := ks.files[loc.FileHash]
 		if !exists {
@@ -557,14 +563,18 @@ func (ks *KeyStore) CleanupExtensions(extensions ...string) error {
 	return nil
 }
 
+// cacheDir returns the path to the .cache directory inside storageDir.
 func (ks *KeyStore) cacheDir() string {
 	return filepath.Join(ks.storageDir, ".cache")
 }
 
+// cachePathForHash returns the canonical cache TOML path for a given file hash.
 func (ks *KeyStore) cachePathForHash(fileHash [HashSize]byte) string {
 	return filepath.Join(ks.cacheDir(), fmt.Sprintf("%x.toml", fileHash))
 }
 
+// upsertCacheEntry writes (or overwrites) the File's TOML representation into
+// the .cache directory, keyed by file hash.
 func (ks *KeyStore) upsertCacheEntry(file *File) error {
 	cacheDir := ks.cacheDir()
 	if err := os.MkdirAll(cacheDir, 0755); err != nil {
@@ -587,6 +597,8 @@ func (ks *KeyStore) upsertCacheEntry(file *File) error {
 	return nil
 }
 
+// isCacheVariant returns true if candidateName is a .toml file whose stem
+// matches the given stem exactly or is a legacy duplicate (stem + " " prefix).
 func isCacheVariant(stem, candidateName string) bool {
 	if !strings.HasSuffix(candidateName, ".toml") {
 		return false
@@ -595,6 +607,8 @@ func isCacheVariant(stem, candidateName string) bool {
 	return candidateStem == stem || strings.HasPrefix(candidateStem, stem+" ")
 }
 
+// cacheEntryPathsForHash returns all cache file paths that match a file hash,
+// including legacy duplicate variants (e.g. "<hash> (1).toml").
 func (ks *KeyStore) cacheEntryPathsForHash(fileHash [HashSize]byte) ([]string, error) {
 	stem := fmt.Sprintf("%x", fileHash)
 	cacheDir := ks.cacheDir()
@@ -621,6 +635,7 @@ func (ks *KeyStore) cacheEntryPathsForHash(fileHash [HashSize]byte) ([]string, e
 	return paths, nil
 }
 
+// pruneCachePath deletes a single cache file. No-op if already absent.
 func (ks *KeyStore) pruneCachePath(cachePath string) error {
 	if err := os.Remove(cachePath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to prune cache entry %s: %w", cachePath, err)
@@ -628,6 +643,8 @@ func (ks *KeyStore) pruneCachePath(cachePath string) error {
 	return nil
 }
 
+// isLocalReference returns true if the reference points to a chunk stored on
+// the local filesystem (protocol is empty or "file", or location is under storageDir).
 func (ks *KeyStore) isLocalReference(ref *FileReference) bool {
 	if ref == nil {
 		return false
@@ -651,6 +668,8 @@ func (ks *KeyStore) isLocalReference(ref *FileReference) bool {
 	return strings.HasPrefix(filepath.ToSlash(cleanLocation), "local/storage/")
 }
 
+// localReferenceExists checks whether the chunk file for a reference exists on
+// disk, trying both the stored Location path and the canonical key-derived path.
 func (ks *KeyStore) localReferenceExists(ref *FileReference) bool {
 	if ref == nil {
 		return false
@@ -675,6 +694,8 @@ func (ks *KeyStore) localReferenceExists(ref *FileReference) bool {
 	return false
 }
 
+// cacheEntryIsLive decodes a cache TOML file and returns true only if every
+// local chunk reference still has its data file present on disk.
 func (ks *KeyStore) cacheEntryIsLive(cachePath string) (bool, error) {
 	var file File
 	if _, err := toml.DecodeFile(cachePath, &file); err != nil {
@@ -693,6 +714,8 @@ func (ks *KeyStore) cacheEntryIsLive(cachePath string) (bool, error) {
 	return true, nil
 }
 
+// pruneDeadCacheEntries scans all .toml files in the cache directory and deletes
+// any whose local chunk references no longer exist on disk.
 func (ks *KeyStore) pruneDeadCacheEntries() error {
 	cacheDir := ks.cacheDir()
 	if err := os.MkdirAll(cacheDir, 0755); err != nil {
@@ -731,6 +754,8 @@ func (ks *KeyStore) pruneDeadCacheEntries() error {
 	return nil
 }
 
+// hasCacheEntryForHash returns true if at least one live cache entry exists for
+// the given file hash. Dead entries encountered during the scan are pruned.
 func (ks *KeyStore) hasCacheEntryForHash(fileHash [HashSize]byte) (bool, error) {
 	cachePaths, err := ks.cacheEntryPathsForHash(fileHash)
 	if err != nil {
@@ -763,6 +788,8 @@ func (ks *KeyStore) hasCacheEntryForHash(fileHash [HashSize]byte) (bool, error) 
 	return cached, nil
 }
 
+// ensureHashNotCached returns ErrFileHashCached if a live cache entry already
+// exists for the given hash, preventing duplicate stores.
 func (ks *KeyStore) ensureHashNotCached(fileHash [HashSize]byte, fileName string) error {
 	cached, err := ks.hasCacheEntryForHash(fileHash)
 	if err != nil {
@@ -774,20 +801,19 @@ func (ks *KeyStore) ensureHashNotCached(fileHash [HashSize]byte, fileName string
 	return nil
 }
 
+// moveToCache relocates a metadata TOML file from its current location into the
+// .cache directory. If an entry for the same hash already exists in cache, the
+// source file is discarded to avoid duplicates.
 func (ks *KeyStore) moveToCache(sourcePath string) error {
-	// create cache directory
 	cacheDir := ks.cacheDir()
 	if err := os.MkdirAll(cacheDir, 0755); err != nil {
 		return fmt.Errorf("failed to create cache directory: %w", err)
 	}
 
-	// get filename and create destination path
 	fileName := filepath.Base(sourcePath)
 	destPath := filepath.Join(cacheDir, fileName)
 	stem := strings.TrimSuffix(fileName, ".toml")
 
-	// If the same metadata (or a legacy duplicate variant) already exists in cache,
-	// discard the source metadata file instead of creating another cache entry.
 	entries, err := os.ReadDir(cacheDir)
 	if err != nil {
 		return fmt.Errorf("failed to read cache directory: %w", err)
@@ -821,6 +847,9 @@ func (ks *KeyStore) moveToCache(sourcePath string) error {
 	return nil
 }
 
+// verifyFileReferences scans all tracked files and checks that every chunk's
+// .kdht file exists on disk. Files with missing chunks are removed from
+// in-memory indexes and their metadata is moved to the cache directory.
 func (ks *KeyStore) verifyFileReferences() error {
 	if ks.config.Verbose {
 		fmt.Printf("Verifying file references ... \n")

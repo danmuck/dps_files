@@ -23,7 +23,10 @@ Files are split into chunks, each chunk gets a 20-byte SHA-1 DHT key, chunk payl
 - `cmd/server/main.go`: server node entry point (TCP listener demo)
 - `cmd/client/main.go`: client node entry point (Protobuf RPC demo)
 - `cmd/chain/main.go`: blockchain demo (AES-GCM)
-- `cmd/storage/main.go`: file chunking integration flow
+- `cmd/storage/`: file chunking integration flow (interactive CLI)
+- `cmd/fileserver/`: TCP file server (4-byte length-prefixed binary protocol)
+- `cmd/httpserver/`: HTTP file server (PUT/GET/Range/DELETE)
+- `cmd/internal/logcfg/`: shared smplog config loader
 - `src/api/nodes/`: node interfaces and routing scaffolding
 - `src/api/transport/`: transport interfaces, TCP handler, protobuf encoding, `rpc.proto`
 - `src/api/ledgers/`: ledger/snapshot interfaces
@@ -37,9 +40,11 @@ Files are split into chunks, each chunk gets a 20-byte SHA-1 DHT key, chunk payl
 - `make test` / `make test-coverage`
 - `make build`
 - `make server`, `make client`, `make chain`
+- `make storage ARGS="..."`
+- `make fileserver ARGS="..."`
+- `make httpserver ARGS="..."`
 - `make tidy`
 - `make build-protobuf`
-- `go run cmd/storage/main.go`
 
 ## Contracts And Interfaces
 
@@ -62,9 +67,11 @@ When changing behavior, keep lifecycle and RPC semantics explicit: start/stop/st
 
 ## Known Implementation Gaps (from `CLAUDE.md`)
 
-- Kademlia routing logic is incomplete.
+- smplog migration is complete project-wide; remaining gap is Phase 1C cleanup items (extract shared chunking helper, add context.Context, remove PRINT_BLOCKS from library code).
+- Kademlia routing logic is incomplete (interface stubs only).
 - UDP transport is a placeholder.
 - Raft and snapshot/backup systems are interface-only.
+- Blockchain Chain struct not yet implemented (Block works, no Chain/persistence).
 - Some transport and hashing paths contain correctness risks noted in `CLAUDE.md`.
 
 ## Required Reference

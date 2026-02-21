@@ -36,7 +36,7 @@
 
 ## Issues to Address Along the Way
 
-- `fmt.Printf` everywhere — swap to `log.Logger` or structured logger when adding TCP server
-- `fileFromMemory` prints on every call — noisy for a server, gate behind verbosity config
+- ~~`fmt.Printf` everywhere~~ — resolved: project-wide migration to `smplog` (structured logging via zerolog)
+- ~~`fileFromMemory` prints on every call~~ — resolved: now uses smplog debug level, gated by log config
 - `LoadFileReferenceData` hashes on every read — consider optional skip for trusted-local reads
 - TOML hex encoding doubles hash storage — acceptable for now, revisit if metadata size matters

@@ -32,3 +32,4 @@ local/data/
 *.trash/
 .DS_Store
 main
+.prompt.md
