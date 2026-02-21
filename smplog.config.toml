@@ -91,8 +91,8 @@ field_value = 7    # White
 
 menu        = 14   # BrightCyan
 title       = 6   # BrightWhite (text style can be added in code if needed)
-prompt      = 3   # BrightBlue
 data        = 7    # White
+prompt      = 3   # BrightBlue
 divider     = 8    # BrightBlack
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -108,7 +108,7 @@ menu_selected_prefix   = ">"
 menu_unselected_prefix = " "
 menu_index_width       = 2
 input_cursor           = "_"
-divider_width          = 64
+divider_width          = 32
 
 
 # ─────────────────────────────────────────────────────────────────────────────
