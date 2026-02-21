@@ -1023,3 +1023,20 @@ func TestReuploadRefreshesTTL(t *testing.T) {
 		t.Error("reassembled data does not match original")
 	}
 }
+
+func TestMetaDataBackwardCompat(t *testing.T) {
+	md := MetaData{
+		FileName:  "legacy.txt",
+		TotalSize: 100,
+	}
+	if md.EntryType != "" {
+		t.Errorf("expected empty EntryType, got %q", md.EntryType)
+	}
+	if md.IsDirectory() {
+		t.Error("default MetaData should not be a directory")
+	}
+	var zeroHash [HashSize]byte
+	if md.ParentHash != zeroHash {
+		t.Error("default ParentHash should be zero")
+	}
+}

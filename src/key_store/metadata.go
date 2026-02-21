@@ -22,6 +22,13 @@ type MetaData struct {
 	TTL         uint64           `toml:"ttl"`
 	BlockSize   uint32           `toml:"chunk_size"`
 	TotalBlocks uint32           `toml:"total_chunks"`
+	EntryType   string           `toml:"entry_type,omitempty"`   // "file" (default/empty) or "directory"
+	ParentHash  [HashSize]byte   `toml:"parent_hash,omitempty"`  // hash of parent directory manifest; zero for root
+}
+
+// IsDirectory returns true if this entry is a directory manifest.
+func (md MetaData) IsDirectory() bool {
+	return md.EntryType == "directory"
 }
 
 func PrepareMetaDataSecure(name string, data []byte, signature [CryptoSize]byte) (metadata MetaData, e error) {
