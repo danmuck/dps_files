@@ -43,4 +43,10 @@ tidy:
 	go mod tidy
 
 build-protobuf:
-	protoc --go_out=. --go_opt=paths=source_relative src/api/transport/rpc.proto
+	protoc \
+	  -I src/api/pb \
+	  -I third_party/googleapis \
+	  --go_out=src/api/pb --go_opt=paths=source_relative \
+	  --go-grpc_out=src/api/pb --go-grpc_opt=paths=source_relative \
+	  --grpc-gateway_out=src/api/pb --grpc-gateway_opt=paths=source_relative \
+	  src/api/pb/dps.proto
