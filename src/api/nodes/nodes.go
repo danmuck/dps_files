@@ -2,6 +2,7 @@ package nodes
 
 import (
 	"github.com/danmuck/dps_files/src/api/ledgers"
+	"github.com/danmuck/dps_files/src/api/pb"
 )
 
 type NodeState string
@@ -33,11 +34,12 @@ type ServerNode interface {
 	Storage() ledgers.FileLedger
 }
 
-// ClientNode performs file operations against ServerNodes.
+// ClientNode is a user-facing interface that performs file operations against ServerNodes.
+// All operations go through a gRPC connection — even in local mode.
 type ClientNode interface {
 	Node
-	Upload(filePath string, target *NodeInfo) error
-	Download(fileHash [32]byte, outputPath string, source *NodeInfo) error
-	Delete(fileHash [32]byte, target *NodeInfo) error
-	List(target *NodeInfo) ([]ledgers.FileID, error)
+	// Stub returns the gRPC client stub for the active server connection.
+	Stub() (pb.DPSFilesClient, error)
+	// LocalServer returns the embedded ServerNode, or nil if not in local mode.
+	LocalServer() *DefaultServerNode
 }

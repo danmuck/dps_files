@@ -2,38 +2,37 @@ package nodes
 
 import (
 	"fmt"
-	"os"
 
-	"github.com/danmuck/dps_files/src/api/ledgers"
+	"github.com/danmuck/dps_files/src/api/pb"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
-// DefaultClientNode embeds DefaultNode and performs file operations against
-// remote ServerNodes or an optional co-located local server.
+// DefaultClientNode is a user-facing interface to one or more ServerNodes.
+// All file operations go through gRPC — even when targeting a co-located local server.
 type DefaultClientNode struct {
 	*DefaultNode
 	localServer *DefaultServerNode
-	remotes     []*NodeInfo
-	storageDir  string
+	storageDir  string // non-empty → start a local ServerNode in Start()
+	activeConn  *grpc.ClientConn
+	remoteAddrs []string
 }
 
 // ClientOption configures optional DefaultClientNode features.
 type ClientOption func(*DefaultClientNode)
 
-// WithLocalStorage enables a co-located ServerNode backed by the given directory.
+// WithLocalStorage configures the client to start a co-located ServerNode backed
+// by the given directory. The client connects to it over gRPC on localhost:0.
 func WithLocalStorage(dir string) ClientOption {
 	return func(c *DefaultClientNode) { c.storageDir = dir }
 }
 
-// WithRemotes adds remote server addresses to the client's target list.
+// WithRemotes adds remote server gRPC addresses to connect to.
 func WithRemotes(addrs ...string) ClientOption {
-	return func(c *DefaultClientNode) {
-		for _, addr := range addrs {
-			c.remotes = append(c.remotes, &NodeInfo{Address: addr})
-		}
-	}
+	return func(c *DefaultClientNode) { c.remoteAddrs = append(c.remoteAddrs, addrs...) }
 }
 
-// NewClientNode creates a DefaultClientNode. The ID must be exactly 20 bytes.
+// NewClientNode creates a DefaultClientNode. ID must be 20 bytes.
 func NewClientNode(id []byte, opts ...ClientOption) (*DefaultClientNode, error) {
 	base, err := NewDefaultNode(id, "localhost:0")
 	if err != nil {
@@ -46,7 +45,8 @@ func NewClientNode(id []byte, opts ...ClientOption) (*DefaultClientNode, error) 
 	return cn, nil
 }
 
-// Start optionally starts a co-located local ServerNode.
+// Start initialises the local ServerNode (if configured) and establishes the
+// active gRPC connection. Local server takes priority over remote addresses.
 func (c *DefaultClientNode) Start() error {
 	if c.storageDir != "" {
 		sn, err := NewServerNode(c.ID(), "localhost:0", c.storageDir)
@@ -57,71 +57,47 @@ func (c *DefaultClientNode) Start() error {
 			return fmt.Errorf("start local server: %w", err)
 		}
 		c.localServer = sn
+		conn, err := grpc.NewClient(sn.Addr(),
+			grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if err != nil {
+			return fmt.Errorf("dial local server: %w", err)
+		}
+		c.activeConn = conn
+		return nil
+	}
+	if len(c.remoteAddrs) > 0 {
+		conn, err := grpc.NewClient(c.remoteAddrs[0],
+			grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if err != nil {
+			return fmt.Errorf("dial %s: %w", c.remoteAddrs[0], err)
+		}
+		c.activeConn = conn
 	}
 	return nil
 }
 
-// Shutdown stops the local server (if any).
+// Shutdown closes the active gRPC connection and stops the local server (if any).
 func (c *DefaultClientNode) Shutdown() error {
+	if c.activeConn != nil {
+		c.activeConn.Close()
+	}
 	if c.localServer != nil {
 		c.localServer.Shutdown()
 	}
 	return nil
 }
 
+// Stub returns a gRPC client stub for the active server.
+// Returns an error if no server has been configured.
+func (c *DefaultClientNode) Stub() (pb.DPSFilesClient, error) {
+	if c.activeConn == nil {
+		return nil, fmt.Errorf("no server configured: use WithLocalStorage or WithRemotes")
+	}
+	return pb.NewDPSFilesClient(c.activeConn), nil
+}
+
 // LocalServer returns the co-located ServerNode, or nil if not configured.
+// Use this only for TUI operations that need direct KeyStore access (RawKeyStore).
 func (c *DefaultClientNode) LocalServer() *DefaultServerNode {
 	return c.localServer
-}
-
-// Upload reads filePath and sends it to the target server.
-// Remote upload via gRPC will be wired in Task 7.
-func (c *DefaultClientNode) Upload(filePath string, target *NodeInfo) error {
-	_, err := os.ReadFile(filePath)
-	if err != nil {
-		return fmt.Errorf("read file: %w", err)
-	}
-	// TODO(Task 7): send via gRPC to target.Address
-	return fmt.Errorf("remote upload not yet implemented")
-}
-
-// Download requests a file by hash from the source server.
-// Remote download via gRPC will be wired in Task 7.
-func (c *DefaultClientNode) Download(fileHash [32]byte, outputPath string, source *NodeInfo) error {
-	_ = fileHash
-	_ = outputPath
-	_ = source
-	// TODO(Task 7): fetch via gRPC from source.Address
-	return fmt.Errorf("remote download not yet implemented")
-}
-
-// Delete requests deletion of a file by hash on the target server.
-// Remote delete via gRPC will be wired in Task 7.
-func (c *DefaultClientNode) Delete(fileHash [32]byte, target *NodeInfo) error {
-	_ = fileHash
-	_ = target
-	// TODO(Task 7): delete via gRPC on target.Address
-	return fmt.Errorf("remote delete not yet implemented")
-}
-
-// List requests the file list from the target server.
-// Remote list via gRPC will be wired in Task 7.
-func (c *DefaultClientNode) List(target *NodeInfo) ([]ledgers.FileID, error) {
-	_ = target
-	// TODO(Task 7): list via gRPC from target.Address
-	return nil, fmt.Errorf("remote list not yet implemented")
-}
-
-// ListLocal is a convenience method that lists files on the co-located server
-// without a network round-trip.
-func (c *DefaultClientNode) ListLocal() ([]ledgers.FileID, error) {
-	if c.localServer == nil {
-		return nil, fmt.Errorf("no local server configured")
-	}
-	summaries := c.localServer.Storage().ListKnownFilesMetadata()
-	ids := make([]ledgers.FileID, len(summaries))
-	for i, s := range summaries {
-		ids[i] = s.Hash
-	}
-	return ids, nil
 }
