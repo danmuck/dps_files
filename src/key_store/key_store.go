@@ -215,11 +215,11 @@ func (ks *KeyStore) fileFromMemory(key [HashSize]byte) (*File, error) {
 	}
 
 	if ks.config.Verbose {
-		fmt.Printf("Loaded file metadata from %s\n", file.ShortString())
-		fmt.Printf("Number of references: %d\n", len(file.References))
+		logs.Debugf("Loaded file metadata from %s", file.ShortString())
+		logs.Debugf("Number of references: %d", len(file.References))
 		for i, ref := range file.References {
 			if ref != nil && (i%PRINT_BLOCKS == 0 || i == len(file.References)-1) {
-				fmt.Printf("Reference %d: Key=%x, DataHash=%x\n",
+				logs.Debugf("Reference %d: Key=%x, DataHash=%x",
 					i, ref.Key, ref.DataHash)
 			}
 		}
@@ -854,7 +854,7 @@ func (ks *KeyStore) moveToCache(sourcePath string) error {
 	}
 
 	if ks.config.Verbose {
-		fmt.Printf("Moved to cache: %s\n", fileName)
+		logs.Debugf("Moved to cache: %s", fileName)
 	}
 	return nil
 }
@@ -864,7 +864,7 @@ func (ks *KeyStore) moveToCache(sourcePath string) error {
 // in-memory indexes and their metadata is moved to the cache directory.
 func (ks *KeyStore) verifyFileReferences() error {
 	if ks.config.Verbose {
-		fmt.Printf("Verifying file references ... \n")
+		logs.Debugf("Verifying file references ...")
 	}
 
 	// Track which files have missing chunks by their hash

@@ -9,7 +9,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sync"
 
 	logs "github.com/danmuck/smplog"
@@ -132,15 +131,6 @@ func (h *DefaultRemoteHandler) PassFileReference(fr *FileReference, d []byte) {
 	defer h.mu.Unlock()
 	h.stream <- fr
 	h.stream <- d
-}
-
-func PrintMemUsage() {
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	logs.Infof("Alloc = %v MiB", m.Alloc/1024/1024)
-	logs.Infof("\tTotalAlloc = %v MiB", m.TotalAlloc/1024/1024)
-	logs.Infof("\tSys = %v MiB", m.Sys/1024/1024)
-	logs.Infof("\tNumGC = %v", m.NumGC)
 }
 
 // calculate optimal block size based on file size
