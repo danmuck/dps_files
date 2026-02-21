@@ -30,9 +30,6 @@ server:
 client:
 	go run ./cmd/client $(ARGS)
 
-storage:
-	clear; go run ./cmd/storage $(ARGS)
-
 chain:
 	go run cmd/chain/main.go
 
