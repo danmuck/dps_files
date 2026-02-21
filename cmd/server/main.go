@@ -1,13 +1,12 @@
 package main
 
 import (
-	"fmt"
-	"time"
-
 	"math/rand"
+	"time"
 
 	"github.com/danmuck/dps_files/src/api/nodes"
 	"github.com/danmuck/dps_files/src/api/transport"
+	logs "github.com/danmuck/smplog"
 )
 
 func handleInbound(h transport.TCPHandler) {
@@ -15,10 +14,10 @@ func handleInbound(h transport.TCPHandler) {
 		rpc := <-h.ProcessRPC()
 		// ch <- rpc
 		if rpc != nil {
-			fmt.Printf("handleInbound(%s) \n", rpc.Sender.Address)
+			logs.Debugf("handleInbound(%s)", rpc.Sender.Address)
 			continue
 		}
-		fmt.Printf("handleInbound(): exiting \n")
+		logs.Debugf("handleInbound(): exiting")
 		break
 	}
 }
@@ -35,19 +34,22 @@ func GenerateKey() []byte {
 	return b
 }
 func main() {
+	logs.Configure(logs.DefaultConfig())
+
 	n, err := nodes.NewDefaultNode(GenerateKey(), "localhost:3000", 5, 5)
 	if err != nil {
-		fmt.Println(err)
+		logs.Errorf(err, "failed to create node")
 		return
 	}
 	r := n.Router
-	fmt.Printf("Router: %+v \n", r)
+	logs.Infof("Router: %+v", r)
 
 	go n.Start()
 
 	time.Sleep(20 * time.Second)
 
 	err = n.Shutdown()
-	fmt.Println(err)
-
+	if err != nil {
+		logs.Errorf(err, "shutdown error")
+	}
 }

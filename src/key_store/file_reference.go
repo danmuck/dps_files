@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	logs "github.com/danmuck/smplog"
 )
 
 // this is metadata for locally stored chunks of a file
@@ -34,7 +36,7 @@ func (ks *KeyStore) StoreFileReference(ref *FileReference, data []byte) error {
 	defer ks.lock.Unlock()
 
 	if ks.config.Verbose && ref.FileIndex%PRINT_BLOCKS == 0 {
-		fmt.Printf("Storing block %d: expected size=%d, actual size=%d\n",
+		logs.Debugf("Storing block %d: expected size=%d, actual size=%d",
 			ref.FileIndex, ref.Size, len(data))
 	}
 	if uint32(len(data)) != ref.Size {
@@ -88,7 +90,7 @@ func (ks *KeyStore) StoreFileReference(ref *FileReference, data []byte) error {
 	}
 
 	if ks.config.Verbose && ref.FileIndex%100 == 0 {
-		fmt.Printf("Block %d stored with hash: %x\n", ref.FileIndex, ref.DataHash)
+		logs.Debugf("Block %d stored with hash: %x", ref.FileIndex, ref.DataHash)
 	}
 	return nil
 }

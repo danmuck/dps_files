@@ -5,10 +5,10 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"log"
 	"net"
 
 	"github.com/danmuck/dps_files/src/key_store"
+	logs "github.com/danmuck/smplog"
 )
 
 func handleConn(ks *key_store.KeyStore, conn net.Conn) {
@@ -17,7 +17,7 @@ func handleConn(ks *key_store.KeyStore, conn net.Conn) {
 	// Read the command frame
 	frame, err := readFrame(conn)
 	if err != nil {
-		log.Printf("read frame: %v", err)
+		logs.Warnf("read frame: %v", err)
 		return
 	}
 	if len(frame) < 1 {
@@ -159,7 +159,7 @@ func handleDownload(ks *key_store.KeyStore, conn net.Conn, payload []byte) {
 
 	// Stream file data directly to connection
 	if err := ks.StreamFile(file.MetaData.FileHash, conn); err != nil {
-		log.Printf("stream error: %v", err)
+		logs.Warnf("stream error: %v", err)
 	}
 }
 

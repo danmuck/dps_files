@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	logs "github.com/danmuck/smplog"
 )
 
 // PhaseRecord holds the name and elapsed time of a completed phase.
@@ -222,14 +224,14 @@ func renderSummary(s OpSummary) {
 func writeOpLog(s OpSummary) {
 	dir := "./local/logs"
 	if err := createDirPath(dir); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not create log dir: %v\n", err)
+		logs.Warnf("could not create log dir: %v", err)
 		return
 	}
 	date := s.StartedAt.Format("2006-01-02")
 	path := fmt.Sprintf("%s/%s-%s.log", dir, date, s.Operation)
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not open log file %s: %v\n", path, err)
+		logs.Warnf("could not open log file %s: %v", path, err)
 		return
 	}
 	defer f.Close()

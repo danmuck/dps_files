@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
+
+	logs "github.com/danmuck/smplog"
 )
 
 const (
@@ -104,19 +106,19 @@ func (h *DefaultRemoteHandler) StartReceiver(md *MetaData) {
 				_ = tmp
 				index++
 				if index == blocks {
-					fmt.Printf("Final Block Data Received: %d/%d \n", index, blocks)
+					logs.Debugf("Final Block Data Received: %d/%d", index, blocks)
 					return
 				}
 
 			case *MetaData:
-				fmt.Printf("MetaData: %+v \n", tmp)
+				logs.Debugf("MetaData: %+v", tmp)
 
 			case *FileReference:
 				// FileReference is a header; the next message will be []byte data
-				fmt.Printf("FileReference: %d/%d \n", tmp.FileIndex+1, blocks)
+				logs.Debugf("FileReference: %d/%d", tmp.FileIndex+1, blocks)
 
 			default:
-				fmt.Printf("Hit Default Case??: %+v \n", tmp)
+				logs.Debugf("Hit Default Case??: %+v", tmp)
 			}
 		}
 	}()
@@ -135,10 +137,10 @@ func (h *DefaultRemoteHandler) PassFileReference(fr *FileReference, d []byte) {
 func PrintMemUsage() {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	fmt.Printf("Alloc = %v MiB", m.Alloc/1024/1024)
-	fmt.Printf("\tTotalAlloc = %v MiB", m.TotalAlloc/1024/1024)
-	fmt.Printf("\tSys = %v MiB", m.Sys/1024/1024)
-	fmt.Printf("\tNumGC = %v\n", m.NumGC)
+	logs.Infof("Alloc = %v MiB", m.Alloc/1024/1024)
+	logs.Infof("\tTotalAlloc = %v MiB", m.TotalAlloc/1024/1024)
+	logs.Infof("\tSys = %v MiB", m.Sys/1024/1024)
+	logs.Infof("\tNumGC = %v", m.NumGC)
 }
 
 // calculate optimal block size based on file size

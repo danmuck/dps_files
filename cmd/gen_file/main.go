@@ -16,6 +16,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	logs "github.com/danmuck/smplog"
 )
 
 const DefaultUploadDir = "local/upload"
@@ -59,17 +61,19 @@ func defaultSizeLabel(size int64) string {
 }
 
 func main() {
+	logs.Configure(logs.DefaultConfig())
+
 	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: gen_file <size> [filename]\n")
-		fmt.Fprintf(os.Stderr, "  size: number with optional suffix (B, KB, MB, GB)\n")
-		fmt.Fprintf(os.Stderr, "  Examples: 1MB, 256MB, 65536\n")
-		fmt.Fprintf(os.Stderr, "  Default output dir when filename omitted: %s/\n", DefaultUploadDir)
+		logs.Warnf("Usage: gen_file <size> [filename]")
+		logs.Warnf("  size: number with optional suffix (B, KB, MB, GB)")
+		logs.Warnf("  Examples: 1MB, 256MB, 65536")
+		logs.Warnf("  Default output dir when filename omitted: %s/", DefaultUploadDir)
 		os.Exit(1)
 	}
 
 	size, err := parseSize(os.Args[1])
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		logs.Errorf(err, "invalid size argument")
 		os.Exit(1)
 	}
 
@@ -84,7 +88,7 @@ func main() {
 	dir := filepath.Dir(filename)
 	if dir != "." && dir != "" {
 		if err := os.MkdirAll(dir, 0755); err != nil {
-			fmt.Fprintf(os.Stderr, "Error creating directory: %v\n", err)
+			logs.Errorf(err, "Error creating directory")
 			os.Exit(1)
 		}
 	}
@@ -102,7 +106,7 @@ func main() {
 
 	f, err := os.Create(filename)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating file: %v\n", err)
+		logs.Errorf(err, "Error creating file")
 		os.Exit(1)
 	}
 	defer f.Close()
@@ -115,11 +119,11 @@ func main() {
 	for remaining > 0 {
 		n := min(remaining, int64(chunkSize))
 		if _, err := rand.Read(buf[:n]); err != nil {
-			fmt.Fprintf(os.Stderr, "Error generating random data: %v\n", err)
+			logs.Errorf(err, "Error generating random data")
 			os.Exit(1)
 		}
 		if _, err := f.Write(buf[:n]); err != nil {
-			fmt.Fprintf(os.Stderr, "Error writing file: %v\n", err)
+			logs.Errorf(err, "Error writing file")
 			os.Exit(1)
 		}
 		remaining -= n

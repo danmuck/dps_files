@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	logs "github.com/danmuck/smplog"
 )
 
 // computeChunkKey produces a deterministic 20-byte DHT routing key for a chunk.
@@ -74,7 +76,7 @@ func (ks *KeyStore) StoreFileLocal(name string, fileData []byte) (*File, error) 
 	}
 	defer func() {
 		if err := ks.clearIntent(metadata.FileHash); err != nil && ks.config.Verbose {
-			fmt.Printf("Warning: failed to clear intent for %x: %v\n", metadata.FileHash, err)
+			logs.Warnf("failed to clear intent for %x: %v", metadata.FileHash, err)
 		}
 	}()
 
@@ -425,7 +427,7 @@ func (ks *KeyStore) LoadAndStoreFileLocal(localFilePath string) (*File, error) {
 	}
 	defer func() {
 		if err := ks.clearIntent(metadata.FileHash); err != nil && ks.config.Verbose {
-			fmt.Printf("Warning: failed to clear intent for %x: %v\n", metadata.FileHash, err)
+			logs.Warnf("failed to clear intent for %x: %v", metadata.FileHash, err)
 		}
 	}()
 
@@ -609,7 +611,7 @@ func (ks *KeyStore) LoadAndStoreFileRemote(localFilePath string, handler RemoteH
 	}
 	defer func() {
 		if err := ks.clearIntent(metadata.FileHash); err != nil && ks.config.Verbose {
-			fmt.Printf("Warning: failed to clear intent for %x: %v\n", metadata.FileHash, err)
+			logs.Warnf("failed to clear intent for %x: %v", metadata.FileHash, err)
 		}
 	}()
 

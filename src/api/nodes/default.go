@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/danmuck/dps_files/src/api/transport"
+	logs "github.com/danmuck/smplog"
 )
 
 type DefaultNode struct {
@@ -65,11 +66,11 @@ func (n *DefaultNode) Start() error {
 		for {
 			select {
 			case <-n.exit:
-				fmt.Printf("handleInbound(): exiting \n")
+				logs.Debugf("handleInbound(): exiting")
 				return
 			case rpc := <-c:
 				if rpc != nil {
-					fmt.Printf("handleInbound(%s) \n", rpc.Sender.Address)
+					logs.Debugf("handleInbound(%s)", rpc.Sender.Address)
 					continue
 				}
 				// default:

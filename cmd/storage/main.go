@@ -4,15 +4,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"sort"
 
 	"github.com/danmuck/dps_files/src/key_store"
+	logs "github.com/danmuck/smplog"
 )
 
 func main() {
+	logs.Configure(logs.DefaultConfig())
+
 	cfg, err := parseCLI(os.Args[1:], defaultRuntimeConfig)
 	if err != nil {
 		indexedFiles, indexErr := getFilesInDirectory(defaultRuntimeConfig.UploadDirectory)
@@ -28,30 +30,30 @@ func main() {
 	}
 
 	if err := createDirPath(cfg.UploadDirectory); err != nil {
-		log.Fatalf("Failed to ensure upload directory %s: %v", cfg.UploadDirectory, err)
+		logs.Fatalf(err, "Failed to ensure upload directory %s", cfg.UploadDirectory)
 	}
 
 	if err := createDirPath(cfg.KeyStore.StorageDir); err != nil {
-		log.Fatalf("Failed to ensure storage directory %s: %v", cfg.KeyStore.StorageDir, err)
+		logs.Fatalf(err, "Failed to ensure storage directory %s", cfg.KeyStore.StorageDir)
 	}
 
 	keystore, err := key_store.InitKeyStoreWithConfig(cfg.KeyStore)
 	if err != nil {
-		log.Fatalf("Failed to initialize keystore: %v", err)
+		logs.Fatalf(err, "Failed to initialize keystore")
 	}
 	fmt.Printf("KeyStore initialized: %d file(s) loaded.\n", len(keystore.ListKnownFiles()))
 
 	if cfg.CleanKDHTOnExit {
 		defer func() {
 			if err := keystore.CleanupKDHT(); err != nil {
-				log.Printf("Warning: CleanupKDHT failed: %v", err)
+				logs.Warnf("CleanupKDHT failed: %v", err)
 			}
 		}()
 	}
 
 	remotesCfg, remErr := loadRemotesConfig("./local/remotes.toml")
 	if remErr != nil {
-		log.Printf("Warning: could not load remotes config: %v", remErr)
+		logs.Warnf("could not load remotes config: %v", remErr)
 	} else {
 		cfg.KnownRemotes = remotesCfg.Remotes
 	}
@@ -61,14 +63,14 @@ func main() {
 
 	if shouldRunInteractiveSession(cfg, os.Stdin) {
 		if err := runInteractiveSession(cfg, keystore, os.Stdin); err != nil {
-			log.Fatalf("Interactive session failed: %v", err)
+			logs.Fatalf(err, "Interactive session failed")
 		}
 		return
 	}
 
 	indexedFiles, metadataCount, err := refreshMenuContext(cfg, keystore)
 	if err != nil {
-		log.Fatalf("Failed to prepare runtime context: %v", err)
+		logs.Fatalf(err, "Failed to prepare runtime context")
 	}
 
 	action, actionSource, err := promptAction(os.Stdin, &cfg, indexedFiles, metadataCount)
@@ -76,7 +78,7 @@ func main() {
 		return
 	}
 	if err != nil {
-		log.Fatalf("Failed to select action: %v", err)
+		logs.Fatalf(err, "Failed to select action")
 	}
 	cfg.Action = action
 
@@ -86,7 +88,7 @@ func main() {
 			fmt.Println("Action cancelled.")
 			return
 		}
-		log.Fatalf("Action %q failed: %v", cfg.Action, err)
+		logs.Fatalf(err, "Action %q failed", cfg.Action)
 	}
 }
 
@@ -219,7 +221,7 @@ func executeActionOnce(cfg RuntimeConfig, keystore *key_store.KeyStore, input io
 	case ActionUpload:
 		if cfg.CleanCopyFiles {
 			if err := cleanupCopyFiles(cfg.KeyStore.StorageDir); err != nil {
-				log.Printf("Warning: cleanup copy files failed: %v", err)
+				logs.Warnf("cleanup copy files failed: %v", err)
 			}
 		}
 		if err := executeStoreTargets(cfg, keystore, selectedTargets); err != nil {
@@ -228,7 +230,7 @@ func executeActionOnce(cfg RuntimeConfig, keystore *key_store.KeyStore, input io
 	case ActionStore:
 		if cfg.CleanCopyFiles {
 			if err := cleanupCopyFiles(cfg.KeyStore.StorageDir); err != nil {
-				log.Printf("Warning: cleanup copy files failed: %v", err)
+				logs.Warnf("cleanup copy files failed: %v", err)
 			}
 		}
 		if err := executeStoreTargets(cfg, keystore, selectedTargets); err != nil {
@@ -245,7 +247,7 @@ func executeActionOnce(cfg RuntimeConfig, keystore *key_store.KeyStore, input io
 	if cfg.Mode == ModeRun {
 		kdhtCount, err := countKDHTFiles(cfg.KeyStore.StorageDir)
 		if err != nil {
-			log.Printf("Warning: failed to count .kdht files: %v", err)
+			logs.Warnf("failed to count .kdht files: %v", err)
 		} else {
 			fmt.Printf("\nStored .kdht files currently present: %d\n", kdhtCount)
 		}

@@ -6,6 +6,8 @@ import (
 	"io"
 	"net"
 	"time"
+
+	logs "github.com/danmuck/smplog"
 )
 
 type TCPHandler struct {
@@ -18,7 +20,7 @@ type TCPHandler struct {
 
 // TCPHandler generator function
 func NewTCPHandler(address string, exit chan any) *TCPHandler {
-	fmt.Printf("NewTCPHandler(%s) \n", address)
+	logs.Debugf("NewTCPHandler(%s)", address)
 	return &TCPHandler{
 		address: address,
 		inbound: make(chan *RPC),
@@ -31,15 +33,15 @@ func NewTCPHandler(address string, exit chan any) *TCPHandler {
 
 // close listener connection and inbound channel
 func (h *TCPHandler) Close() error {
-	fmt.Println("Close(start)")
+	logs.Debugf("Close(start)")
 	close(h.inbound)
-	fmt.Println("Close(done)")
+	logs.Debugf("Close(done)")
 	return nil
 }
 
 // Listen and accept connections via TCPHandler.listener
 func (h *TCPHandler) ListenAndAccept() error {
-	fmt.Printf("ListenAndAccept(%s) \n", h.address)
+	logs.Debugf("ListenAndAccept(%s)", h.address)
 	var err error
 	h.listener, err = net.Listen("tcp", h.address)
 	if err != nil {
@@ -66,7 +68,7 @@ func (h *TCPHandler) Send(conn net.Conn, rpc *RPC) error {
 
 // Recieve an RPC from the inbound channel
 func (h *TCPHandler) ProcessRPC() <-chan *RPC {
-	fmt.Println("ProcessRPC(): returning channel")
+	logs.Debugf("ProcessRPC(): returning channel")
 	return h.inbound
 }
 
@@ -74,12 +76,12 @@ func (h *TCPHandler) ProcessRPC() <-chan *RPC {
 
 // listener accept loop
 func (h *TCPHandler) acceptConnections() {
-	fmt.Printf("acceptConnections(): start \n")
+	logs.Debugf("acceptConnections(): start")
 	defer h.listener.Close()
 	for {
 		select {
 		case <-h.exit:
-			fmt.Printf("acceptConnections(): exit \n")
+			logs.Debugf("acceptConnections(): exit")
 			return
 		default:
 			h.listener.(*net.TCPListener).SetDeadline(time.Now().Add(500 * time.Millisecond)) // Non-blocking
@@ -89,7 +91,7 @@ func (h *TCPHandler) acceptConnections() {
 					// Timeout, continue to check exit
 					continue
 				}
-				fmt.Printf("acceptConnections(error): %s \n", err)
+				logs.Warnf("acceptConnections error: %s", err)
 				return
 			}
 			go h.handleConnection(conn)
@@ -101,7 +103,7 @@ func (h *TCPHandler) acceptConnections() {
 func (h *TCPHandler) handleConnection(conn net.Conn) {
 	defer conn.Close()
 	clientAddr := conn.RemoteAddr().String()
-	fmt.Printf("handleConnection(%s): start \n", clientAddr)
+	logs.Debugf("handleConnection(%s): start", clientAddr)
 
 	reader := bufio.NewReader(conn)
 	tcpConn, ok := conn.(*net.TCPConn)
@@ -110,7 +112,7 @@ Process:
 	for {
 		select {
 		case <-h.exit:
-			fmt.Printf("handleConnection(): exit \n")
+			logs.Debugf("handleConnection(): exit")
 			return
 		default:
 			if ok {
@@ -124,22 +126,22 @@ Process:
 					continue
 				}
 				if err == io.EOF {
-					fmt.Println("Connection closed by peer.")
+					logs.Debugf("Connection closed by peer.")
 					return
 				}
-				fmt.Printf("Error reading from reader: %v\n", err)
+				logs.Warnf("Error reading from reader: %v", err)
 				return
 			}
 
 			if len(data) > 0 {
 				rpc, err := h.coder.Decode(reader)
 				if err != nil {
-					fmt.Println("handleConnection(error): ", err)
+					logs.Warnf("handleConnection error: %v", err)
 					break Process
 				}
 				h.inbound <- rpc
 			}
 		}
 	}
-	fmt.Printf("handleConnection(%s): connection released \n", clientAddr)
+	logs.Debugf("handleConnection(%s): connection released", clientAddr)
 }

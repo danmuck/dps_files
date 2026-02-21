@@ -3,6 +3,8 @@ package impl
 import (
 	"fmt"
 	"time"
+
+	logs "github.com/danmuck/smplog"
 )
 
 type Block struct {
@@ -33,7 +35,7 @@ func NewBlock(index uint64, data []byte, prev []byte) *Block {
 	}
 	_, err = b.hashBlock(data)
 	if err != nil {
-		fmt.Printf("NewBlock error: %v \n", err.Error())
+		logs.Errorf(err, "NewBlock error")
 	}
 	return b
 }
@@ -81,7 +83,7 @@ func NewBlockEncrypt(index uint64, data []byte, prev []byte, key []byte) *Block 
 	}
 	_, err = b.hashBlockEncrypt(data, key)
 	if err != nil {
-		fmt.Printf("NewBlockEncrypt error: %v \n", err.Error())
+		logs.Errorf(err, "NewBlockEncrypt error")
 	}
 	return b
 }

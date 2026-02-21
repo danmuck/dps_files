@@ -2,21 +2,22 @@ package main
 
 import (
 	"flag"
-	"fmt"
-	"log"
 	"net/http"
 
 	"github.com/danmuck/dps_files/src/key_store"
+	logs "github.com/danmuck/smplog"
 )
 
 func main() {
+	logs.Configure(logs.DefaultConfig())
+
 	addr := flag.String("addr", ":8080", "HTTP listen address")
 	storageDir := flag.String("storage", "local/storage", "storage directory")
 	flag.Parse()
 
 	ks, err := key_store.InitKeyStore(*storageDir)
 	if err != nil {
-		log.Fatalf("failed to init keystore: %v", err)
+		logs.Fatalf(err, "failed to init keystore")
 	}
 
 	mux := http.NewServeMux()
@@ -26,6 +27,8 @@ func main() {
 	mux.HandleFunc("GET /files/{name}", handleDownloadByName(ks))
 	mux.HandleFunc("GET /files", handleListFiles(ks))
 
-	fmt.Printf("HTTP file server listening on %s (storage: %s)\n", *addr, *storageDir)
-	log.Fatal(http.ListenAndServe(*addr, mux))
+	logs.Infof("HTTP file server listening on %s (storage: %s)", *addr, *storageDir)
+	if err := http.ListenAndServe(*addr, mux); err != nil {
+		logs.Fatal(err, "server exited")
+	}
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/danmuck/dps_files/src/impl"
+	logs "github.com/danmuck/smplog"
 )
 
 type Blockchain struct {
@@ -91,6 +92,8 @@ func InitializeBlockchain(encryptionKey []byte) *Blockchain {
 }
 
 func main() {
+	logs.Configure(logs.DefaultConfig())
+
 	// Initialize the blockchain
 	encryptionKey := []byte("examplekey123456")
 	// encryptionKey := []byte("some random data for my super secure key but it needs to be long enough
@@ -116,7 +119,7 @@ func main() {
 		// Append block with user input
 		err := bc.Append([]byte(input))
 		if err != nil {
-			fmt.Printf("Error appending block: %v\n", err)
+			logs.Errorf(err, "Error appending block")
 			continue
 		}
 
@@ -124,8 +127,8 @@ func main() {
 		bc.PrintChainDecrypted(encryptionKey)
 	}
 	if err := bc.ValidateChain(); err != nil {
-		fmt.Printf("Chain validation failed: %v\n", err)
+		logs.Errorf(err, "Chain validation failed")
 	} else {
-		fmt.Println("Chain validation passed.")
+		logs.Info("Chain validation passed.")
 	}
 }

@@ -9,17 +9,20 @@ import (
 	"time"
 
 	"github.com/danmuck/dps_files/src/api/transport"
+	logs "github.com/danmuck/smplog"
 
 	"google.golang.org/protobuf/proto"
 )
 
 func main() {
+	logs.Configure(logs.DefaultConfig())
+
 	address := "localhost:3000" // Replace with your server address
-	fmt.Printf("Connecting to server at %s...\n", address)
+	logs.Infof("Connecting to server at %s...", address)
 
 	conn, err := net.Dial("tcp", address)
 	if err != nil {
-		fmt.Printf("Failed to connect to server: %v\n", err)
+		logs.Errorf(err, "Failed to connect to server")
 		return
 	}
 	defer conn.Close()
@@ -54,7 +57,7 @@ func main() {
 		// Serialize the Protobuf message
 		data, err := proto.Marshal(msg)
 		if err != nil {
-			fmt.Printf("Failed to serialize message: %v\n", err)
+			logs.Errorf(err, "Failed to serialize message")
 			continue
 		}
 
@@ -65,10 +68,10 @@ func main() {
 		// Write the serialized data to the connection
 		_, err = conn.Write(data)
 		if err != nil {
-			fmt.Printf("Failed to send message: %v\n", err)
+			logs.Errorf(err, "Failed to send message")
 			break
 		}
 
-		fmt.Printf("Message sent. Length: %v \n", len(data))
+		logs.Infof("Message sent. Length: %v", len(data))
 	}
 }

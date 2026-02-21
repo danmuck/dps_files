@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	logs "github.com/danmuck/smplog"
 )
 
 type KeyStore struct {
@@ -75,7 +76,7 @@ func InitKeyStoreWithConfig(cfg KeyStoreConfig) (*KeyStore, error) {
 			hashBytes, err := hex.DecodeString(hashStr)
 			if err != nil {
 				if ks.config.Verbose {
-					fmt.Printf("Warning: invalid metadata filename %s: %v\n", entry.Name(), err)
+					logs.Warnf("invalid metadata filename %s: %v", entry.Name(), err)
 				}
 				continue
 			}
@@ -85,7 +86,7 @@ func InitKeyStoreWithConfig(cfg KeyStoreConfig) (*KeyStore, error) {
 			var file File
 			if _, err := toml.DecodeFile(filepath.Join(metadataDir, entry.Name()), &file); err != nil {
 				if ks.config.Verbose {
-					fmt.Printf("Warning: failed to decode file %s: %v\n", entry.Name(), err)
+					logs.Warnf("failed to decode file %s: %v", entry.Name(), err)
 				}
 				continue
 			}
@@ -112,7 +113,7 @@ func InitKeyStoreWithConfig(cfg KeyStoreConfig) (*KeyStore, error) {
 	// Recover incomplete stores from previous crashes
 	if err := ks.recoverIntents(); err != nil {
 		if ks.config.Verbose {
-			fmt.Printf("Warning: intent recovery failed: %v\n", err)
+			logs.Warnf("intent recovery failed: %v", err)
 		}
 	}
 
@@ -712,7 +713,7 @@ func (ks *KeyStore) pruneDeadCacheEntries() error {
 		live, err := ks.cacheEntryIsLive(cachePath)
 		if err != nil {
 			if ks.config.Verbose {
-				fmt.Printf("Warning: %v\n", err)
+				logs.Warnf("%v", err)
 			}
 			if err := ks.pruneCachePath(cachePath); err != nil {
 				return err
@@ -741,7 +742,7 @@ func (ks *KeyStore) hasCacheEntryForHash(fileHash [HashSize]byte) (bool, error) 
 		live, err := ks.cacheEntryIsLive(cachePath)
 		if err != nil {
 			if ks.config.Verbose {
-				fmt.Printf("Warning: %v\n", err)
+				logs.Warnf("%v", err)
 			}
 			if err := ks.pruneCachePath(cachePath); err != nil {
 				return false, err
@@ -800,7 +801,7 @@ func (ks *KeyStore) moveToCache(sourcePath string) error {
 				return fmt.Errorf("failed to remove duplicate metadata source: %w", err)
 			}
 			if ks.config.Verbose {
-				fmt.Printf("Cache already contains metadata for %s; discarded duplicate source\n", stem)
+				logs.Warnf("Cache already contains metadata for %s; discarded duplicate source", stem)
 			}
 			return nil
 		}
@@ -859,7 +860,7 @@ func (ks *KeyStore) verifyFileReferences() error {
 			sourcePath := filepath.Join(metadataDir, fileName)
 			if err := ks.moveToCache(sourcePath); err != nil {
 				if ks.config.Verbose {
-					fmt.Printf("Warning: %v\n", err)
+					logs.Warnf("%v", err)
 				}
 			}
 		}

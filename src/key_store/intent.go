@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	logs "github.com/danmuck/smplog"
 )
 
 // intentRecord is the JSON structure written to .intents/{fileHash}.json.
@@ -106,7 +108,7 @@ func (ks *KeyStore) recoverIntents() error {
 		if err := ks.recoverIntentFile(intentPath); err != nil {
 			issues = append(issues, fmt.Sprintf("%s: %v", entry.Name(), err))
 			if ks.config.Verbose {
-				fmt.Printf("Warning: intent recovery issue for %s: %v\n", entry.Name(), err)
+				logs.Warnf("intent recovery issue for %s: %v", entry.Name(), err)
 			}
 		}
 	}
@@ -142,7 +144,7 @@ func (ks *KeyStore) recoverIntentFile(intentPath string) error {
 	metadataPath := filepath.Join(ks.storageDir, "metadata", fmt.Sprintf("%x.toml", fileHash))
 	if _, err := os.Stat(metadataPath); err == nil {
 		if ks.config.Verbose {
-			fmt.Printf("Intent recovery: skipping cleanup for committed file %s (%s)\n", rec.FileName, rec.FileHash)
+			logs.Infof("Intent recovery: skipping cleanup for committed file %s (%s)", rec.FileName, rec.FileHash)
 		}
 		if err := os.Remove(intentPath); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("failed to remove stale intent: %w", err)
@@ -164,7 +166,7 @@ func (ks *KeyStore) recoverIntentFile(intentPath string) error {
 	}
 
 	if ks.config.Verbose && cleaned > 0 {
-		fmt.Printf("Intent recovery: cleaned %d orphaned chunks for %s (%s)\n", cleaned, rec.FileName, rec.FileHash)
+		logs.Infof("Intent recovery: cleaned %d orphaned chunks for %s (%s)", cleaned, rec.FileName, rec.FileHash)
 	}
 
 	if err := os.Remove(intentPath); err != nil && !os.IsNotExist(err) {
