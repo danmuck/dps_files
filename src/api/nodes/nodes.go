@@ -2,7 +2,6 @@ package nodes
 
 import (
 	"github.com/danmuck/dps_files/src/api/ledgers"
-	"github.com/danmuck/dps_files/src/api/transport"
 )
 
 type NodeState string
@@ -13,13 +12,19 @@ const (
 	Leader    NodeState = "Leader"
 )
 
+// NodeInfo identifies a node on the network.
+type NodeInfo struct {
+	ID      []byte
+	Address string
+}
+
 type Node interface {
-	NodeInfo() transport.NodeInfo
+	NodeInfo() NodeInfo
 	Address() string
 	ID() []byte
 	Start() error
 	Shutdown() error
-	Peers() []*transport.NodeInfo
+	Peers() []*NodeInfo
 }
 
 // ServerNode manages storage and serves gRPC RPCs.
@@ -31,8 +36,8 @@ type ServerNode interface {
 // ClientNode performs file operations against ServerNodes.
 type ClientNode interface {
 	Node
-	Upload(filePath string, target *transport.NodeInfo) error
-	Download(fileHash [32]byte, outputPath string, source *transport.NodeInfo) error
-	Delete(fileHash [32]byte, target *transport.NodeInfo) error
-	List(target *transport.NodeInfo) ([]ledgers.FileID, error)
+	Upload(filePath string, target *NodeInfo) error
+	Download(fileHash [32]byte, outputPath string, source *NodeInfo) error
+	Delete(fileHash [32]byte, target *NodeInfo) error
+	List(target *NodeInfo) ([]ledgers.FileID, error)
 }

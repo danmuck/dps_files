@@ -39,7 +39,7 @@ func main() {
 		logs.Fatalf(err, "failed to start server node")
 	}
 
-	logs.Infof("Server node listening on %s (storage: %s)", sn.TCPHandler.Addr(), *storageDir)
+	logs.Infof("Server node listening on %s (storage: %s)", sn.Addr(), *storageDir)
 	if *httpAddr != "" {
 		logs.Infof("HTTP server on %s", *httpAddr)
 	}
