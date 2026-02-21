@@ -966,3 +966,71 @@ func (ks *KeyStore) CleanupExpired() int {
 	}
 	return removed
 }
+
+// StorageDir returns the root storage directory path.
+func (ks *KeyStore) StorageDir() string {
+	return ks.storageDir
+}
+
+// DeepCleanResult holds counts of files removed by DeepClean.
+type DeepCleanResult struct {
+	RemovedKDHT     int
+	RemovedMetadata int
+	RemovedCache    int
+}
+
+// DeepClean removes all .kdht chunks, all metadata .toml files, and all cache
+// entries. Returns counts of what was removed. Recreates the directories so
+// the keystore remains usable afterward.
+func (ks *KeyStore) DeepClean() (DeepCleanResult, error) {
+	var result DeepCleanResult
+
+	// Count + remove .kdht files.
+	kdhtPattern := filepath.Join(ks.storageDir, "data", "*.kdht")
+	kdhtFiles, err := filepath.Glob(kdhtPattern)
+	if err != nil {
+		return result, fmt.Errorf("glob kdht: %w", err)
+	}
+	result.RemovedKDHT = len(kdhtFiles)
+	if err := ks.CleanupKDHT(); err != nil {
+		return result, fmt.Errorf("cleanup kdht: %w", err)
+	}
+
+	// Count + remove metadata files.
+	metaDir := filepath.Join(ks.storageDir, "metadata")
+	metaEntries, err := os.ReadDir(metaDir)
+	if err != nil && !os.IsNotExist(err) {
+		return result, fmt.Errorf("read metadata dir: %w", err)
+	}
+	for _, e := range metaEntries {
+		if !e.IsDir() {
+			result.RemovedMetadata++
+		}
+	}
+	if err := os.RemoveAll(metaDir); err != nil {
+		return result, fmt.Errorf("remove metadata dir: %w", err)
+	}
+	if err := os.MkdirAll(metaDir, 0o755); err != nil {
+		return result, fmt.Errorf("recreate metadata dir: %w", err)
+	}
+
+	// Count + remove cache files.
+	cacheDir := filepath.Join(ks.storageDir, ".cache")
+	cacheEntries, err := os.ReadDir(cacheDir)
+	if err != nil && !os.IsNotExist(err) {
+		return result, fmt.Errorf("read cache dir: %w", err)
+	}
+	for _, e := range cacheEntries {
+		if !e.IsDir() {
+			result.RemovedCache++
+		}
+	}
+	if err := os.RemoveAll(cacheDir); err != nil {
+		return result, fmt.Errorf("remove cache dir: %w", err)
+	}
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		return result, fmt.Errorf("recreate cache dir: %w", err)
+	}
+
+	return result, nil
+}
