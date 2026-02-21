@@ -28,6 +28,9 @@ clean:
 server:
 	go run ./cmd/server $(ARGS)
 
+srvd:
+	go run ./cmd/server --addr :9000 --http :8080 --storage local/storage
+
 client:
 	go run ./cmd/client $(ARGS)
 
