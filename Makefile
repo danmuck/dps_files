@@ -24,14 +24,14 @@ build:
 clean:
 	rm -rf .build/
 
-storage:
-	clear; go run ./cmd/storage $(ARGS)
-
 server:
-	go run cmd/server/main.go
+	go run ./cmd/server $(ARGS)
 
 client:
-	go run cmd/client/main.go
+	go run ./cmd/client $(ARGS)
+
+storage:
+	clear; go run ./cmd/storage $(ARGS)
 
 chain:
 	go run cmd/chain/main.go
@@ -43,12 +43,6 @@ gen-file:
 # Tidy up dependencies
 tidy:
 	go mod tidy
-
-fileserver:
-	go run ./cmd/fileserver $(ARGS)
-
-httpserver:
-	go run ./cmd/httpserver $(ARGS)
 
 build-protobuf:
 	protoc --go_out=. --go_opt=paths=source_relative src/api/transport/rpc.proto
