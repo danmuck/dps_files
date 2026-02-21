@@ -218,7 +218,7 @@ func (ks *KeyStore) fileFromMemory(key [HashSize]byte) (*File, error) {
 		logs.Debugf("Loaded file metadata from %s", file.ShortString())
 		logs.Debugf("Number of references: %d", len(file.References))
 		for i, ref := range file.References {
-			if ref != nil && (i%PRINT_BLOCKS == 0 || i == len(file.References)-1) {
+			if ref != nil && (i%500 == 0 || i == len(file.References)-1) {
 				logs.Debugf("Reference %d: Key=%x, DataHash=%x",
 					i, ref.Key, ref.DataHash)
 			}

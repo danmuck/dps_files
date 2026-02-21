@@ -121,7 +121,7 @@ func (ks *KeyStore) StoreFileLocal(name string, fileData []byte) (*File, error) 
 		totalBytesProcessed += uint64(blockSize)
 
 		// progress output
-		if ks.config.Verbose && (i%PRINT_BLOCKS == 0 || i == metadata.TotalBlocks-1) {
+		if ks.config.Verbose && (i%500 == 0 || i == metadata.TotalBlocks-1) {
 			logs.Debugf("Stored block %d/%d (%.1f%%)",
 				i+1, metadata.TotalBlocks, float64(i+1)/float64(metadata.TotalBlocks)*100)
 		}
@@ -527,7 +527,7 @@ func (ks *KeyStore) LoadAndStoreFileLocal(localFilePath string) (*File, error) {
 				if ref == nil {
 					return nil, fmt.Errorf("missing reference for block %d", i)
 				}
-				if i%PRINT_BLOCKS == 0 || i == len(file.References)-1 {
+				if i%500 == 0 || i == len(file.References)-1 {
 					logs.Debugf("Block %d: Size=%d, Index=%d", i, ref.Size, ref.FileIndex)
 				}
 			}

@@ -35,7 +35,7 @@ func (ks *KeyStore) StoreFileReference(ref *FileReference, data []byte) error {
 	ks.lock.Lock()
 	defer ks.lock.Unlock()
 
-	if ks.config.Verbose && ref.FileIndex%PRINT_BLOCKS == 0 {
+	if ks.config.Verbose && ref.FileIndex%500 == 0 {
 		logs.Debugf("Storing block %d: expected size=%d, actual size=%d",
 			ref.FileIndex, ref.Size, len(data))
 	}

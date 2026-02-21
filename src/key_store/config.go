@@ -24,8 +24,6 @@ const (
 	TargetBlocks                 = 1000         // aim for ~1000 chunks for large files
 	LargeFileMx                  = 128          // multiplier for defining large filesize (MaxBlockSize * LargeFileMx)
 	FileExtension                = ".kdht"
-	PRINT_BLOCKS                 = 500
-	VERIFY                       = false
 )
 
 // KeyStoreConfig controls runtime behavior of a KeyStore instance.
@@ -37,11 +35,11 @@ type KeyStoreConfig struct {
 }
 
 // DefaultConfig returns a KeyStoreConfig with verbose output enabled
-// and verify-on-write matching the VERIFY constant.
+// and verify-on-write disabled by default.
 func DefaultConfig(storageDir string) KeyStoreConfig {
 	return KeyStoreConfig{
 		StorageDir:        storageDir,
-		VerifyOnWrite:     VERIFY,
+		VerifyOnWrite:     false,
 		Verbose:           true,
 		DefaultTTLSeconds: DefaultFileTTLSeconds,
 	}
