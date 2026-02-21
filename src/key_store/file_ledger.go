@@ -123,3 +123,33 @@ func (l *KeyStoreLedger) ListKnownFilesMetadata() []ledgers.FileMetaSummary {
 	}
 	return summaries
 }
+
+func (l *KeyStoreLedger) StoreDirectory(rootPath string) (ledgers.FileID, error) {
+	hash, err := l.ks.StoreDirectory(rootPath)
+	if err != nil {
+		return ledgers.FileID{}, err
+	}
+	return ledgers.FileID(hash), nil
+}
+
+func (l *KeyStoreLedger) ListDirectory(dirID ledgers.FileID) ([]ledgers.DirectoryEntry, error) {
+	entries, err := l.ks.ListDirectory([HashSize]byte(dirID))
+	if err != nil {
+		return nil, err
+	}
+	result := make([]ledgers.DirectoryEntry, len(entries))
+	for i, e := range entries {
+		result[i] = ledgers.DirectoryEntry{
+			Name: e.Name,
+			Path: e.Path,
+			Hash: ledgers.FileID(e.Hash),
+			Type: e.Type,
+			Size: e.Size,
+		}
+	}
+	return result, nil
+}
+
+func (l *KeyStoreLedger) ReassembleDirectory(dirID ledgers.FileID, outputRoot string) error {
+	return l.ks.ReassembleDirectory([HashSize]byte(dirID), outputRoot)
+}

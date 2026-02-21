@@ -31,6 +31,15 @@ type MetadataStore interface {
 	ListFiles() ([]FileID, error)
 }
 
+// DirectoryEntry represents a child in a directory manifest.
+type DirectoryEntry struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+	Hash FileID `json:"hash"`
+	Type string `json:"type"`
+	Size uint64 `json:"size"`
+}
+
 type FileLedger interface {
 	VerifyReferences() error
 	StoreFileLocal(name string, fileData []byte) (FileID, error)
@@ -48,4 +57,9 @@ type FileLedger interface {
 	StreamFileByName(name string, w io.Writer) error
 	DeleteFile(fileID FileID) error
 	ListKnownFilesMetadata() []FileMetaSummary
+
+	// Directory operations
+	StoreDirectory(rootPath string) (FileID, error)
+	ListDirectory(dirID FileID) ([]DirectoryEntry, error)
+	ReassembleDirectory(dirID FileID, outputRoot string) error
 }

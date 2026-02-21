@@ -2,6 +2,7 @@ package key_store
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/danmuck/dps_files/src/api/ledgers"
@@ -51,5 +52,44 @@ func TestKeyStoreImplementsFileLedger(t *testing.T) {
 	files, _ = fl.ListKnownFiles()
 	if len(files) != 0 {
 		t.Fatalf("expected empty after delete, got %d", len(files))
+	}
+}
+
+func TestFileLedgerDirectoryRoundTrip(t *testing.T) {
+	tmpDir := t.TempDir()
+	storageDir := filepath.Join(tmpDir, "storage")
+	testRoot := filepath.Join(tmpDir, "upload")
+	outputRoot := filepath.Join(tmpDir, "output")
+
+	os.MkdirAll(filepath.Join(testRoot, "sub"), 0o755)
+	os.WriteFile(filepath.Join(testRoot, "file.txt"), []byte("hello"), 0o644)
+	os.WriteFile(filepath.Join(testRoot, "sub", "nested.txt"), []byte("world"), 0o644)
+
+	ks, _ := InitKeyStoreWithConfig(KeyStoreConfig{
+		StorageDir: storageDir, DefaultTTLSeconds: 3600,
+	})
+	fl := NewFileLedger(ks)
+
+	dirID, err := fl.StoreDirectory(testRoot)
+	if err != nil {
+		t.Fatalf("StoreDirectory: %v", err)
+	}
+
+	entries, err := fl.ListDirectory(dirID)
+	if err != nil {
+		t.Fatalf("ListDirectory: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+
+	err = fl.ReassembleDirectory(dirID, outputRoot)
+	if err != nil {
+		t.Fatalf("ReassembleDirectory: %v", err)
+	}
+
+	got, _ := os.ReadFile(filepath.Join(outputRoot, "sub", "nested.txt"))
+	if string(got) != "world" {
+		t.Errorf("nested.txt = %q, want %q", got, "world")
 	}
 }

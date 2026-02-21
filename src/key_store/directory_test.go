@@ -131,3 +131,89 @@ func TestReassembleDirectory(t *testing.T) {
 		t.Errorf("sub/nested.txt = %q, want %q", gotNested, "nested file")
 	}
 }
+
+func TestDuplicateBasenamesInDirectories(t *testing.T) {
+	tmpDir := t.TempDir()
+	storageDir := filepath.Join(tmpDir, "storage")
+	testRoot := filepath.Join(tmpDir, "upload")
+
+	os.MkdirAll(filepath.Join(testRoot, "a"), 0o755)
+	os.MkdirAll(filepath.Join(testRoot, "b"), 0o755)
+	os.WriteFile(filepath.Join(testRoot, "a", "main.go"), []byte("package a"), 0o644)
+	os.WriteFile(filepath.Join(testRoot, "b", "main.go"), []byte("package b"), 0o644)
+
+	ks, _ := InitKeyStoreWithConfig(KeyStoreConfig{
+		StorageDir: storageDir, DefaultTTLSeconds: 3600,
+	})
+	_, err := ks.StoreDirectory(testRoot)
+	if err != nil {
+		t.Fatalf("StoreDirectory: %v", err)
+	}
+
+	fileA, err := ks.GetFileByName("a/main.go")
+	if err != nil {
+		t.Fatalf("GetFileByName(a/main.go): %v", err)
+	}
+	fileB, err := ks.GetFileByName("b/main.go")
+	if err != nil {
+		t.Fatalf("GetFileByName(b/main.go): %v", err)
+	}
+	if fileA.MetaData.FileHash == fileB.MetaData.FileHash {
+		t.Error("files with different content should have different hashes")
+	}
+}
+
+func TestDeepNesting(t *testing.T) {
+	tmpDir := t.TempDir()
+	storageDir := filepath.Join(tmpDir, "storage")
+	testRoot := filepath.Join(tmpDir, "upload")
+	outputRoot := filepath.Join(tmpDir, "output")
+
+	deepPath := filepath.Join(testRoot, "a", "b", "c", "d")
+	os.MkdirAll(deepPath, 0o755)
+	os.WriteFile(filepath.Join(deepPath, "deep.txt"), []byte("deep"), 0o644)
+
+	ks, _ := InitKeyStoreWithConfig(KeyStoreConfig{
+		StorageDir: storageDir, DefaultTTLSeconds: 3600,
+	})
+	dirHash, err := ks.StoreDirectory(testRoot)
+	if err != nil {
+		t.Fatalf("StoreDirectory: %v", err)
+	}
+
+	err = ks.ReassembleDirectory(dirHash, outputRoot)
+	if err != nil {
+		t.Fatalf("ReassembleDirectory: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(outputRoot, "a", "b", "c", "d", "deep.txt"))
+	if err != nil {
+		t.Fatalf("read deep.txt: %v", err)
+	}
+	if string(got) != "deep" {
+		t.Errorf("deep.txt = %q, want %q", got, "deep")
+	}
+}
+
+func TestEmptyDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+	storageDir := filepath.Join(tmpDir, "storage")
+	testRoot := filepath.Join(tmpDir, "upload")
+	os.MkdirAll(testRoot, 0o755)
+
+	ks, _ := InitKeyStoreWithConfig(KeyStoreConfig{
+		StorageDir: storageDir, DefaultTTLSeconds: 3600,
+	})
+	dirHash, err := ks.StoreDirectory(testRoot)
+	if err != nil {
+		t.Fatalf("StoreDirectory: %v", err)
+	}
+
+	entries, err := ks.ListDirectory(dirHash)
+	if err != nil {
+		t.Fatalf("ListDirectory: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("expected 0 entries for empty dir, got %d", len(entries))
+	}
+}
