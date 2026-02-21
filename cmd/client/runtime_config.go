@@ -53,6 +53,7 @@ const (
 	ActionDelete    MenuAction = "delete"
 	ActionExpire    MenuAction = "expire"
 	ActionDownload  MenuAction = "download"
+	ActionUploadDir MenuAction = "upload-dir"
 )
 
 const defaultRuntimeTTLSeconds uint64 = 1800
@@ -256,6 +257,13 @@ func parseCLI(args []string, cfg RuntimeConfig) (RuntimeConfig, error) {
 				return runtimeCfg, fmt.Errorf("multiple actions provided: %q", arg)
 			}
 			runtimeCfg.Action = ActionDownload
+			runtimeCfg.ActionProvided = true
+			actionProvided = true
+		case string(ActionUploadDir), "ud", "updir":
+			if actionProvided {
+				return runtimeCfg, fmt.Errorf("multiple actions provided: %q", arg)
+			}
+			runtimeCfg.Action = ActionUploadDir
 			runtimeCfg.ActionProvided = true
 			actionProvided = true
 		default:

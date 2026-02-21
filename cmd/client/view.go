@@ -62,7 +62,11 @@ func executeViewAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.Reade
 			shortHash = shortHash[:16]
 		}
 
-		logs.MenuItem(i, md.FileName, false)
+		displayName := md.FileName
+		if md.IsDirectory() {
+			displayName = "[DIR] " + displayName
+		}
+		logs.MenuItem(i, displayName, false)
 		logs.Printf("\n")
 		logs.Dataf("      hash: %s...  size: %s  chunks: %d\n", shortHash, formatBytes(md.TotalSize), md.TotalBlocks)
 		logs.Dataf("      chunk_size: %s  last_chunk: %s  modified: %s  ttl: %s\n",

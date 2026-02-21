@@ -65,6 +65,7 @@ func promptAction(input io.Reader, cfg *RuntimeConfig, indexedFiles []string, me
 		logs.Menuf("  view 		(inspect metadata + reassemble)\n")
 		logs.Menuf("  store 	(chunk/store explicit filepath)\n")
 		logs.Menuf("  upload 	(chunk/store files from upload dir)\n")
+		logs.Menuf("  upload-dir 	(chunk/store entire directory)\n")
 		logs.Menuf("  delete 	(remove a single stored file + chunks)\n")
 		logs.Menuf("  download 	(write a stored file to disk)\n")
 		logs.Printf("\n")
@@ -119,6 +120,9 @@ func promptAction(input io.Reader, cfg *RuntimeConfig, indexedFiles []string, me
 				continue
 			}
 			return ActionDownload, "download", nil
+
+		case string(ActionUploadDir), "ud", "updir":
+			return ActionUploadDir, "upload directory", nil
 
 		case string(ActionStore), "s":
 			return ActionStore, "store (explicit filepath)", nil

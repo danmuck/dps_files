@@ -236,6 +236,8 @@ func executeActionOnce(cfg RuntimeConfig, keystore *key_store.KeyStore, input io
 		return executeExpireAction(cfg, keystore)
 	case ActionDownload:
 		return executeDownloadAction(cfg, keystore, input)
+	case ActionUploadDir:
+		return executeUploadDirAction(cfg, keystore, input)
 	case ActionUpload:
 		selectedUploads, selection, err := promptUploadSelection(indexedFiles, input, cfg)
 		if err != nil {
