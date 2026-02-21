@@ -81,6 +81,10 @@ const (
 	Command_REQUEST_VOTE     Command = 8
 	Command_APPEND_ENTRIES   Command = 9
 	Command_INSTALL_SNAPSHOT Command = 10
+	Command_UPLOAD           Command = 11
+	Command_DOWNLOAD         Command = 12
+	Command_LIST             Command = 13
+	Command_DELETE           Command = 14
 )
 
 // Enum value maps for Command.
@@ -97,6 +101,10 @@ var (
 		8:  "REQUEST_VOTE",
 		9:  "APPEND_ENTRIES",
 		10: "INSTALL_SNAPSHOT",
+		11: "UPLOAD",
+		12: "DOWNLOAD",
+		13: "LIST",
+		14: "DELETE",
 	}
 	Command_value = map[string]int32{
 		"PING":             0,
@@ -110,6 +118,10 @@ var (
 		"REQUEST_VOTE":     8,
 		"APPEND_ENTRIES":   9,
 		"INSTALL_SNAPSHOT": 10,
+		"UPLOAD":           11,
+		"DOWNLOAD":         12,
+		"LIST":             13,
+		"DELETE":           14,
 	}
 )
 
@@ -375,7 +387,7 @@ const file_src_api_transport_rpc_proto_rawDesc = "" +
 	"\aTraceID\x18\b \x01(\tR\aTraceID*\"\n" +
 	"\bProtocol\x12\b\n" +
 	"\x04Raft\x10\x00\x12\f\n" +
-	"\bKademlia\x10\x01*\xa1\x01\n" +
+	"\bKademlia\x10\x01*\xd1\x01\n" +
 	"\aCommand\x12\b\n" +
 	"\x04PING\x10\x00\x12\t\n" +
 	"\x05STORE\x10\x01\x12\a\n" +
@@ -389,7 +401,13 @@ const file_src_api_transport_rpc_proto_rawDesc = "" +
 	"\fREQUEST_VOTE\x10\b\x12\x12\n" +
 	"\x0eAPPEND_ENTRIES\x10\t\x12\x14\n" +
 	"\x10INSTALL_SNAPSHOT\x10\n" +
-	"B0Z.github.com/danmuck/dps_files/src/api/transportb\x06proto3"
+	"\x12\n" +
+	"\n" +
+	"\x06UPLOAD\x10\v\x12\f\n" +
+	"\bDOWNLOAD\x10\f\x12\b\n" +
+	"\x04LIST\x10\r\x12\n" +
+	"\n" +
+	"\x06DELETE\x10\x0eB0Z.github.com/danmuck/dps_files/src/api/transportb\x06proto3"
 
 var (
 	file_src_api_transport_rpc_proto_rawDescOnce sync.Once

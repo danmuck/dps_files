@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync"
 	"time"
 
 	logs "github.com/danmuck/smplog"
@@ -16,6 +17,8 @@ type TCPHandler struct {
 	inbound  chan *RPC
 	coder    Coder
 	exit     chan any
+	mu       sync.Mutex
+	conns    map[string]net.Conn
 }
 
 // TCPHandler generator function
@@ -26,10 +29,39 @@ func NewTCPHandler(address string, exit chan any) *TCPHandler {
 		inbound: make(chan *RPC),
 		exit:    exit,
 		coder:   DefaultCoder{},
+		conns:   make(map[string]net.Conn),
 	}
 }
 
 // interface
+
+// Dial connects to a remote address, reusing an existing connection if available.
+func (h *TCPHandler) Dial(addr string) (net.Conn, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if conn, ok := h.conns[addr]; ok {
+		return conn, nil
+	}
+	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("dial %s: %w", addr, err)
+	}
+	h.conns[addr] = conn
+	return conn, nil
+}
+
+// Addr returns the listener's address if available, otherwise the configured address.
+func (h *TCPHandler) Addr() string {
+	if h.listener != nil {
+		return h.listener.Addr().String()
+	}
+	return h.address
+}
+
+// ReadRPC decodes a single RPC from the given connection.
+func (h *TCPHandler) ReadRPC(conn net.Conn) (*RPC, error) {
+	return h.coder.Decode(conn)
+}
 
 // close listener connection and inbound channel
 func (h *TCPHandler) Close() error {
@@ -119,7 +151,7 @@ Process:
 				tcpConn.SetReadDeadline(time.Now().Add(500 * time.Millisecond)) // Non-blocking
 			}
 
-			data, err := reader.Peek(2)
+			data, err := reader.Peek(4)
 			if err != nil {
 				if opErr, ok := err.(*net.OpError); ok && opErr.Timeout() {
 					// Timeout, continue to check exit

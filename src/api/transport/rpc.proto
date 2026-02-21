@@ -21,6 +21,10 @@ enum Command {
     REQUEST_VOTE = 8;
     APPEND_ENTRIES = 9;
     INSTALL_SNAPSHOT = 10;
+    UPLOAD = 11;
+    DOWNLOAD = 12;
+    LIST = 13;
+    DELETE = 14;
 }
 
 message NodeInfo {

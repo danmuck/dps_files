@@ -15,7 +15,7 @@ func TestTCPHandlerListenAndAccept(t *testing.T) {
 	}
 
 	// Verify we can connect to it
-	addr := handler.listener.Addr().String()
+	addr := handler.Addr()
 	conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
 	if err != nil {
 		t.Fatalf("Failed to connect to handler: %v", err)
@@ -36,7 +36,7 @@ func TestTCPHandlerSendReceive(t *testing.T) {
 		t.Fatalf("ListenAndAccept failed: %v", err)
 	}
 
-	addr := handler.listener.Addr().String()
+	addr := handler.Addr()
 
 	// Connect a client
 	conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
@@ -87,4 +87,46 @@ func TestTCPHandlerSendReceive(t *testing.T) {
 	close(exit)
 	time.Sleep(600 * time.Millisecond)
 	handler.Close()
+}
+
+func TestTCPHandler_DialAndSend(t *testing.T) {
+	exit := make(chan any)
+	defer close(exit)
+
+	server := NewTCPHandler("localhost:0", exit)
+	if err := server.ListenAndAccept(); err != nil {
+		t.Fatalf("ListenAndAccept: %v", err)
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	serverAddr := server.Addr()
+
+	clientExit := make(chan any)
+	defer close(clientExit)
+	client := NewTCPHandler("localhost:0", clientExit)
+
+	conn, err := client.Dial(serverAddr)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+
+	rpc := &RPC{
+		Meta:    &RPCT{Command: Command_UPLOAD, Protocol: Protocol_Kademlia},
+		Payload: []byte("test payload"),
+	}
+	if err := client.Send(conn, rpc); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	select {
+	case got := <-server.ProcessRPC():
+		if got.Meta.Command != Command_UPLOAD {
+			t.Fatalf("expected UPLOAD, got %v", got.Meta.Command)
+		}
+		if string(got.Payload) != "test payload" {
+			t.Fatalf("expected 'test payload', got %q", got.Payload)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for RPC")
+	}
 }
