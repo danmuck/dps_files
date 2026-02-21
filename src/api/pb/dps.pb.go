@@ -722,6 +722,443 @@ func (x *ListDirResponse) GetEntries() []*DirEntry {
 	return nil
 }
 
+type VerifyRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *VerifyRequest) Reset() {
+	*x = VerifyRequest{}
+	mi := &file_dps_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VerifyRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VerifyRequest) ProtoMessage() {}
+
+func (x *VerifyRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_dps_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VerifyRequest.ProtoReflect.Descriptor instead.
+func (*VerifyRequest) Descriptor() ([]byte, []int) {
+	return file_dps_proto_rawDescGZIP(), []int{14}
+}
+
+type VerifyError struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ChunkIndex    uint64                 `protobuf:"varint,1,opt,name=chunk_index,json=chunkIndex,proto3" json:"chunk_index,omitempty"`
+	FileName      string                 `protobuf:"bytes,2,opt,name=file_name,json=fileName,proto3" json:"file_name,omitempty"`
+	Error         string                 `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *VerifyError) Reset() {
+	*x = VerifyError{}
+	mi := &file_dps_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VerifyError) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VerifyError) ProtoMessage() {}
+
+func (x *VerifyError) ProtoReflect() protoreflect.Message {
+	mi := &file_dps_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VerifyError.ProtoReflect.Descriptor instead.
+func (*VerifyError) Descriptor() ([]byte, []int) {
+	return file_dps_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *VerifyError) GetChunkIndex() uint64 {
+	if x != nil {
+		return x.ChunkIndex
+	}
+	return 0
+}
+
+func (x *VerifyError) GetFileName() string {
+	if x != nil {
+		return x.FileName
+	}
+	return ""
+}
+
+func (x *VerifyError) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+type VerifyResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Errors        []*VerifyError         `protobuf:"bytes,1,rep,name=errors,proto3" json:"errors,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *VerifyResponse) Reset() {
+	*x = VerifyResponse{}
+	mi := &file_dps_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VerifyResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VerifyResponse) ProtoMessage() {}
+
+func (x *VerifyResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_dps_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VerifyResponse.ProtoReflect.Descriptor instead.
+func (*VerifyResponse) Descriptor() ([]byte, []int) {
+	return file_dps_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *VerifyResponse) GetErrors() []*VerifyError {
+	if x != nil {
+		return x.Errors
+	}
+	return nil
+}
+
+type ExpireRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExpireRequest) Reset() {
+	*x = ExpireRequest{}
+	mi := &file_dps_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExpireRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExpireRequest) ProtoMessage() {}
+
+func (x *ExpireRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_dps_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExpireRequest.ProtoReflect.Descriptor instead.
+func (*ExpireRequest) Descriptor() ([]byte, []int) {
+	return file_dps_proto_rawDescGZIP(), []int{17}
+}
+
+type ExpireResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Removed       int64                  `protobuf:"varint,1,opt,name=removed,proto3" json:"removed,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExpireResponse) Reset() {
+	*x = ExpireResponse{}
+	mi := &file_dps_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExpireResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExpireResponse) ProtoMessage() {}
+
+func (x *ExpireResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_dps_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExpireResponse.ProtoReflect.Descriptor instead.
+func (*ExpireResponse) Descriptor() ([]byte, []int) {
+	return file_dps_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *ExpireResponse) GetRemoved() int64 {
+	if x != nil {
+		return x.Removed
+	}
+	return 0
+}
+
+// deep=true removes .kdht + metadata + cache; false removes .kdht only.
+type CleanRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Deep          bool                   `protobuf:"varint,1,opt,name=deep,proto3" json:"deep,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CleanRequest) Reset() {
+	*x = CleanRequest{}
+	mi := &file_dps_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CleanRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CleanRequest) ProtoMessage() {}
+
+func (x *CleanRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_dps_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CleanRequest.ProtoReflect.Descriptor instead.
+func (*CleanRequest) Descriptor() ([]byte, []int) {
+	return file_dps_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *CleanRequest) GetDeep() bool {
+	if x != nil {
+		return x.Deep
+	}
+	return false
+}
+
+type CleanResponse struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	RemovedKdht     int64                  `protobuf:"varint,1,opt,name=removed_kdht,json=removedKdht,proto3" json:"removed_kdht,omitempty"`
+	RemovedMetadata int64                  `protobuf:"varint,2,opt,name=removed_metadata,json=removedMetadata,proto3" json:"removed_metadata,omitempty"`
+	RemovedCache    int64                  `protobuf:"varint,3,opt,name=removed_cache,json=removedCache,proto3" json:"removed_cache,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *CleanResponse) Reset() {
+	*x = CleanResponse{}
+	mi := &file_dps_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CleanResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CleanResponse) ProtoMessage() {}
+
+func (x *CleanResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_dps_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CleanResponse.ProtoReflect.Descriptor instead.
+func (*CleanResponse) Descriptor() ([]byte, []int) {
+	return file_dps_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *CleanResponse) GetRemovedKdht() int64 {
+	if x != nil {
+		return x.RemovedKdht
+	}
+	return 0
+}
+
+func (x *CleanResponse) GetRemovedMetadata() int64 {
+	if x != nil {
+		return x.RemovedMetadata
+	}
+	return 0
+}
+
+func (x *CleanResponse) GetRemovedCache() int64 {
+	if x != nil {
+		return x.RemovedCache
+	}
+	return 0
+}
+
+type StatsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StatsRequest) Reset() {
+	*x = StatsRequest{}
+	mi := &file_dps_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StatsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StatsRequest) ProtoMessage() {}
+
+func (x *StatsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_dps_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StatsRequest.ProtoReflect.Descriptor instead.
+func (*StatsRequest) Descriptor() ([]byte, []int) {
+	return file_dps_proto_rawDescGZIP(), []int{21}
+}
+
+type StatsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	DataBytes     uint64                 `protobuf:"varint,1,opt,name=data_bytes,json=dataBytes,proto3" json:"data_bytes,omitempty"`
+	MetadataBytes uint64                 `protobuf:"varint,2,opt,name=metadata_bytes,json=metadataBytes,proto3" json:"metadata_bytes,omitempty"`
+	CacheBytes    uint64                 `protobuf:"varint,3,opt,name=cache_bytes,json=cacheBytes,proto3" json:"cache_bytes,omitempty"`
+	TotalBytes    uint64                 `protobuf:"varint,4,opt,name=total_bytes,json=totalBytes,proto3" json:"total_bytes,omitempty"`
+	FileCount     int64                  `protobuf:"varint,5,opt,name=file_count,json=fileCount,proto3" json:"file_count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StatsResponse) Reset() {
+	*x = StatsResponse{}
+	mi := &file_dps_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StatsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StatsResponse) ProtoMessage() {}
+
+func (x *StatsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_dps_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StatsResponse.ProtoReflect.Descriptor instead.
+func (*StatsResponse) Descriptor() ([]byte, []int) {
+	return file_dps_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *StatsResponse) GetDataBytes() uint64 {
+	if x != nil {
+		return x.DataBytes
+	}
+	return 0
+}
+
+func (x *StatsResponse) GetMetadataBytes() uint64 {
+	if x != nil {
+		return x.MetadataBytes
+	}
+	return 0
+}
+
+func (x *StatsResponse) GetCacheBytes() uint64 {
+	if x != nil {
+		return x.CacheBytes
+	}
+	return 0
+}
+
+func (x *StatsResponse) GetTotalBytes() uint64 {
+	if x != nil {
+		return x.TotalBytes
+	}
+	return 0
+}
+
+func (x *StatsResponse) GetFileCount() int64 {
+	if x != nil {
+		return x.FileCount
+	}
+	return 0
+}
+
 var File_dps_proto protoreflect.FileDescriptor
 
 const file_dps_proto_rawDesc = "" +
@@ -765,14 +1202,46 @@ const file_dps_proto_rawDesc = "" +
 	"\x04type\x18\x04 \x01(\tR\x04type\x12\x12\n" +
 	"\x04size\x18\x05 \x01(\x04R\x04size\":\n" +
 	"\x0fListDirResponse\x12'\n" +
-	"\aentries\x18\x01 \x03(\v2\r.dps.DirEntryR\aentries2\xe7\x03\n" +
+	"\aentries\x18\x01 \x03(\v2\r.dps.DirEntryR\aentries\"\x0f\n" +
+	"\rVerifyRequest\"a\n" +
+	"\vVerifyError\x12\x1f\n" +
+	"\vchunk_index\x18\x01 \x01(\x04R\n" +
+	"chunkIndex\x12\x1b\n" +
+	"\tfile_name\x18\x02 \x01(\tR\bfileName\x12\x14\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\":\n" +
+	"\x0eVerifyResponse\x12(\n" +
+	"\x06errors\x18\x01 \x03(\v2\x10.dps.VerifyErrorR\x06errors\"\x0f\n" +
+	"\rExpireRequest\"*\n" +
+	"\x0eExpireResponse\x12\x18\n" +
+	"\aremoved\x18\x01 \x01(\x03R\aremoved\"\"\n" +
+	"\fCleanRequest\x12\x12\n" +
+	"\x04deep\x18\x01 \x01(\bR\x04deep\"\x82\x01\n" +
+	"\rCleanResponse\x12!\n" +
+	"\fremoved_kdht\x18\x01 \x01(\x03R\vremovedKdht\x12)\n" +
+	"\x10removed_metadata\x18\x02 \x01(\x03R\x0fremovedMetadata\x12#\n" +
+	"\rremoved_cache\x18\x03 \x01(\x03R\fremovedCache\"\x0e\n" +
+	"\fStatsRequest\"\xb6\x01\n" +
+	"\rStatsResponse\x12\x1d\n" +
+	"\n" +
+	"data_bytes\x18\x01 \x01(\x04R\tdataBytes\x12%\n" +
+	"\x0emetadata_bytes\x18\x02 \x01(\x04R\rmetadataBytes\x12\x1f\n" +
+	"\vcache_bytes\x18\x03 \x01(\x04R\n" +
+	"cacheBytes\x12\x1f\n" +
+	"\vtotal_bytes\x18\x04 \x01(\x04R\n" +
+	"totalBytes\x12\x1d\n" +
+	"\n" +
+	"file_count\x18\x05 \x01(\x03R\tfileCount2\x99\x06\n" +
 	"\bDPSFiles\x12G\n" +
 	"\x06Upload\x12\x10.dps.UploadChunk\x1a\x13.dps.UploadResponse\"\x14\x82\xd3\xe4\x93\x02\x0e:\x01*\"\t/v1/files(\x01\x12e\n" +
 	"\bDownload\x12\x14.dps.DownloadRequest\x1a\x0e.dps.DataChunk\"1\x82\xd3\xe4\x93\x02+Z\x17\x12\x15/v1/files/name/{name}\x12\x10/v1/files/{hash}0\x01\x12K\n" +
 	"\x06Delete\x12\x12.dps.DeleteRequest\x1a\x13.dps.DeleteResponse\"\x18\x82\xd3\xe4\x93\x02\x12*\x10/v1/files/{hash}\x12>\n" +
 	"\x04List\x12\x10.dps.ListRequest\x1a\x11.dps.ListResponse\"\x11\x82\xd3\xe4\x93\x02\v\x12\t/v1/files\x12O\n" +
 	"\tUploadDir\x12\x15.dps.UploadDirRequest\x1a\x16.dps.UploadDirResponse\"\x13\x82\xd3\xe4\x93\x02\r:\x01*\"\b/v1/dirs\x12M\n" +
-	"\aListDir\x12\x13.dps.ListDirRequest\x1a\x14.dps.ListDirResponse\"\x17\x82\xd3\xe4\x93\x02\x11\x12\x0f/v1/dirs/{hash}B)Z'github.com/danmuck/dps_files/src/api/pbb\x06proto3"
+	"\aListDir\x12\x13.dps.ListDirRequest\x1a\x14.dps.ListDirResponse\"\x17\x82\xd3\xe4\x93\x02\x11\x12\x0f/v1/dirs/{hash}\x12K\n" +
+	"\x06Verify\x12\x12.dps.VerifyRequest\x1a\x13.dps.VerifyResponse\"\x18\x82\xd3\xe4\x93\x02\x12\x12\x10/v1/admin/verify\x12N\n" +
+	"\x06Expire\x12\x12.dps.ExpireRequest\x1a\x13.dps.ExpireResponse\"\x1b\x82\xd3\xe4\x93\x02\x15:\x01*\"\x10/v1/admin/expire\x12J\n" +
+	"\x05Clean\x12\x11.dps.CleanRequest\x1a\x12.dps.CleanResponse\"\x1a\x82\xd3\xe4\x93\x02\x14:\x01*\"\x0f/v1/admin/clean\x12G\n" +
+	"\x05Stats\x12\x11.dps.StatsRequest\x1a\x12.dps.StatsResponse\"\x17\x82\xd3\xe4\x93\x02\x11\x12\x0f/v1/admin/statsB)Z'github.com/danmuck/dps_files/src/api/pbb\x06proto3"
 
 var (
 	file_dps_proto_rawDescOnce sync.Once
@@ -786,7 +1255,7 @@ func file_dps_proto_rawDescGZIP() []byte {
 	return file_dps_proto_rawDescData
 }
 
-var file_dps_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_dps_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_dps_proto_goTypes = []any{
 	(*UploadChunk)(nil),       // 0: dps.UploadChunk
 	(*UploadResponse)(nil),    // 1: dps.UploadResponse
@@ -802,27 +1271,45 @@ var file_dps_proto_goTypes = []any{
 	(*ListDirRequest)(nil),    // 11: dps.ListDirRequest
 	(*DirEntry)(nil),          // 12: dps.DirEntry
 	(*ListDirResponse)(nil),   // 13: dps.ListDirResponse
+	(*VerifyRequest)(nil),     // 14: dps.VerifyRequest
+	(*VerifyError)(nil),       // 15: dps.VerifyError
+	(*VerifyResponse)(nil),    // 16: dps.VerifyResponse
+	(*ExpireRequest)(nil),     // 17: dps.ExpireRequest
+	(*ExpireResponse)(nil),    // 18: dps.ExpireResponse
+	(*CleanRequest)(nil),      // 19: dps.CleanRequest
+	(*CleanResponse)(nil),     // 20: dps.CleanResponse
+	(*StatsRequest)(nil),      // 21: dps.StatsRequest
+	(*StatsResponse)(nil),     // 22: dps.StatsResponse
 }
 var file_dps_proto_depIdxs = []int32{
 	7,  // 0: dps.ListResponse.files:type_name -> dps.FileEntry
 	12, // 1: dps.ListDirResponse.entries:type_name -> dps.DirEntry
-	0,  // 2: dps.DPSFiles.Upload:input_type -> dps.UploadChunk
-	2,  // 3: dps.DPSFiles.Download:input_type -> dps.DownloadRequest
-	4,  // 4: dps.DPSFiles.Delete:input_type -> dps.DeleteRequest
-	6,  // 5: dps.DPSFiles.List:input_type -> dps.ListRequest
-	9,  // 6: dps.DPSFiles.UploadDir:input_type -> dps.UploadDirRequest
-	11, // 7: dps.DPSFiles.ListDir:input_type -> dps.ListDirRequest
-	1,  // 8: dps.DPSFiles.Upload:output_type -> dps.UploadResponse
-	3,  // 9: dps.DPSFiles.Download:output_type -> dps.DataChunk
-	5,  // 10: dps.DPSFiles.Delete:output_type -> dps.DeleteResponse
-	8,  // 11: dps.DPSFiles.List:output_type -> dps.ListResponse
-	10, // 12: dps.DPSFiles.UploadDir:output_type -> dps.UploadDirResponse
-	13, // 13: dps.DPSFiles.ListDir:output_type -> dps.ListDirResponse
-	8,  // [8:14] is the sub-list for method output_type
-	2,  // [2:8] is the sub-list for method input_type
-	2,  // [2:2] is the sub-list for extension type_name
-	2,  // [2:2] is the sub-list for extension extendee
-	0,  // [0:2] is the sub-list for field type_name
+	15, // 2: dps.VerifyResponse.errors:type_name -> dps.VerifyError
+	0,  // 3: dps.DPSFiles.Upload:input_type -> dps.UploadChunk
+	2,  // 4: dps.DPSFiles.Download:input_type -> dps.DownloadRequest
+	4,  // 5: dps.DPSFiles.Delete:input_type -> dps.DeleteRequest
+	6,  // 6: dps.DPSFiles.List:input_type -> dps.ListRequest
+	9,  // 7: dps.DPSFiles.UploadDir:input_type -> dps.UploadDirRequest
+	11, // 8: dps.DPSFiles.ListDir:input_type -> dps.ListDirRequest
+	14, // 9: dps.DPSFiles.Verify:input_type -> dps.VerifyRequest
+	17, // 10: dps.DPSFiles.Expire:input_type -> dps.ExpireRequest
+	19, // 11: dps.DPSFiles.Clean:input_type -> dps.CleanRequest
+	21, // 12: dps.DPSFiles.Stats:input_type -> dps.StatsRequest
+	1,  // 13: dps.DPSFiles.Upload:output_type -> dps.UploadResponse
+	3,  // 14: dps.DPSFiles.Download:output_type -> dps.DataChunk
+	5,  // 15: dps.DPSFiles.Delete:output_type -> dps.DeleteResponse
+	8,  // 16: dps.DPSFiles.List:output_type -> dps.ListResponse
+	10, // 17: dps.DPSFiles.UploadDir:output_type -> dps.UploadDirResponse
+	13, // 18: dps.DPSFiles.ListDir:output_type -> dps.ListDirResponse
+	16, // 19: dps.DPSFiles.Verify:output_type -> dps.VerifyResponse
+	18, // 20: dps.DPSFiles.Expire:output_type -> dps.ExpireResponse
+	20, // 21: dps.DPSFiles.Clean:output_type -> dps.CleanResponse
+	22, // 22: dps.DPSFiles.Stats:output_type -> dps.StatsResponse
+	13, // [13:23] is the sub-list for method output_type
+	3,  // [3:13] is the sub-list for method input_type
+	3,  // [3:3] is the sub-list for extension type_name
+	3,  // [3:3] is the sub-list for extension extendee
+	0,  // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_dps_proto_init() }
@@ -836,7 +1323,7 @@ func file_dps_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_dps_proto_rawDesc), len(file_dps_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   14,
+			NumMessages:   23,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

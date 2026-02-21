@@ -25,6 +25,10 @@ const (
 	DPSFiles_List_FullMethodName      = "/dps.DPSFiles/List"
 	DPSFiles_UploadDir_FullMethodName = "/dps.DPSFiles/UploadDir"
 	DPSFiles_ListDir_FullMethodName   = "/dps.DPSFiles/ListDir"
+	DPSFiles_Verify_FullMethodName    = "/dps.DPSFiles/Verify"
+	DPSFiles_Expire_FullMethodName    = "/dps.DPSFiles/Expire"
+	DPSFiles_Clean_FullMethodName     = "/dps.DPSFiles/Clean"
+	DPSFiles_Stats_FullMethodName     = "/dps.DPSFiles/Stats"
 )
 
 // DPSFilesClient is the client API for DPSFiles service.
@@ -37,6 +41,10 @@ type DPSFilesClient interface {
 	List(ctx context.Context, in *ListRequest, opts ...grpc.CallOption) (*ListResponse, error)
 	UploadDir(ctx context.Context, in *UploadDirRequest, opts ...grpc.CallOption) (*UploadDirResponse, error)
 	ListDir(ctx context.Context, in *ListDirRequest, opts ...grpc.CallOption) (*ListDirResponse, error)
+	Verify(ctx context.Context, in *VerifyRequest, opts ...grpc.CallOption) (*VerifyResponse, error)
+	Expire(ctx context.Context, in *ExpireRequest, opts ...grpc.CallOption) (*ExpireResponse, error)
+	Clean(ctx context.Context, in *CleanRequest, opts ...grpc.CallOption) (*CleanResponse, error)
+	Stats(ctx context.Context, in *StatsRequest, opts ...grpc.CallOption) (*StatsResponse, error)
 }
 
 type dPSFilesClient struct {
@@ -119,6 +127,46 @@ func (c *dPSFilesClient) ListDir(ctx context.Context, in *ListDirRequest, opts .
 	return out, nil
 }
 
+func (c *dPSFilesClient) Verify(ctx context.Context, in *VerifyRequest, opts ...grpc.CallOption) (*VerifyResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(VerifyResponse)
+	err := c.cc.Invoke(ctx, DPSFiles_Verify_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dPSFilesClient) Expire(ctx context.Context, in *ExpireRequest, opts ...grpc.CallOption) (*ExpireResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ExpireResponse)
+	err := c.cc.Invoke(ctx, DPSFiles_Expire_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dPSFilesClient) Clean(ctx context.Context, in *CleanRequest, opts ...grpc.CallOption) (*CleanResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CleanResponse)
+	err := c.cc.Invoke(ctx, DPSFiles_Clean_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dPSFilesClient) Stats(ctx context.Context, in *StatsRequest, opts ...grpc.CallOption) (*StatsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(StatsResponse)
+	err := c.cc.Invoke(ctx, DPSFiles_Stats_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DPSFilesServer is the server API for DPSFiles service.
 // All implementations must embed UnimplementedDPSFilesServer
 // for forward compatibility.
@@ -129,6 +177,10 @@ type DPSFilesServer interface {
 	List(context.Context, *ListRequest) (*ListResponse, error)
 	UploadDir(context.Context, *UploadDirRequest) (*UploadDirResponse, error)
 	ListDir(context.Context, *ListDirRequest) (*ListDirResponse, error)
+	Verify(context.Context, *VerifyRequest) (*VerifyResponse, error)
+	Expire(context.Context, *ExpireRequest) (*ExpireResponse, error)
+	Clean(context.Context, *CleanRequest) (*CleanResponse, error)
+	Stats(context.Context, *StatsRequest) (*StatsResponse, error)
 	mustEmbedUnimplementedDPSFilesServer()
 }
 
@@ -156,6 +208,18 @@ func (UnimplementedDPSFilesServer) UploadDir(context.Context, *UploadDirRequest)
 }
 func (UnimplementedDPSFilesServer) ListDir(context.Context, *ListDirRequest) (*ListDirResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListDir not implemented")
+}
+func (UnimplementedDPSFilesServer) Verify(context.Context, *VerifyRequest) (*VerifyResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Verify not implemented")
+}
+func (UnimplementedDPSFilesServer) Expire(context.Context, *ExpireRequest) (*ExpireResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Expire not implemented")
+}
+func (UnimplementedDPSFilesServer) Clean(context.Context, *CleanRequest) (*CleanResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Clean not implemented")
+}
+func (UnimplementedDPSFilesServer) Stats(context.Context, *StatsRequest) (*StatsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Stats not implemented")
 }
 func (UnimplementedDPSFilesServer) mustEmbedUnimplementedDPSFilesServer() {}
 func (UnimplementedDPSFilesServer) testEmbeddedByValue()                  {}
@@ -268,6 +332,78 @@ func _DPSFiles_ListDir_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DPSFiles_Verify_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(VerifyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DPSFilesServer).Verify(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DPSFiles_Verify_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DPSFilesServer).Verify(ctx, req.(*VerifyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DPSFiles_Expire_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ExpireRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DPSFilesServer).Expire(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DPSFiles_Expire_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DPSFilesServer).Expire(ctx, req.(*ExpireRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DPSFiles_Clean_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CleanRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DPSFilesServer).Clean(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DPSFiles_Clean_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DPSFilesServer).Clean(ctx, req.(*CleanRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DPSFiles_Stats_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StatsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DPSFilesServer).Stats(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DPSFiles_Stats_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DPSFilesServer).Stats(ctx, req.(*StatsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DPSFiles_ServiceDesc is the grpc.ServiceDesc for DPSFiles service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -290,6 +426,22 @@ var DPSFiles_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListDir",
 			Handler:    _DPSFiles_ListDir_Handler,
+		},
+		{
+			MethodName: "Verify",
+			Handler:    _DPSFiles_Verify_Handler,
+		},
+		{
+			MethodName: "Expire",
+			Handler:    _DPSFiles_Expire_Handler,
+		},
+		{
+			MethodName: "Clean",
+			Handler:    _DPSFiles_Clean_Handler,
+		},
+		{
+			MethodName: "Stats",
+			Handler:    _DPSFiles_Stats_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
