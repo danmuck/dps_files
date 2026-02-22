@@ -41,9 +41,6 @@ func loadRemotesConfig(path string) (RemotesConfig, error) {
 type MenuAction string
 
 const (
-	ModeRun    = "run"
-	ModeRemote = "remote"
-
 	ActionUpload    MenuAction = "upload"
 	ActionClean     MenuAction = "clean"
 	ActionDeepClean MenuAction = "deep-clean"
@@ -58,20 +55,18 @@ const (
 const defaultRuntimeTTLSeconds uint64 = 1800
 
 type RuntimeConfig struct {
-	TUI               tui.TUI
-	UploadDirectory   string
-	RunAll            bool
-	DefaultFileIndex  int
-	Mode              string
-	ReassembleEnabled bool
-	CleanCopyFiles    bool
-	CleanKDHTOnExit   bool
-	Action            MenuAction
-	ActionProvided    bool
-	TTLSeconds        uint64
-	KeyStore          key_store.KeyStoreConfig
-	RemoteAddr        string        // active remote host:port
-	KnownRemotes      []RemoteEntry // loaded from local/remotes.toml
+	TUI              tui.TUI
+	UploadDirectory  string
+	RunAll           bool
+	DefaultFileIndex int
+	ServerAddr       string // active server host:port (embedded or remote)
+	ServerLabel      string // display label for the active server
+	Action           MenuAction
+	ActionProvided   bool
+	TTLSeconds       uint64
+	KeyStore         key_store.KeyStoreConfig
+	RemoteAddr       string        // CLI-provided remote override
+	KnownRemotes     []RemoteEntry // loaded from local/remotes.toml
 }
 
 func defaultConfig() RuntimeConfig {
@@ -80,30 +75,24 @@ func defaultConfig() RuntimeConfig {
 	ksCfg.Verbose = false
 	ksCfg.DefaultTTLSeconds = defaultRuntimeTTLSeconds
 	return RuntimeConfig{
-		UploadDirectory:   "./local/upload/",
-		RunAll:            false,
-		DefaultFileIndex:  0,
-		Mode:              ModeRun,
-		ReassembleEnabled: false,
-		CleanCopyFiles:    true,
-		CleanKDHTOnExit:   false,
-		Action:            ActionView,
-		ActionProvided:    false,
-		TTLSeconds:        defaultRuntimeTTLSeconds,
-		KeyStore:          ksCfg,
+		UploadDirectory:  "./local/upload/",
+		RunAll:           false,
+		DefaultFileIndex: 0,
+		Action:           ActionView,
+		ActionProvided:   false,
+		TTLSeconds:       defaultRuntimeTTLSeconds,
+		KeyStore:         ksCfg,
 	}
 }
 
 var defaultRuntimeConfig = defaultConfig()
 
-const REASSEMBLE_FLAG = "--reassemble"
 const TTL_SECONDS_FLAG = "--ttl-seconds"
 const VERBOSE_FLAG = "--verbose"
 const REMOTE_ADDR_FLAG = "--remote-addr"
 
 func parseCLI(args []string, cfg RuntimeConfig) (RuntimeConfig, error) {
 	runtimeCfg := cfg
-	modeProvided := false
 	actionProvided := false
 
 	for i := 0; i < len(args); i++ {
@@ -111,11 +100,6 @@ func parseCLI(args []string, cfg RuntimeConfig) (RuntimeConfig, error) {
 
 		if arg == VERBOSE_FLAG {
 			runtimeCfg.KeyStore.Verbose = true
-			continue
-		}
-
-		if arg == REASSEMBLE_FLAG {
-			runtimeCfg.ReassembleEnabled = true
 			continue
 		}
 
@@ -166,12 +150,6 @@ func parseCLI(args []string, cfg RuntimeConfig) (RuntimeConfig, error) {
 
 		normalized := strings.ToLower(strings.TrimSpace(arg))
 		switch normalized {
-		case ModeRun, ModeRemote:
-			if modeProvided {
-				return runtimeCfg, fmt.Errorf("multiple modes provided: %q", arg)
-			}
-			runtimeCfg.Mode = normalized
-			modeProvided = true
 		case string(ActionUpload):
 			if actionProvided {
 				return runtimeCfg, fmt.Errorf("multiple actions provided: %q", arg)
@@ -252,19 +230,17 @@ func printUsage(indexedFiles []string, cfg RuntimeConfig) {
 	sorted := append([]string(nil), indexedFiles...)
 	sort.Strings(sorted)
 
-	fmt.Printf("Usage: go run main.go [run|remote] [upload|clean|deep-clean|view|stats|verify|delete|expire|download] [%s] [%s] [%s N]\n",
-		REASSEMBLE_FLAG,
+	fmt.Printf("Usage: go run main.go [upload|clean|deep-clean|view|stats|verify|delete|expire|download] [%s] [%s N] [%s addr]\n",
 		VERBOSE_FLAG,
 		TTL_SECONDS_FLAG,
+		REMOTE_ADDR_FLAG,
 	)
-	fmt.Printf("No mode defaults to %q.\n", cfg.Mode)
 	fmt.Printf("No action defaults to %q.\n", cfg.Action)
-	fmt.Printf("Reassembly defaults to disabled; enable with %q.\n", REASSEMBLE_FLAG)
 	fmt.Printf("Verbose logging defaults to disabled; enable with %q.\n", VERBOSE_FLAG)
 	fmt.Printf("Default TTL is %d seconds; override with %q.\n", cfg.TTLSeconds, TTL_SECONDS_FLAG)
 	fmt.Printf("Reassembled copy outputs are written to %s.\n", cfg.KeyStore.StorageDir)
 	fmt.Printf("\nUpload action indexes %s and excludes directories + copy.* files.\n", cfg.UploadDirectory)
-	fmt.Println("Actions: upload (path prompt; empty = browse upload dir), clean (.kdht only), deep-clean (.kdht + metadata + cache), view (inspect metadata + optional reassemble), stats (storage/system stats), verify (deep integrity scan), delete (remove a single file), expire (sweep TTL-expired files), download (write stored file to disk).")
+	fmt.Println("Actions: upload (path prompt; empty = browse upload dir), clean (.kdht only), deep-clean (.kdht + metadata + cache), view (inspect metadata), stats (storage/system stats), verify (deep integrity scan), delete (remove a single file), expire (sweep TTL-expired files), download (write stored file to disk).")
 
 	if len(sorted) == 0 {
 		fmt.Println("\nNo indexable upload files were found.")

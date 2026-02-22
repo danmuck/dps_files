@@ -31,7 +31,7 @@ type StorageStats struct {
 	TotalBytes    uint64
 }
 
-func executeStatsAction(cfg RuntimeConfig) error {
+func executeStatsAction(cfg RuntimeConfig, client *GRPCClient) error {
 	runtimeStats := collectRuntimeStats()
 	storageStats, err := collectStorageStats(cfg.KeyStore.StorageDir)
 	if err != nil {
@@ -59,25 +59,18 @@ func executeStatsAction(cfg RuntimeConfig) error {
 	t.FieldFU("other in storage/", formatBytes(storageStats.OtherBytes)); nl()
 	t.FieldFU("total storage/", formatBytes(storageStats.TotalBytes)); nl()
 
-	if cfg.Mode == ModeRemote && cfg.RemoteAddr != "" {
-		t.MenuTitleTC(&tui.TitleParams{Text: fmt.Sprintf("Remote Server: %s", cfg.RemoteAddr)})
-		client, dialErr := NewGRPCClient(cfg.RemoteAddr)
-		if dialErr != nil {
-			t.StatusErrorFU(fmt.Sprintf("Status: unreachable (%v)", dialErr)); nl()
-		} else {
-			defer client.Close()
-			rs, statsErr := client.RemoteStorageStats()
-			if statsErr != nil {
-				t.StatusErrorFU(fmt.Sprintf("Status: unreachable (%v)", statsErr)); nl()
-			} else {
-				t.StatusInfoFU("Status: reachable"); nl()
-				t.FieldFU("Files", rs.FileCount); nl()
-				t.FieldFU("data/", formatBytes(rs.DataBytes)); nl()
-				t.FieldFU("metadata/", formatBytes(rs.MetadataBytes)); nl()
-				t.FieldFU(".cache/", formatBytes(rs.CacheBytes)); nl()
-				t.FieldFU("total", formatBytes(rs.TotalBytes)); nl()
-			}
-		}
+	// Server stats — always shown.
+	t.MenuTitleTC(&tui.TitleParams{Text: fmt.Sprintf("Server: %s", cfg.ServerAddr)})
+	rs, statsErr := client.RemoteStorageStats()
+	if statsErr != nil {
+		t.StatusErrorFU(fmt.Sprintf("Status: unreachable (%v)", statsErr)); nl()
+	} else {
+		t.StatusInfoFU("Status: reachable"); nl()
+		t.FieldFU("Files", rs.FileCount); nl()
+		t.FieldFU("data/", formatBytes(rs.DataBytes)); nl()
+		t.FieldFU("metadata/", formatBytes(rs.MetadataBytes)); nl()
+		t.FieldFU(".cache/", formatBytes(rs.CacheBytes)); nl()
+		t.FieldFU("total", formatBytes(rs.TotalBytes)); nl()
 	}
 
 	return nil

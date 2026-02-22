@@ -13,7 +13,6 @@ import (
 	"github.com/danmuck/dps_files/cmd/internal/logcfg"
 	"github.com/danmuck/dps_files/cmd/internal/tuicfg"
 	"github.com/danmuck/dps_files/src/api/nodes"
-	"github.com/danmuck/dps_files/src/key_store"
 	tui "github.com/danmuck/tui_go"
 	logs "github.com/danmuck/smplog"
 )
@@ -68,26 +67,21 @@ func main() {
 	}
 	defer cn.Shutdown()
 
-	// Extract the KeyStore from the local server for TUI operations.
-	keystore := cn.LocalServer().RawKeyStore()
-	if keystore == nil {
-		logs.Fatalf(nil, "Failed to access local KeyStore from client node")
+	// Determine the server address: use embedded server by default, CLI remote overrides.
+	cfg.ServerAddr = cn.LocalServer().Addr()
+	cfg.ServerLabel = fmt.Sprintf("local @ %s", cfg.ServerAddr)
+
+	if cfg.RemoteAddr != "" {
+		cfg.ServerAddr = cfg.RemoteAddr
+		cfg.ServerLabel = fmt.Sprintf("remote @ %s", cfg.ServerAddr)
 	}
 
-	// Override the keystore config with the CLI-parsed config.
-	// The ClientNode created its own KeyStore with defaults from the storage dir,
-	// but we need to apply CLI settings (verbose, TTL, etc.).
-	keystore.ApplyConfig(cfg.KeyStore)
-
-	logs.Printf("KeyStore initialized: %d file(s) loaded.\n", len(keystore.ListKnownFiles()))
-
-	if cfg.CleanKDHTOnExit {
-		defer func() {
-			if err := keystore.CleanupKDHT(); err != nil {
-				logs.Warnf("CleanupKDHT failed: %v", err)
-			}
-		}()
+	// Create the unified gRPC client.
+	client, err := NewGRPCClient(cfg.ServerAddr)
+	if err != nil {
+		logs.Fatalf(err, "Failed to connect to server %s", cfg.ServerAddr)
 	}
+	defer client.Close()
 
 	remotesCfg, remErr := loadRemotesConfig("./local/remotes.toml")
 	if remErr != nil {
@@ -95,18 +89,15 @@ func main() {
 	} else {
 		cfg.KnownRemotes = remotesCfg.Remotes
 	}
-	if cfg.Mode == ModeRemote && cfg.RemoteAddr == "" && len(cfg.KnownRemotes) > 0 {
-		cfg.RemoteAddr = cfg.KnownRemotes[0].Address
-	}
 
 	if shouldRunInteractiveSession(cfg, os.Stdin) {
-		if err := runInteractiveSession(cfg, keystore, os.Stdin); err != nil {
+		if err := runInteractiveSession(cfg, client, os.Stdin); err != nil {
 			logs.Fatalf(err, "Interactive session failed")
 		}
 		return
 	}
 
-	metadataCount, err := refreshMenuContext(cfg, keystore)
+	metadataCount, err := refreshMenuContext(cfg, client)
 	if err != nil {
 		logs.Fatalf(err, "Failed to prepare runtime context")
 	}
@@ -121,7 +112,7 @@ func main() {
 	cfg.Action = action
 
 	printRuntimeSummary(cfg, actionSource)
-	if err := executeActionOnce(cfg, keystore, os.Stdin); err != nil {
+	if err := executeActionOnce(cfg, client, os.Stdin); err != nil {
 		if errors.Is(err, errMenuBack) {
 			logs.Println("Action cancelled.")
 			return
@@ -134,12 +125,23 @@ func shouldRunInteractiveSession(cfg RuntimeConfig, input io.Reader) bool {
 	return !cfg.ActionProvided && isInteractiveReader(input)
 }
 
-func runInteractiveSession(cfg RuntimeConfig, keystore *key_store.KeyStore, input io.Reader) error {
+func runInteractiveSession(cfg RuntimeConfig, client *GRPCClient, input io.Reader) error {
 	reader := getBufferedReader(input)
 	clearTerminalIfInteractive(input)
 
+	currentAddr := cfg.ServerAddr
 	for {
-		metadataCount, err := refreshMenuContext(cfg, keystore)
+		if cfg.ServerAddr != currentAddr {
+			client.Close()
+			var err error
+			client, err = NewGRPCClient(cfg.ServerAddr)
+			if err != nil {
+				return fmt.Errorf("reconnect to %s: %w", cfg.ServerAddr, err)
+			}
+			currentAddr = cfg.ServerAddr
+		}
+
+		metadataCount, err := refreshMenuContext(cfg, client)
 		if err != nil {
 			return err
 		}
@@ -155,9 +157,21 @@ func runInteractiveSession(cfg RuntimeConfig, keystore *key_store.KeyStore, inpu
 		}
 
 		cfg.Action = action
+
+		// Reconnect if server was switched during the prompt loop.
+		if cfg.ServerAddr != currentAddr {
+			client.Close()
+			var reconnErr error
+			client, reconnErr = NewGRPCClient(cfg.ServerAddr)
+			if reconnErr != nil {
+				return fmt.Errorf("reconnect to %s: %w", cfg.ServerAddr, reconnErr)
+			}
+			currentAddr = cfg.ServerAddr
+		}
+
 		clearTerminalIfInteractive(input)
 		printRuntimeSummary(cfg, actionSource)
-		err = executeActionOnce(cfg, keystore, reader)
+		err = executeActionOnce(cfg, client, reader)
 		if err != nil && !errors.Is(err, errMenuBack) {
 			logs.Printf("\nAction %q failed: %v\n", cfg.Action, err)
 		}
@@ -168,20 +182,19 @@ func runInteractiveSession(cfg RuntimeConfig, keystore *key_store.KeyStore, inpu
 	}
 }
 
-func refreshMenuContext(cfg RuntimeConfig, keystore *key_store.KeyStore) (int, error) {
-	if err := keystore.ReloadLocalState(); err != nil {
-		return 0, fmt.Errorf("failed to reload keystore state: %w", err)
+func refreshMenuContext(cfg RuntimeConfig, client *GRPCClient) (int, error) {
+	entries, err := client.List()
+	if err != nil {
+		return 0, fmt.Errorf("list files: %w", err)
 	}
-	return len(keystore.ListKnownFiles()), nil
+	return len(entries), nil
 }
 
 func printRuntimeSummary(cfg RuntimeConfig, actionSource string) {
 	logs.Printf("\n")
-	cfg.TUI.FieldFU("Execution mode", cfg.Mode)
+	cfg.TUI.FieldFU("Server", cfg.ServerLabel)
 	logs.Printf("\n")
 	cfg.TUI.FieldFU("TTL seconds", cfg.TTLSeconds)
-	logs.Printf("\n")
-	cfg.TUI.FieldFU("Reassembly enabled", cfg.ReassembleEnabled)
 	logs.Printf("\n")
 	cfg.TUI.FieldFU("Action", actionSource)
 	logs.Printf("\n")
@@ -189,51 +202,36 @@ func printRuntimeSummary(cfg RuntimeConfig, actionSource string) {
 	logs.Printf("\n")
 }
 
-func executeActionOnce(cfg RuntimeConfig, keystore *key_store.KeyStore, input io.Reader) error {
+func executeActionOnce(cfg RuntimeConfig, client *GRPCClient, input io.Reader) error {
 	switch cfg.Action {
 	case ActionClean:
-		if cfg.Mode == ModeRemote {
-			return executeRemoteClean(cfg, false)
-		}
-		removed, err := cleanupAllKDHTFiles(cfg.KeyStore.StorageDir)
+		result, err := client.Clean(false)
 		if err != nil {
-			return fmt.Errorf("failed to clean .kdht files: %w", err)
+			return fmt.Errorf("clean: %w", err)
 		}
-		logs.Printf("Clean complete: removed %d .kdht file(s) from %s\n", removed, filepath.Join(cfg.KeyStore.StorageDir, "data"))
+		logs.Printf("Clean complete: removed %d .kdht file(s).\n", result.RemovedKDHT)
 		return nil
 	case ActionDeepClean:
-		if cfg.Mode == ModeRemote {
-			return executeRemoteClean(cfg, true)
-		}
-		result, err := deepCleanStorage(cfg.KeyStore.StorageDir)
+		result, err := client.Clean(true)
 		if err != nil {
-			return fmt.Errorf("failed to deep clean storage: %w", err)
+			return fmt.Errorf("deep clean: %w", err)
 		}
-		logs.Printf("Deep clean complete: removed %d .kdht, %d metadata file(s), %d cache file(s).\n",
-			result.RemovedKDHT,
-			result.RemovedMetadata,
-			result.RemovedCache,
-		)
+		logs.Printf("Deep clean complete: removed %d .kdht, %d metadata, %d cache file(s).\n",
+			result.RemovedKDHT, result.RemovedMetadata, result.RemovedCache)
 		return nil
 	case ActionStats:
-		if err := executeStatsAction(cfg); err != nil {
+		if err := executeStatsAction(cfg, client); err != nil {
 			return fmt.Errorf("failed to collect stats: %w", err)
 		}
 		return nil
 	case ActionVerify:
-		if cfg.Mode == ModeRemote {
-			return executeRemoteVerify(cfg)
-		}
-		return executeVerifyAction(cfg, keystore)
+		return executeVerifyAction(cfg, client)
 	case ActionDelete:
-		return executeDeleteAction(cfg, keystore, input)
+		return executeDeleteAction(cfg, client, input)
 	case ActionExpire:
-		if cfg.Mode == ModeRemote {
-			return executeRemoteExpire(cfg)
-		}
-		return executeExpireAction(cfg, keystore)
+		return executeExpireAction(cfg, client)
 	case ActionDownload:
-		return executeDownloadAction(cfg, keystore, input)
+		return executeDownloadAction(cfg, client, input)
 	case ActionUpload:
 		resolvedPath, isDir, resolveErr := promptUploadPath(input, cfg)
 		if resolveErr != nil {
@@ -241,23 +239,7 @@ func executeActionOnce(cfg RuntimeConfig, keystore *key_store.KeyStore, input io
 		}
 
 		if isDir {
-			if cfg.Mode == ModeRemote {
-				return executeRemoteUploadDirAction(cfg, input, resolvedPath)
-			}
-			confirmed, confirmErr := confirmDirectoryUpload(input, cfg, resolvedPath)
-			if confirmErr != nil {
-				return confirmErr
-			}
-			if !confirmed {
-				return errMenuBack
-			}
-			logs.Printf("\nUploading directory %q...\n", resolvedPath)
-			dirHash, storeErr := keystore.StoreDirectory(resolvedPath)
-			if storeErr != nil {
-				return fmt.Errorf("store directory: %w", storeErr)
-			}
-			logs.Printf("Directory stored. Root hash: %x\n", dirHash)
-			return nil
+			return executeUploadDirAction(cfg, client, input, resolvedPath)
 		}
 
 		// File path. Check for the "all" sentinel (upload dir itself was returned).
@@ -280,14 +262,9 @@ func executeActionOnce(cfg RuntimeConfig, keystore *key_store.KeyStore, input io
 			filePaths = []string{resolvedPath}
 		}
 
-		if cfg.CleanCopyFiles {
-			if err := cleanupCopyFiles(cfg.KeyStore.StorageDir); err != nil {
-				logs.Warnf("cleanup copy files: %v", err)
-			}
-		}
-		return executeStoreTargets(cfg, keystore, filePaths)
+		return executeStoreTargets(cfg, client, filePaths)
 	case ActionView:
-		if err := executeViewAction(cfg, keystore, input); err != nil {
+		if err := executeViewAction(cfg, client); err != nil {
 			return fmt.Errorf("view action failed: %w", err)
 		}
 		return nil
@@ -311,10 +288,7 @@ func clearTerminalIfInteractive(input io.Reader) {
 	fmt.Print("\033[H\033[2J")
 }
 
-func executeRemoteUploadDirAction(cfg RuntimeConfig, input io.Reader, dirPath string) error {
-	if cfg.RemoteAddr == "" {
-		return fmt.Errorf("remote mode requires an address; use %s or configure remotes", REMOTE_ADDR_FLAG)
-	}
+func executeUploadDirAction(cfg RuntimeConfig, client *GRPCClient, input io.Reader, dirPath string) error {
 	confirmed, confirmErr := confirmDirectoryUpload(input, cfg, dirPath)
 	if confirmErr != nil {
 		return confirmErr
@@ -322,81 +296,11 @@ func executeRemoteUploadDirAction(cfg RuntimeConfig, input io.Reader, dirPath st
 	if !confirmed {
 		return errMenuBack
 	}
-	client, err := NewGRPCClient(cfg.RemoteAddr)
-	if err != nil {
-		return fmt.Errorf("connect to remote: %w", err)
-	}
-	defer client.Close()
-	logs.Printf("\nUploading directory %q to remote %s...\n", dirPath, cfg.RemoteAddr)
+	logs.Printf("\nUploading directory %q to %s...\n", dirPath, cfg.ServerAddr)
 	rootHash, totalSize, err := executeRemoteUploadDir(client, dirPath, dirPath)
 	if err != nil {
-		return fmt.Errorf("remote dir upload: %w", err)
+		return fmt.Errorf("dir upload: %w", err)
 	}
 	logs.Printf("Directory upload complete. Root hash: %x  total size: %s\n", rootHash, formatBytes(totalSize))
-	return nil
-}
-
-func executeRemoteVerify(cfg RuntimeConfig) error {
-	if cfg.RemoteAddr == "" {
-		return fmt.Errorf("remote mode requires an address")
-	}
-	client, err := NewGRPCClient(cfg.RemoteAddr)
-	if err != nil {
-		return fmt.Errorf("connect to remote: %w", err)
-	}
-	defer client.Close()
-	issues, err := client.Verify()
-	if err != nil {
-		return fmt.Errorf("remote verify: %w", err)
-	}
-	if len(issues) == 0 {
-		cfg.TUI.StatusInfoFU("Remote: all chunks verified — healthy.")
-		logs.Printf("\n")
-		return nil
-	}
-	logs.Printf("Remote found %d integrity error(s):\n", len(issues))
-	for _, iss := range issues {
-		cfg.TUI.MenuItemFU(int(iss.ChunkIndex), iss.FileName+" — "+iss.Err, false)
-		logs.Printf("\n")
-	}
-	return nil
-}
-
-func executeRemoteExpire(cfg RuntimeConfig) error {
-	if cfg.RemoteAddr == "" {
-		return fmt.Errorf("remote mode requires an address")
-	}
-	client, err := NewGRPCClient(cfg.RemoteAddr)
-	if err != nil {
-		return fmt.Errorf("connect to remote: %w", err)
-	}
-	defer client.Close()
-	removed, err := client.Expire()
-	if err != nil {
-		return fmt.Errorf("remote expire: %w", err)
-	}
-	logs.Printf("Remote expire complete: %d file(s) removed.\n", removed)
-	return nil
-}
-
-func executeRemoteClean(cfg RuntimeConfig, deep bool) error {
-	if cfg.RemoteAddr == "" {
-		return fmt.Errorf("remote mode requires an address")
-	}
-	client, err := NewGRPCClient(cfg.RemoteAddr)
-	if err != nil {
-		return fmt.Errorf("connect to remote: %w", err)
-	}
-	defer client.Close()
-	result, err := client.Clean(deep)
-	if err != nil {
-		return fmt.Errorf("remote clean: %w", err)
-	}
-	if deep {
-		logs.Printf("Remote deep clean: removed %d .kdht, %d metadata, %d cache file(s).\n",
-			result.RemovedKDHT, result.RemovedMetadata, result.RemovedCache)
-	} else {
-		logs.Printf("Remote clean: removed %d .kdht file(s).\n", result.RemovedKDHT)
-	}
 	return nil
 }

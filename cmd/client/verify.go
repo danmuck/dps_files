@@ -1,21 +1,26 @@
 package main
 
 import (
-	"github.com/danmuck/dps_files/src/key_store"
+	"fmt"
+
 	logs "github.com/danmuck/smplog"
 )
 
-func executeVerifyAction(cfg RuntimeConfig, ks *key_store.KeyStore) error {
+func executeVerifyAction(cfg RuntimeConfig, client *GRPCClient) error {
 	logs.Println("\nRunning integrity scan...")
-	errs := ks.VerifyAll()
-	if len(errs) == 0 {
-		cfg.TUI.StatusInfoFU("All chunks verified: healthy."); logs.Printf("\n")
+	issues, err := client.Verify()
+	if err != nil {
+		return fmt.Errorf("verify: %w", err)
+	}
+	if len(issues) == 0 {
+		cfg.TUI.StatusInfoFU("All chunks verified: healthy.")
+		logs.Printf("\n")
 		return nil
 	}
-	logs.Printf("Found %d integrity error(s):\n", len(errs))
-	for _, ce := range errs {
-		cfg.TUI.MenuItemFU(int(ce.ChunkIndex), ce.FileName+" — "+ce.Err.Error(), false)
+	logs.Printf("Found %d integrity error(s):\n", len(issues))
+	for _, iss := range issues {
+		cfg.TUI.MenuItemFU(int(iss.ChunkIndex), iss.FileName+" — "+iss.Err, false)
 		logs.Printf("\n")
 	}
-	return nil // non-fatal: report errors but don't fail the session
+	return nil
 }

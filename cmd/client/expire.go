@@ -1,13 +1,17 @@
 package main
 
 import (
-	"github.com/danmuck/dps_files/src/key_store"
+	"fmt"
+
 	logs "github.com/danmuck/smplog"
 )
 
-func executeExpireAction(cfg RuntimeConfig, ks *key_store.KeyStore) error {
-	logs.Printf("\nSweeping expired files (TTL=%ds)...\n", cfg.TTLSeconds)
-	removed := ks.CleanupExpired()
+func executeExpireAction(cfg RuntimeConfig, client *GRPCClient) error {
+	logs.Printf("\nSweeping expired files...\n")
+	removed, err := client.Expire()
+	if err != nil {
+		return fmt.Errorf("expire: %w", err)
+	}
 	logs.Printf("Expired sweep complete: %d file(s) removed.\n", removed)
 	return nil
 }
