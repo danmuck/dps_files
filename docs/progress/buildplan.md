@@ -7,97 +7,68 @@
 
 ## Stage 1: KeyStore — Verification, Hardening & Performance
 
-**Current state:** The most complete module. File chunking (local), metadata persistence (TOML), reassembly, hash verification, streaming, TTL expiry, crash recovery, deep integrity verification, cache management with deduplication, and concurrent access safety all work. 62 tests across 3 files (store_test.go: 26, hardening_test.go: 28, config_test.go: 2) cover 1KB–256MB files plus edge cases (empty, single chunk, corruption, concurrent access, crash recovery). `StoreFileLocal` and `LoadAndStoreFileLocal` now produce identical DHT keys via `computeChunkKey`. `DefaultRemoteHandler` is a placeholder with smplog debug logging and correct synchronization. Empty files are handled correctly (0 blocks). Logging uses `github.com/danmuck/smplog` via shared config loader (`cmd/internal/logcfg`).
+**Current state:** The most complete module. File chunking (local), metadata persistence (TOML), reassembly, hash verification, streaming, TTL expiry, crash recovery, deep integrity verification, cache management with deduplication, and concurrent access safety all work. Tests across 4 files cover 1KB–256MB files plus edge cases (empty, single chunk, corruption, concurrent access, crash recovery). `StoreFileLocal` and `LoadAndStoreFileLocal` produce identical DHT keys via `computeChunkKey`. Empty files are handled correctly (0 blocks). Logging uses `github.com/danmuck/smplog` via shared config loader (`cmd/internal/logcfg`).
 
 **Key files:**
 - `src/key_store/key_store.go` — KeyStore struct, init, memory/disk persistence, cleanup, verification
 - `src/key_store/files.go` — File struct, StoreFileLocal, LoadAndStoreFileLocal, LoadAndStoreFileRemote, reassembly, `computeChunkKey`
 - `src/key_store/file_reference.go` — FileReference struct, StoreFileReference, LoadFileReferenceData, DeleteFileReference
 - `src/key_store/metadata.go` — MetaData struct, PrepareMetaData, TOML serialization
-- `src/key_store/config.go` — KeyStoreConfig, DefaultConfig(), CalculateBlockSize() with promotion logic, HashFile(), CopyFile(), ValidateSHA256(), constants, RemoteHandler interface, DefaultRemoteHandler
+- `src/key_store/config.go` — KeyStoreConfig, DefaultConfig(), CalculateBlockSize() with promotion logic, HashFile(), CopyFile(), ValidateSHA256(), constants
 - `src/key_store/verify.go` — VerifyAll(), VerifyFile(): deep integrity scanning
 - `src/key_store/intent.go` — Crash recovery via intent files (write-ahead before chunking)
 - `src/key_store/string.go` — String formatting helpers
-- `src/key_store/store_test.go` — 26 tests: large file, small parametric, empty, single chunk, exact block, persistence, corruption, cleanup, key consistency, streaming, TTL, deletion, cache dedup, utility functions
-- `src/key_store/hardening_test.go` — 28 tests: concurrent stores/reads/deletes, crash recovery, integrity verification, error injection, stale cache pruning, non-destructive startup
-- `src/key_store/config_test.go` — 2 tests: KeyStoreConfig defaults, configurable TTL
+- `src/key_store/store_test.go` — chunking, persistence, corruption, cleanup, key consistency, streaming, TTL, deletion, cache dedup, utility functions
+- `src/key_store/hardening_test.go` — concurrent stores/reads/deletes, crash recovery, integrity verification, error injection, stale cache pruning, non-destructive startup
+- `src/key_store/config_test.go` — KeyStoreConfig defaults, configurable TTL
 
 ### Phase 1A: Bug Fixes & Correctness
 - [x] Fix `StoreFileLocal` vs `LoadAndStoreFileLocal` DHT key calculation mismatch — unified via `computeChunkKey`
 - [x] Remove `StoreFileRemote` — dead copy-paste removed
 - [x] Fix `LoadAndStoreFileRemote` race condition — removed goroutine wrapper on `StartReceiver`, added ready signal
 - [x] Fix `LoadAndStoreFileRemote` — `PassFileReference` no longer launched as goroutine
-- [x] Fix `DefaultRemoteHandler.StartReceiver` off-by-one — index now increments on `[]byte` (data) case
-- [x] Fix `verifyFileReferences` — now only moves metadata for files with missing chunks, not all files
 - [x] Fix `fileToMemory` variable shadowing — renamed to `metadataPath`
-- [x] Fix `LoadLocalFileToMemory` variable shadowing and ineffective `ref = nil` — uses index assignment
 - [x] Fix `CalculateBlockSize` / `PrepareMetaData` divide-by-zero on empty files
 - [x] Migrate runtime/test filesystem paths to local/storage/data (runtime chunk store) and local/upload (input files)
-- [x] Rename command entrypoint directory from `cmd/key_store` to `cmd/storage` and update repository command/docs references accordingly
-- [x] Fix `cmd/storage` CLI mode/output — `make storage` now runs `go run ./cmd/storage`, defaults to `run`, reports automated indexing from `local/upload`, prompts for file index (`all`/`clean` supported), persists `.kdht` chunks in `local/storage/data` by default, and gates reassembly behind `--reassemble`
-- [x] Add configurable default TTL for `cmd/storage` via `--ttl-seconds`, wired through `RuntimeConfig.TTLSeconds` into `KeyStoreConfig` and applied to local/remote store metadata (runtime default set explicitly, independent from library default)
-- [x] Refactor `cmd/storage` runtime defaults to a top-level config struct (`RuntimeConfig`); CLI flags now act as run-time overrides on that default config
-- [x] Refactor `cmd/storage` into smaller files and add explicit menu actions for `upload` (from `local/upload`, with indexed file list shown before selection), `store` (direct filepath), `clean` (`.kdht` only), `deep-clean` (`.kdht` + metadata + cache), and `view` (inspect metadata + optional reassembly to `local/storage/copy.*`); `InitKeyStore` now runs at process startup
-- [x] Add transfer observability to `cmd/storage`: ANSI progress bars (default), per-phase timing summaries, and append-only operation logs under `local/logs/` for local store/stream and remote upload/download flows (`--verbose` disables bars and preserves chunk-level output)
-- [x] Add explicit operation stage banners for transfer workflows and rename `stream` action to `download` in CLI/menu semantics (legacy `stream` alias retained for compatibility)
-- [x] Make `cmd/storage` menu continuously navigable: action loop returns to root after each command, submenus accept `e` to go back, root accepts `e` to exit, and terminal clears between root/action transitions
-- [x] Make `cmd/storage` menu state filesystem-consistent across actions: refresh KeyStore memory indexes from disk before each root menu decision so `deep-clean` is immediately reflected by `view`
-- [x] Add `stats` action to `cmd/storage` root menu and CLI args; report runtime/system stats plus on-disk storage breakdown for `data/`, `metadata/`, `.cache/`, and all other entries under storage root
-- [x] Improve `view` action metadata entry formatting in `cmd/storage/view.go` (readable multi-line layout, human-readable size/TTL, last-chunk size, truncated hash)
-- [x] Prevent `.cache` metadata duplication, upsert cache metadata on successful store, and skip storing files whose hash is already present in cache (CLI now reports skip instead of fatal exit)
-- [x] Validate cache entries before hash-cache skip decisions: local (`file` protocol / `local/storage/*`) references are checked for chunk existence, stale cache entries are pruned on startup and hash-check paths, and uploads now proceed when cache metadata points to missing local data
-- [x] Make startup non-destructive: `InitKeyStoreWithConfig` no longer moves/prunes metadata/cache on boot; stale local references are validated at upload-time and missing-data hashes are evicted from in-memory indexes so upload reprocesses chunks
-- [x] Add internal block-size promotion utility with `LargeFileMx` guard in `config.go` and wire it into `CalculateBlockSize`
-- [x] Restore `cmd/gen_file` default filename size-labeling (`test_<n>B|KB|MB|GB.dat`) so generated names use abbreviated units instead of raw byte-only labels
-- [x] Fix `existingFileByHash` — re-upload of an expired file (TTL elapsed, chunks still on disk) now refreshes `Modified` timestamp and resets TTL to `DefaultTTLSeconds` via `fileToMemory`, so subsequent reassembly does not fail with "file expired"; all four upload paths (`StoreFileLocal`, `LoadAndStoreFileLocal`, `LoadAndStoreFileRemote`, `StoreFromReader`) are covered at the single dedup guard
-- [x] Fix `Cleanup` — scans `chunkDataDir` on disk and removes every `.kdht` file found (not just in-memory tracked chunks), covering orphaned files left by crashed mid-store operations
-- [x] Normalize `smplog` config discovery across all `cmd/*` entrypoints with shared loader (`cmd/internal/logcfg`) that resolves `SMPLOG_CONFIG`, `./smplog.config.toml`, then `./local/smplog.config.toml`
+- [x] Add configurable default TTL wired through `KeyStoreConfig`
+- [x] Add internal block-size promotion utility with `LargeFileMx` guard in `config.go`
+- [x] Fix `existingFileByHash` — re-upload of an expired file refreshes TTL; all four upload paths covered
+- [x] Fix `Cleanup` — scans `chunkDataDir` on disk and removes every `.kdht` file found
+- [x] Normalize `smplog` config discovery across all `cmd/*` entrypoints with shared loader (`cmd/internal/logcfg`)
+- [x] Make startup non-destructive: `InitKeyStoreWithConfig` no longer moves/prunes metadata/cache on boot
 
 ### Phase 1B: Testing
-- [x] Fix `TestLargeFileChunking` — now generates a 256MB test file and reuses it if present
+- [x] Fix `TestLargeFileChunking` — generates 256MB test file and reuses if present
 - [x] Add test: empty file (0 bytes) — `TestEmptyFile`
 - [x] Add test: file smaller than `MinBlockSize` — `TestSingleChunkFile`
 - [x] Add test: file exactly equal to one block size — `TestExactBlockSizeFile`
 - [x] Add test: store → cleanup → verify all files removed — `TestCleanupRemovesAllFiles`
 - [x] Add test: store → reload KeyStore from disk — `TestKeyStorePersistence`
-- [x] Add test: key consistency between `StoreFileLocal` and `LoadAndStoreFileLocal` — `TestStoreFileLocalAndLoadAndStoreFileLocalProduceSameKeys`
+- [x] Add test: key consistency between `StoreFileLocal` and `LoadAndStoreFileLocal`
 - [x] Add test: chunk corruption detected — `TestChunkCorruptionDetected`
-- [x] Add tests: error-injection cleanup paths for failed metadata persistence — `TestStoreFileLocalErrorInjectionCleansChunks`, `TestLoadAndStoreFileLocalErrorInjectionCleansChunks`
-- [x] Add test: stale local cache metadata is pruned and does not block upload — `TestLoadAndStoreFileLocalPrunesDeadLocalCacheEntry`
-- [x] Add tests: startup is non-destructive and missing-data reupload works after restart — `TestInitKeyStoreDoesNotPruneStorageOnStartup`, `TestLoadAndStoreFileLocalReuploadsMissingDataAfterRestart`
-- [x] Add focused unit tests for block-size promotion utility and `LargeFileMx` threshold behavior — `TestPromoteCandidateBlockSize`
-- [x] Add `CalculateBlockSize` integration tests for promotion + large-file guard behavior — `TestCalculateBlockSizePromotionIntegration`
-- [x] Add test: re-upload of expired file refreshes TTL and permits reassembly — `TestReuploadRefreshesTTL`
-- [x] Add tests: small file parametric chunking — `TestSmallFileChunking`
+- [x] Add tests: error-injection cleanup paths for failed metadata persistence
+- [x] Add test: stale local cache metadata is pruned and does not block upload
+- [x] Add tests: startup is non-destructive and missing-data reupload works after restart
+- [x] Add focused unit tests for block-size promotion utility and `LargeFileMx` threshold behavior
 - [x] Add tests: streaming to writer — `TestStreamFile`, `TestStreamFileByName`, `TestStreamChunkRange`, `TestStreamFileDetectsCorruption`
-- [x] Add tests: filename index lookup and persistence — `TestGetFileByName`, `TestGetFileByNamePersistence`
-- [x] Add test: overwrite file by name — `TestFileByNameOverwrite`
-- [x] Add tests: KeyStoreConfig defaults and configurable TTL — `TestKeyStoreConfig`, `TestConfigurableDefaultTTL`
-- [x] Add test: chunk-loc index resolution — `TestChunkLocResolution`
-- [x] Add tests: TTL expiry, zero-TTL never-expires, CleanupExpired, DeleteFile — `TestTTLExpiry`, `TestTTLZeroNeverExpires`, `TestCleanupExpired`, `TestDeleteFile`
-- [x] Add tests: StoreFromReader success and size-mismatch error — `TestStoreFromReader`, `TestStoreFromReaderSizeMismatch`
-- [x] Add tests: ListStoredFileReferences and ListKnownFiles — `TestListStoredFileReferencesAndKnownFiles`
-- [x] Add test: ReassembleFileToPath — `TestReassembleFileToPath`
-- [x] Add test: DeleteFileReference — `TestDeleteFileReference`
-- [x] Add tests: LoadLocalFileToMemory filters missing location, LoadAllLocalFilesToMemory rebuilds indexes — `TestLoadLocalFileToMemoryFiltersMissingLocation`, `TestLoadAllLocalFilesToMemoryRebuildsIndexes`
-- [x] Add tests: CleanupKDHTAndMetaData, VerifyFileReferences moves orphan metadata to cache, MoveToCache deduplicates by hash — `TestCleanupKDHTAndMetaData`, `TestVerifyFileReferencesMovesOrphanMetadataToCache`, `TestMoveToCacheDeduplicatesByHash`
-- [x] Add tests: hash-cache skip decisions for StoreFileLocal and LoadAndStoreFileLocal — `TestStoreFileLocalSkipsWhenHashAlreadyCached`, `TestStoreFileLocalWritesCacheEntry`, `TestLoadAndStoreFileLocalSkipsWhenHashAlreadyCached`
-- [x] Add tests: utility functions, PrepareMetaDataSecure, LoadAndStoreFileRemote with default handler, string/formatting helpers — `TestUtilityFunctions`, `TestPrepareMetaDataSecure`, `TestLoadAndStoreFileRemoteWithDefaultHandler`, `TestStringAndFormattingHelpers`
-- [x] Add tests: concurrent stores, reads, store-and-read, deletes under contention — `TestConcurrentStores`, `TestConcurrentReads`, `TestConcurrentStoreAndRead`, `TestConcurrentDeletes`
-- [x] Add tests: crash-recovery intent file creation and committed-file safety — `TestCrashRecoveryIntent`, `TestIntentRecoveryDoesNotDeleteCommittedFile`
-- [x] Add tests: VerifyAll detects corruption and passes on clean store — `TestVerifyAllDetectsCorruption`, `TestVerifyAllCleanStore`
+- [x] Add tests: filename index lookup and persistence
+- [x] Add tests: KeyStoreConfig defaults and configurable TTL
+- [x] Add tests: TTL expiry, CleanupExpired, DeleteFile
+- [x] Add tests: StoreFromReader success and size-mismatch error
+- [x] Add tests: concurrent stores, reads, store-and-read, deletes under contention
+- [x] Add tests: crash-recovery intent file creation and committed-file safety
+- [x] Add tests: VerifyAll detects corruption and passes on clean store
+- [x] Add tests: CleanupKDHTAndMetaData, MoveToCache deduplicates by hash
+- [x] Add tests: hash-cache skip decisions for StoreFileLocal and LoadAndStoreFileLocal
 
 ### Phase 1C: Cleanup & Performance
-- [x] Ensure all key_store library code uses `smplog` consistently (smplog adopted project-wide; remaining work is auditing library-level code for any stray fmt.Printf or log/slog calls)
-- [x] Make `VERIFY` a runtime field on `KeyStore` instead of a compile-time const (implemented via `KeyStoreConfig.VerifyOnWrite`)
-- [x] Make `PRINT_BLOCKS` a runtime field or remove progress printing from library code (move to cmd/) — removed, inlined
-- [x] Extract shared chunking logic from `StoreFileLocal` and `LoadAndStoreFileLocal` into a private helper to eliminate duplication
-- [x] Add directory semantics: `StoreDirectory`, `ListDirectory`, `ReassembleDirectory` on KeyStore and FileLedger, with `EntryType`/`ParentHash` on MetaData, `DirectoryEntry`/`DirectoryManifest` types, path normalization, edge-case tests (deep nesting, duplicate basenames, empty dirs)
-- [x] Add `UPLOAD_DIR` and `LIST_DIR` RPC commands to protobuf and ServerNode HandleRPC
-- [x] Add HTTP directory listing endpoints (`GET /dirs/hash/{hex}`, `GET /dirs/hash/{hex}/tree`)
+- [x] Ensure all key_store library code uses `smplog` consistently
+- [x] Make `VERIFY` a runtime field on `KeyStore` instead of a compile-time const
+- [x] Extract shared chunking logic from `StoreFileLocal` and `LoadAndStoreFileLocal`
+- [x] Add directory semantics: `StoreDirectory`, `ListDirectory`, `ReassembleDirectory` on KeyStore and FileLedger
 - [x] Add TUI directory upload action (`upload-dir`) and `[DIR]` display in view
 - [ ] Add `context.Context` parameter to `StoreFileLocal` and `LoadAndStoreFileLocal` for cancellation support
-- [x] Deduplicate: `existingFileByHash` is called at the top of all store entry points (`StoreFileLocal`, `LoadAndStoreFileLocal`, `LoadAndStoreFileRemote`, `StoreFromReader`) and short-circuits chunking when the hash is already stored
+- [x] Deduplicate: `existingFileByHash` called at the top of all store entry points
 
 ---
 
@@ -105,7 +76,7 @@
 
 > **STATUS: COMPLETE** — The hand-rolled TCP transport package has been replaced by gRPC. All file operations (Upload, Download, List, Delete, UploadDir, ListDir) are served via a generated `DPSFiles` gRPC service. An optional gRPC-Gateway proxy exposes the same service as HTTP/JSON on a second port.
 
-**Current state:** `src/api/transport/` package deleted entirely (tcp.go, encoding.go, transport.go, udp.go, rpc.proto, rpc.pb.go, tcp_handler_test.go). `NodeInfo` moved to `src/api/nodes/nodes.go`. `src/api/pb/` contains generated code from `dps.proto` (protoc-gen-go, protoc-gen-go-grpc, protoc-gen-grpc-gateway). `src/api/grpc/server.go` implements `pb.DPSFilesServer` backed by `ledgers.FileLedger`. `DefaultServerNode` holds `*grpc.Server` + `net.Listener`. `DefaultClientNode` holds one `*grpc.ClientConn`. Upload/Download use `io.Pipe` for streaming — no large in-memory buffers. Dial-back architecture eliminated. Proto parse errors eliminated.
+**Current state:** `src/api/transport/` package deleted entirely. `NodeInfo` moved to `src/api/nodes/nodes.go`. `src/api/pb/` contains generated code from `dps.proto`. `src/api/grpc/server.go` implements `pb.DPSFilesServer` backed by `ledgers.FileLedger`. `DefaultServerNode` holds `*grpc.Server` + `net.Listener`. `DefaultClientNode` holds one `*grpc.ClientConn`. Upload/Download use `io.Pipe` for streaming — no large in-memory buffers.
 
 **Key files:**
 - `src/api/pb/dps.proto` — `DPSFiles` service definition with HTTP annotations
@@ -120,70 +91,89 @@
 
 ### Phase 2A: gRPC Migration
 - [x] Install proto plugins and add Go module dependencies (grpc, protobuf, grpc-gateway)
-- [x] Update `make build-protobuf` to invoke protoc with go, go-grpc, and grpc-gateway plugins targeting `src/api/pb/`
+- [x] Update `make build-protobuf` to invoke protoc with go, go-grpc, and grpc-gateway plugins
 - [x] Write `dps.proto` service definition with HTTP annotations for all six operations
 - [x] Generate `src/api/pb/` code (dps.pb.go, dps_grpc.pb.go, dps.pb.gw.go)
 - [x] Implement `grpcserver.Server` in `src/api/grpc/server.go` backed by `ledgers.FileLedger`
-- [x] Rewrite `DefaultServerNode` to hold `*grpc.Server` + `net.Listener`; `Start()` calls `grpcServer.Serve`; `WithHTTP` starts grpc-gateway; `Addr()` returns live listener address
-- [x] Simplify `DefaultNode` to identity only (address, pubKey, Router) — no TCPHandler, no exit channel
-- [x] Rewrite `DefaultClientNode` to hold `*grpc.ClientConn`; local mode connects to embedded server over gRPC; `Stub()` returns `pb.DPSFilesClient`; `LocalServer()` exposes embedded server
-- [x] Rewrite `cmd/client/remote.go` — `GRPCClient` replaces `FileServerClient`
-- [x] Delete `src/api/transport/` package entirely; move `NodeInfo` to `src/api/nodes/nodes.go`; remove `http_handlers.go` and `http_handlers_test.go`
-- [x] Update `cmd/server/main.go` for new node constructors
+- [x] Rewrite `DefaultServerNode` to hold `*grpc.Server` + `net.Listener`
+- [x] Simplify `DefaultNode` to identity only (address, pubKey, Router)
+- [x] Rewrite `DefaultClientNode` to hold `*grpc.ClientConn`; local mode connects to embedded server over gRPC
+- [x] Delete `src/api/transport/` package entirely; move `NodeInfo` to `src/api/nodes/nodes.go`
 
 ### Phase 2B: Testing
 - [x] Add grpc server tests via bufconn — `TestUploadAndList`, `TestDownloadByHash`, `TestDeleteFile`
 - [x] Update server_node_test.go — gRPC upload + list via real TCP listener
 - [x] Update client_node_test.go — local mode gRPC, remote mode, LocalServer() access, no-server error
 
-### Phase 2C: Future Transport Work
+---
+
+## Stage 3: v1 Production Hardening & Benchmarking  [CURRENT]
+
+> **STATUS: CURRENT** — Establish performance baselines, add context/cancellation support, and harden the v1 fileserver for real-world use before beginning distributed work.
+
+### Phase 3A: Benchmarks
+- [ ] Add Go benchmark functions for chunking throughput (`BenchmarkStoreFileLocal`, `BenchmarkStoreFromReader`)
+- [ ] Add benchmarks for reassembly (`BenchmarkReassembleFileToBytes`, `BenchmarkReassembleFileToPath`)
+- [ ] Add benchmarks for gRPC Upload and Download round-trips (via bufconn)
+- [ ] Capture and commit baseline benchmark results (`go test -bench=. -benchmem`)
+
+### Phase 3B: v1 Stability
+- [ ] Add `context.Context` to `StoreFileLocal` and `LoadAndStoreFileLocal` for cancellation support
 - [ ] Add TLS support to gRPC connections (required before Raft log replication carries real data)
-- [ ] Implement UDP transport for Kademlia RPCs (small messages, connectionless)
-- [ ] Add rate limiting on inbound connections per remote address
+- [ ] Add graceful shutdown with context-based cancellation propagation through ServerNode → KeyStore
+
+### Phase 3C: Observability
+- [ ] Add structured metrics: upload/download request counts, transfer throughput, error rates via smplog
+- [ ] Write package-level `doc.go` files for each package (key_store, grpcserver, nodes, ledgers, impl)
+
+### Phase 3D: Load Testing
+- [ ] Add multi-client concurrent upload test (N goroutines, large files, verify integrity)
+- [ ] Add concurrent mixed upload+download stress test
+- [ ] Profile hot paths with pprof; optimize based on benchmark results
+
+### Phase 3E: Security
+- [ ] Security audit: validate all external input at gRPC boundaries, enforce max message sizes
+- [ ] Extract all magic numbers into config.go constants or TOML config file
 
 ---
 
-## Stage 3: Kademlia DHT — Routing & Distributed Storage
+## Stage 4: Kademlia DHT — Routing & Distributed Storage
 
-> **STATUS: FUTURE** — Interface stubs and scaffolding only. Will be reworked after Stage 1 completion.
+> **STATUS: FUTURE** — Interface stubs removed. Will be designed from scratch when distribution work begins.
 
-**Current state:** `KademliaRouter` struct exists with a `buckets` field (`[][]*NodeInfo`) but every method is a stub returning `nil` or `-1`. Interfaces are consistent — `RoutingTable.Lookup` returns `(*NodeInfo, error)`, `KademliaRouting` methods return typed values. `DefaultRouter` is a simple map-based router that works. `DefaultNode` is identity-only (no Start/Shutdown — lifecycle is on concrete node types). `NodeInfo` is now defined in `src/api/nodes/nodes.go` (moved from the deleted transport package). Empty method bodies for Kademlia RPCs.
+**Current state:** `KademliaRouting` interface removed (was stubs only). `DefaultRouter` is a simple map-based router that works for current needs. `RoutingTable` interface defines `InsertNode`, `RemoveNode`, `Lookup`. `DefaultNode` is identity-only. `NodeInfo` is defined in `src/api/nodes/nodes.go`.
 
 **Key files:**
-- `src/api/nodes/routing.go` — `RoutingTable`, `KademliaRouting` interfaces, `DefaultRouter`, `KademliaRouter` (stubs)
+- `src/api/nodes/routing.go` — `RoutingTable` interface, `DefaultRouter` (map-based, functional)
 - `src/api/nodes/nodes.go` — `Node`, `ClientNode`, `ServerNode` interfaces; `NodeInfo` struct
 - `src/api/nodes/default.go` — `DefaultNode` struct (identity only: address, pubKey, Router)
 - `src/api/nodes/routing_test.go` — 4 tests: creation, bad ID, start/shutdown, router type
 
 **Depends on:** Stage 2 (transport must work for RPCs)
 
-### Phase 3A: Core Algorithms
+### Phase 4A: Core Algorithms
 - [ ] Implement `XORDistance(a, b []byte) []byte` — bitwise XOR of two 20-byte node IDs
 - [ ] Implement `PrefixLength(distance []byte) int` — count leading zero bits (determines bucket index)
-- [ ] Implement k-bucket struct: ordered list of up to `k` contacts, LRU eviction policy (ping least-recently-seen before evicting)
-- [ ] Initialize `KademliaRouter.buckets` as 160 k-buckets (one per possible prefix length)
+- [ ] Implement k-bucket struct: ordered list of up to `k` contacts, LRU eviction policy
+- [ ] Re-introduce `KademliaRouting` interface with real XOR-distance semantics
 - [ ] Implement `InsertNode`: calculate XOR distance → determine bucket → insert or update position
 - [ ] Implement `RemoveNode`: find and remove from correct bucket
 - [ ] Implement `ClosestK(key)`: collect `k` closest nodes across buckets by XOR distance
 - [ ] Implement `Lookup(id)`: return single closest node or exact match
 
-### Phase 3B: Kademlia RPCs
-- [ ] Implement `PING` handler: respond with `ACK` to confirm liveness, update routing table
-- [ ] Implement `STORE` handler: accept a key-value pair and persist it locally (ties into KeyStore)
-- [ ] Implement `FIND_NODE` handler: return `k` closest nodes to the requested ID
-- [ ] Implement `FIND_VALUE` handler: return value if held locally, otherwise return `k` closest nodes
-- [ ] Wire `DefaultNode.Send/Ping/Store/FindNode/FindValue` to transport layer
+### Phase 4B: Kademlia RPCs
+- [ ] Implement `PING`, `STORE`, `FIND_NODE`, `FIND_VALUE` handlers
+- [ ] Wire to transport layer
 
-### Phase 3C: Iterative Lookups
-- [ ] Implement iterative `NodeLookup`: alpha-concurrent queries, converging on target, short-list management
-- [ ] Implement iterative `ValueLookup`: like NodeLookup but returns immediately when value is found
-- [ ] Implement node join: given a bootstrap address, perform `FindNode(self.ID)` to populate routing table
+### Phase 4C: Iterative Lookups
+- [ ] Implement iterative `NodeLookup` and `ValueLookup`
+- [ ] Implement node join from bootstrap address
 
-### Phase 3D: Maintenance & Cleanup
-- [ ] Add periodic bucket refresh: for each bucket not accessed in 1 hour, perform lookup on a random ID in that bucket's range
-- [ ] Add key republishing: periodically re-store keys to ensure they survive node churn
+### Phase 4D: Maintenance & Cleanup
+- [ ] Add periodic bucket refresh
+- [ ] Add key republishing
 
-### Phase 3E: Testing
+### Phase 4E: Testing
 - [x] Add test: node creation with valid/invalid IDs — `TestNewDefaultNode`, `TestNewDefaultNodeBadID`
 - [x] Add test: start/shutdown lifecycle — `TestDefaultNodeStartShutdown`
 - [x] Add test: router type verification — `TestKademliaRouterCreation`
@@ -195,112 +185,98 @@
 
 ---
 
-## Stage 4: Raft Consensus — Leader Election & Log Replication
+## Stage 5: Raft Consensus — Leader Election & Log Replication
 
-> **STATUS: FUTURE** — Interface stubs and scaffolding only. Will be reworked after Stage 1 completion.
+> **STATUS: FUTURE** — Interfaces removed. Will be designed from scratch when consensus work begins.
 
-**Current state:** Only interfaces exist. `ServerNode` defines `ApplyCommand`, `CreateSnapshot`, `GetState`, `AddPeer`, `RemovePeer` but nothing implements them. `NodeState` enum (Follower/Candidate/Leader) is defined. `LogManager` interface defines `Append`, `GetEntry`, `LastLogIndex`, `Commit` with no implementation. `LogEntry` struct has `Index`, `Term`, `Command`. `SnapshotManager` interface defines `CreateSnapshot`, `PersistSnapshot`, `LoadSnapshot`, `VerifySnapshot` with no implementation. There is zero Raft code.
+**Current state:** `LogManager`, `MetadataStore` interfaces removed from `net_store.go`. `SnapshotManager`, `BackupLedger` interfaces removed (snapshots.go deleted). Only `NodeState` enum (Follower/Candidate/Leader) and `ServerNode` interface stubs remain. There is zero Raft code.
 
 **Key files:**
 - `src/api/nodes/nodes.go` — `ServerNode` interface, `NodeState` enum
-- `src/api/ledgers/net_store.go` — `LogManager`, `MetadataStore`, `FileLedger` interfaces, `LogEntry` struct
-- `src/api/ledgers/snapshots.go` — `SnapshotManager`, `BackupLedger` interfaces, `Snapshot` struct
 
-**Depends on:** Stage 2 (reliable TCP transport for log replication)
+**Depends on:** Stage 2 (reliable gRPC transport for log replication)
 
-### Phase 4A: Persistent State & Log
+### Phase 5A: Persistent State & Log
 - [ ] Implement `RaftState` struct: `currentTerm`, `votedFor`, `log []LogEntry`, persisted to disk
-- [ ] Implement `LogManager`: append, get by index, truncate, commit index tracking
+- [ ] Re-introduce `LogManager` interface with actual implementation
 - [ ] Add write-ahead log persistence (append-only file for crash recovery)
 
-### Phase 4B: Leader Election
+### Phase 5B: Leader Election
 - [ ] Implement election timer: randomized timeout (150-300ms), reset on heartbeat
-- [ ] Implement `RequestVote` RPC: candidate requests vote, follower grants if term is newer and log is up-to-date
-- [ ] Implement state transitions: Follower → Candidate → Leader (or back to Follower on higher term)
-- [ ] Implement `AppendEntries` as heartbeat: empty entries from leader to prevent elections
+- [ ] Implement `RequestVote` RPC
+- [ ] Implement state transitions: Follower → Candidate → Leader
 
-### Phase 4C: Log Replication
-- [ ] Implement `AppendEntries` with log entries: leader sends uncommitted entries, followers append
-- [ ] Implement next/matchIndex tracking per follower
+### Phase 5C: Log Replication
+- [ ] Implement `AppendEntries` with log entries
 - [ ] Implement commit advancement: leader commits once majority has replicated
-- [ ] Implement state machine apply: committed entries are applied in order
+- [ ] Implement state machine apply: committed entries applied in order
 
-### Phase 4D: Snapshots & Membership
-- [ ] Implement `CreateSnapshot`: serialize committed state, compact log
-- [ ] Implement `InstallSnapshot` RPC: leader sends snapshot to lagging followers
-- [ ] Add single-server membership changes (add/remove one node at a time)
+### Phase 5D: Snapshots & Membership
+- [ ] Re-introduce `SnapshotManager` interface with actual implementation
+- [ ] Implement `CreateSnapshot` and `InstallSnapshot` RPC
+- [ ] Add single-server membership changes
 
-### Phase 4E: Testing
+### Phase 5E: Testing
 - [ ] Add test: 3-node cluster elects a leader within timeout
-- [ ] Add test: leader failure triggers re-election, new leader emerges
+- [ ] Add test: leader failure triggers re-election
 - [ ] Add test: log replication — client sends command to leader, all followers receive it
-- [ ] Add test: network partition — split cluster, verify no split-brain commits
+- [ ] Add test: network partition — verify no split-brain commits
 - [ ] Add test: snapshot creation and install on a new follower
 
 ---
 
-## Stage 5: Chain & Ledgers — Blockchain Backup System
+## Stage 6: Chain & Ledgers — Blockchain Backup System
 
-> **STATUS: FUTURE** — Interface stubs and scaffolding only. Will be reworked after Stage 1 completion.
+> **STATUS: FUTURE** — Interfaces removed. Will be designed from scratch when blockchain work begins.
 
-**Current state:** `Block` struct works with all fields exported (Data, Time, Nonce) so gob encoding covers full content. `CalculateHash` and `ValidateHash` handle both `*Block` and `Block` value types. AES-GCM encryption/decryption is functional. `cmd/chain/main.go` demo works with correct hash size (32) and no nil-pointer crash on validation. `BackupLedger` interface is defined but not implemented. No chain struct or persistence.
+**Current state:** `Block` struct works with all fields exported. `CalculateHash` and `ValidateHash` handle both `*Block` and `Block` value types. AES-GCM encryption/decryption is functional. `cmd/chain/main.go` demo works. `BackupLedger` and `SnapshotManager` interfaces removed (snapshots.go deleted). No chain struct or persistence.
 
 **Key files:**
-- `src/impl/block.go` — `Block` struct (exported fields), `NewBlock`, `NewBlockEncrypt`, hash and print methods
+- `src/impl/block.go` — `Block` struct (exported fields), `NewBlock`, `NewBlockEncrypt`, hash methods
 - `src/impl/block_data.go` — `BlockData` struct (Data, Hash, IV fields)
-- `src/impl/utils.go` — `ComputeShaHash`, `CalculateHash`, `ValidateHash` (handles *Block and Block), `EncryptData`, `DecryptData`
-- `src/api/ledgers/snapshots.go` — `BackupLedger`, `SnapshotManager` interfaces, `Snapshot` struct
-- `cmd/chain/main.go` — Interactive blockchain demo (fixed: hash size, nil error handling)
+- `src/impl/utils.go` — `CalculateHash`, `ValidateHash`, `EncryptData`, `DecryptData`
+- `cmd/chain/main.go` — Interactive blockchain demo
 
-### Phase 5A: Chain Structure
-- [x] Fix `CalculateHash` / `gob` issue — Block fields are now exported, gob covers all content
+### Phase 6A: Chain Structure
+- [x] Fix `CalculateHash` / `gob` issue — Block fields are now exported
 - [x] Fix `CalculateHash` / `ValidateHash` — handles both `*Block` and `Block` type assertions
-- [x] Fix `cmd/chain/main.go` — `ValidateHash` called with correct size (32), nil error handled
 - [ ] Create a `Chain` struct: holds `[]*Block`, genesis block, chain height, persistence path
 - [ ] Implement `Append`: validate previous hash linkage, add block
 - [ ] Implement `Validate`: walk the full chain verifying each block's hash and prev-hash linkage
 
-### Phase 5B: Persistence
-- [ ] Implement `Write`: serialize chain to disk (gob, JSON, or custom binary format)
-- [ ] Implement `Load`: deserialize chain from disk and validate on load
-- [ ] Implement `Find`: lookup by 20-byte key (FileReference) or 32-byte key (Block hash)
+### Phase 6B: Persistence
+- [ ] Implement `Write` and `Load` (gob or binary format)
+- [ ] Implement `Find`: lookup by 20-byte key or 32-byte hash
+- [ ] Re-introduce `BackupLedger` interface with actual implementation
 
-### Phase 5C: Raft Integration
-- [ ] Implement `BackupScheduler`: periodic timer on the Raft leader triggers `CreateSnapshot`
+### Phase 6C: Raft Integration
+- [ ] Implement `BackupScheduler`: periodic timer triggers `CreateSnapshot` on Raft leader
 - [ ] Implement `PersistSnapshot`: serialize Raft snapshot into a new `Block` and append to chain
-- [ ] Implement `Sync`: replicate chain state across the Raft cluster
-- [ ] Implement `Rebuild`: reconstruct chain from a snapshot file
 
-### Phase 5D: Testing
+### Phase 6D: Testing
 - [ ] Add test: create genesis → append 10 blocks → validate chain passes
 - [ ] Add test: tamper with a block's data → validate chain fails
-- [ ] Add test: encrypt/decrypt round-trip for block data
 - [ ] Add test: chain persistence — write to disk, load from disk, validate matches
 
 ---
 
-## Stage 6: Integration & End-to-End Pipeline
+## Stage 7: Integration & End-to-End Pipeline
 
-**Depends on:** Stages 1-5
+**Depends on:** Stages 1-6
 
 - [ ] End-to-end: store a file → chunk locally → distribute chunks via DHT `STORE` → verify all chunks retrievable via `FIND_VALUE`
 - [ ] End-to-end: Raft cluster of 3 nodes reaches consensus on a file metadata update
 - [ ] End-to-end: Raft leader creates a blockchain backup block, followers validate the chain
-- [ ] End-to-end: retrieve a file by hash → resolve chunks via DHT → reassemble → verify integrity matches original
+- [ ] End-to-end: retrieve a file by hash → resolve chunks via DHT → reassemble → verify integrity
 - [ ] Add CLI or config-driven node startup (replace hardcoded addresses and node IDs in `cmd/`)
-- [ ] Connect `RemoteHandler` to transport layer so `LoadAndStoreFileRemote` actually distributes chunks over the network
-- [ ] Wire `FileLedger` interface to `KeyStore` (KeyStore already implements most of the behavior, just needs the interface)
+- [ ] Connect distributed chunk distribution to transport layer so `LoadAndStoreFileRemote` actually distributes chunks over the network
 
 ---
 
-## Stage 7: Hardening & Production Readiness
+## Stage 8: Production Readiness & CI
 
-**Depends on:** Stages 1-6
+**Depends on:** Stages 1-7
 
-- [ ] Extract all magic numbers into a TOML config file or `config.go` constants
-- [ ] Security audit: validate all external input at API boundaries, enforce max message sizes
-- [ ] Add graceful shutdown across all components (context-based cancellation)
-- [ ] Write package-level `doc.go` files for each package
-- [x] Add architecture diagrams (Mermaid) showing data flow: file → chunks → DHT → Raft → chain
-- [ ] Benchmark critical paths: chunking throughput, DHT lookup latency, Raft commit latency
 - [ ] Add CI pipeline (GitHub Actions): `make test`, `make build`, lint
+- [x] Add architecture diagrams (Mermaid) showing data flow
+- [ ] Performance baselines documented and regression-guarded (moved to Stage 3 as first priority)

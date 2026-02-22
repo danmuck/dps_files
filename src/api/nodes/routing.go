@@ -14,20 +14,6 @@ type RoutingTable interface {
 	Lookup(id []byte) (*NodeInfo, error) // lookup node by its ID
 }
 
-type KademliaRouting interface {
-	RoutingTable
-	K() int                       // returns the current k value (replication factor)
-	A() int                       // returns the current alpha value (concurrency)
-	GetBucket(index int) []*NodeInfo // returns a list of nodes in a bucket by index
-	ClosestK(key []byte) []*NodeInfo // returns list of closest k nodes to a key
-	Size() int                    // returns the number of non-empty buckets
-}
-
-////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////////////////
-
 type DefaultRouter struct {
 	localhost string
 	nodes     map[string]*NodeInfo

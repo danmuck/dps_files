@@ -1,17 +1,11 @@
 package key_store
 
 import (
-	"crypto/sha1"
 	"crypto/sha256"
-	"crypto/sha512"
-	"fmt"
 	"io"
 	"math"
 	"os"
 	"path/filepath"
-	"sync"
-
-	logs "github.com/danmuck/smplog"
 )
 
 const (
@@ -49,86 +43,6 @@ func DefaultConfig(storageDir string) KeyStoreConfig {
 type chunkLoc struct {
 	FileHash   [HashSize]byte
 	ChunkIndex uint32
-}
-
-// this reciever must be implemented on the server side
-// it needs to implement a channel that will first be initialized
-// with a MetaData{}, followed by all FileReference{} for the file.
-//
-// each FileReference{} is passed just before it's []byte{} data
-//
-// these need to be processed and stored across the dht
-// and removed from memory as the files are stored remotely
-type RemoteHandler interface {
-
-	// StartReceiver() takes a File MetaData and prepares to process
-	// the file as it is passed block by block
-	StartReceiver(md *MetaData)
-	// PassFileReference() takes a FileReference pointer which acts
-	// as a header for the data that will follow it
-	PassFileReference(fr *FileReference, d []byte)
-	// Receive() will need to be implemented in place of the current
-	// default go-routine inside StartReceiver()
-	// NOTE: it takes the place of make(chan interface{}) in a real impl
-	Receive() <-chan any
-}
-
-type DefaultRemoteHandler struct {
-	stream chan any
-	ready  chan struct{} // signals receiver goroutine is ready
-	mu     sync.Mutex
-}
-
-func (h *DefaultRemoteHandler) Receive() <-chan any {
-	if h.stream == nil {
-		h.stream = make(chan any)
-	}
-	return h.stream
-}
-
-func (h *DefaultRemoteHandler) StartReceiver(md *MetaData) {
-	ch := h.Receive()
-	h.ready = make(chan struct{})
-
-	// This needs to be implemented to actually process the data.
-	// Currently this serves as a placeholder that prints output
-	// for testing purposes.
-	go func() {
-		blocks := md.TotalBlocks
-		var index uint32 = 0
-		close(h.ready) // signal that receiver is listening
-		for data := range ch {
-			switch tmp := data.(type) {
-			case []byte:
-				_ = tmp
-				index++
-				if index == blocks {
-					logs.Debugf("Final Block Data Received: %d/%d", index, blocks)
-					return
-				}
-
-			case *MetaData:
-				logs.Debugf("MetaData: %+v", tmp)
-
-			case *FileReference:
-				// FileReference is a header; the next message will be []byte data
-				logs.Debugf("FileReference: %d/%d", tmp.FileIndex+1, blocks)
-
-			default:
-				logs.Debugf("Hit Default Case??: %+v", tmp)
-			}
-		}
-	}()
-
-	// Wait for receiver goroutine to be ready before returning
-	<-h.ready
-}
-
-func (h *DefaultRemoteHandler) PassFileReference(fr *FileReference, d []byte) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.stream <- fr
-	h.stream <- d
 }
 
 // calculate optimal block size based on file size
@@ -223,25 +137,6 @@ func HashFile(filePath string) ([32]byte, int64, error) {
 
 	// Return the hash and file size
 	return hash, fileSize, nil
-
-	// buf := make([]byte, 4096) // 4kb buffer
-	// for {
-	// 	n, err := file.Read(buf)
-	// 	if err != nil && err != io.EOF {
-	// 		return [32]byte{}, 0, err
-	// 	}
-	// 	if n == 0 {
-	// 		break
-	// 	}
-	// 	hasher.Write(buf[:n]) // update hash with the read chunk
-	// }
-
-	// // convert the hash to [32]byte
-	// var hash [32]byte
-	// copy(hash[:], hasher.Sum(nil))
-
-	// // return the hash and file size
-	// return hash, fileSize, nil
 }
 
 func CopyFile(srcPath, dstPath string) error {
@@ -279,32 +174,4 @@ func ValidateSHA256(a, b []byte) bool {
 	hash1 := sha256.Sum256(a)
 	hash2 := sha256.Sum256(b)
 	return hash1 == hash2
-}
-
-// convert byte slice to fixed size array
-func SliceToArray20(b []byte) ([KeySize]byte, error) {
-	if len(b) != KeySize {
-		return [KeySize]byte{}, fmt.Errorf("invalid hash length: got %d, want %d", len(b), KeySize)
-	}
-	var arr [KeySize]byte
-	copy(arr[:], b)
-	return arr, nil
-}
-
-// compute computes and returns the key for obj
-func ShaCheckSum(obj []byte, bytes int) []byte {
-	switch bytes {
-	case KeySize:
-		sha_1 := sha1.Sum(obj)
-		return sha_1[:]
-	case HashSize:
-		sha_1 := sha256.Sum256(obj)
-		return sha_1[:]
-	case CryptoSize:
-		sha_1 := sha512.Sum512(obj)
-		return sha_1[:]
-	default:
-		sha_1 := sha1.Sum(obj)
-		return sha_1[:]
-	}
 }

@@ -1,103 +1,56 @@
-# KDHT File Chunking Test Program
+# key_store
 
-A test utility for the KDHT (Kademlia DHT) file chunking and reassembly system. This program tests the ability to break files into chunks, store them, and reassemble them correctly.
+Local file chunking, storage, and reassembly pipeline for dps_files.
 
-## Setup
+## What it does
 
-1. Create required directories:
-```bash
-mkdir -p local/upload local/storage/data local/storage/.cache local/storage/metadata
-```
-
-2. Add test files to `local/upload/` directory
-   - Files are auto-indexed from that folder at runtime
+Files are split into fixed-size chunks (64KB–4MB, targeting ~1000 chunks per file). Each chunk gets a deterministic 20-byte SHA-1 DHT routing key via `computeChunkKey(file_hash, chunk_index)` and is stored as a `.kdht` file. File metadata is persisted as TOML. All operations are safe for concurrent access.
 
 ## Usage
 
-1. Navigate to the test directory:
-```bash
-cd cmd/_test
+Run the interactive TUI client (`cmd/client`) which wraps this package via the `FileLedger` interface over gRPC:
+
+```sh
+make client ARGS="--mode local --storage local/storage"
 ```
 
-2. Run the test program:
-```bash
-go run main.go run
-# Optional end-to-end reassembly/copy validation:
-go run main.go run --reassemble
-# Optional short-lived TTL (seconds) for expiry testing:
-go run main.go run --ttl-seconds 15
+Or start a standalone server and connect remotely:
+
+```sh
+make server ARGS="--addr :9000 --storage local/storage"
+make client ARGS="--mode remote --remotes localhost:9000"
 ```
 
-## Configuration Options
+## Key files
 
-`cmd/storage/main.go` uses a top-level `defaultRuntimeConfig` struct as the runtime default.
-Edit that struct to set baseline behavior (upload path, run mode, cleanup toggles, and default KeyStore config including TTL).
+| File | Purpose |
+|------|---------|
+| `key_store.go` | `KeyStore` struct: init, memory/disk persistence, cleanup, TTL expiry, streaming, verification |
+| `files.go` | `StoreFileLocal`, `LoadAndStoreFileLocal`, `LoadAndStoreFileRemote`, `StoreFromReader`, reassembly, `computeChunkKey` |
+| `file_reference.go` | `FileReference` struct: per-chunk metadata, `StoreFileReference`, `LoadFileReferenceData`, `DeleteFileReference` |
+| `metadata.go` | `MetaData` struct, `PrepareMetaData`, TOML serialization |
+| `directory.go` | `StoreDirectory`, `ListDirectory`, `ReassembleDirectory` — recursive directory ingest/browse/download |
+| `config.go` | `KeyStoreConfig`, `DefaultConfig`, `CalculateBlockSize`, `HashFile`, `CopyFile`, `ValidateSHA256`, constants |
+| `file_ledger.go` | `KeyStoreLedger` adapter: wraps `*KeyStore` to implement `ledgers.FileLedger` |
+| `verify.go` | `VerifyAll`, `VerifyFile`: deep integrity scanning |
+| `intent.go` | Crash recovery via intent files (write-ahead before chunking) |
+| `string.go` | String/formatting helpers |
 
-CLI flags:
-- `--reassemble` enables output file reassembly/validation (overrides config default for that run).
-- `--ttl-seconds N` overrides the configured default metadata TTL for newly stored files.
+## Storage layout
 
-## Program Flow
-
-1. Creates a storage directory for chunks
-2. For each test file:
-   - Reads original file
-   - Calculates original hash
-   - Breaks file into chunks
-   - Stores chunks with verification
-   - Writes/updates a cache metadata entry in `local/storage/.cache/`
-   - Reassembles file
-   - Verifies reassembled file matches original
-
-## Output Locations
-
-- Original files: `./local/upload/`
-- Chunked storage: `./local/storage/data/`
-- Reassembled files: `./local/upload/copy.<filename>` (only when `--reassemble` is set)
-
-## Example Run
-
-```bash
-# Add a test file
-cp myimage.jpg local/upload/image.jpg
-
-# Run the test
-go run main.go run
-
-# Check results
-ls local/upload/copy.image.jpg
+```
+local/storage/
+  data/           *.kdht chunk files (keyed by 20-byte SHA-1 routing key)
+  metadata/       *.toml file metadata (keyed by 32-byte SHA-256 file hash)
+  .cache/         deduplicated metadata cache entries
+  .intents/       crash-recovery intent files (cleared on successful store)
 ```
 
-## Expected Output
+## Tests
 
-The program will show:
-- Original file details
-- Chunking progress
-- Verification steps
-- Reassembly progress
-- Final hash verification
-
-Example output:
-```
-Original file size: 1048576 bytes
-Original file hash: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
-
-File details:
-Total size: 1048576 bytes
-Chunk size: 65536 bytes
-Total chunks: 16
-...
+```sh
+make test            # includes 256MB large file test
+go test -short ./... # skip large file test
 ```
 
-## Error Handling
-
-- If files don't exist in local/upload/, the program will error
-- Verification failures will stop the process
-- If a file hash already exists in `local/storage/.cache/`, store is skipped to avoid duplicate cache/store entries
-- Use the prompt entry `clean` to remove all `.kdht` files from local/storage/data/
-
-## Notes
-
-- The program requires write permissions in both `local/upload/` and `local/storage/` directories
-- Large files will be chunked into approximately 1000 pieces
-- Each chunk is individually verified during storage and reassembly
+Test files: `store_test.go`, `hardening_test.go`, `config_test.go`, `file_ledger_test.go`.

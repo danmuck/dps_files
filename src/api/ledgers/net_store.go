@@ -5,31 +5,11 @@ import "io"
 type FileID [32]byte
 type ChunkID [20]byte
 
-type LogEntry struct {
-	Index   uint64
-	Term    uint64
-	Command []byte
-}
-
 type FileMetaSummary struct {
 	Name      string `json:"name"`
 	Hash      FileID `json:"hash"`
 	Size      uint64 `json:"size"`
 	EntryType string `json:"entry_type,omitempty"`
-}
-
-type LogManager interface {
-	Append(entry LogEntry) error
-	GetEntry(index uint64) (LogEntry, error)
-	LastLogIndex() uint64
-	Commit(index uint64) error
-}
-
-type MetadataStore interface {
-	UpsertFile(fileID FileID, chunks []ChunkID) error
-	GetFile(fileID FileID) ([]ChunkID, error)
-	DeleteFile(fileID FileID) error
-	ListFiles() ([]FileID, error)
 }
 
 // DirectoryEntry represents a child in a directory manifest.

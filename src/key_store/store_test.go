@@ -270,10 +270,6 @@ func TestKeyStorePersistence(t *testing.T) {
 	}
 	originalHash := file.MetaData.FileHash
 
-	if err := ks1.UpdateLocalMetaData(); err != nil {
-		t.Fatalf("Failed to save metadata: %v", err)
-	}
-
 	// Create a new keystore from the same directory — should load persisted state
 	ks2, err := InitKeyStore(storageDir)
 	if err != nil {
@@ -692,8 +688,7 @@ func TestConfigurableDefaultTTL(t *testing.T) {
 		t.Fatalf("expected LoadAndStoreFileLocal TTL=2, got %d", localFile.MetaData.TTL)
 	}
 
-	remoteHandler := &DefaultRemoteHandler{}
-	remoteFile, err := ks.LoadAndStoreFileRemote(diskPath, remoteHandler)
+	remoteFile, err := ks.LoadAndStoreFileRemote(diskPath, nil)
 	if err != nil {
 		t.Fatalf("LoadAndStoreFileRemote failed: %v", err)
 	}

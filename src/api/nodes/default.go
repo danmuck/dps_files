@@ -40,10 +40,6 @@ func (n *DefaultNode) ID() []byte {
 	return n.pubKey
 }
 
-func (n *DefaultNode) PubKey() []byte {
-	return n.pubKey
-}
-
 func (n *DefaultNode) Peers() []*NodeInfo {
 	return nil
 }

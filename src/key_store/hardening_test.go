@@ -3,6 +3,7 @@ package key_store
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha1"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -12,8 +13,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/BurntSushi/toml"
 )
 
 func randomBytes(t *testing.T, n int) []byte {
@@ -175,103 +174,13 @@ func TestDeleteFileReference(t *testing.T) {
 		t.Fatal("expected LoadFileReferenceData to fail after deletion")
 	}
 
-	var missing [KeySize]byte
-	copy(missing[:], ShaCheckSum([]byte("missing"), KeySize))
+	missing := sha1.Sum([]byte("missing"))
 	if err := ks.DeleteFileReference(missing); err == nil {
 		t.Fatal("expected deleting missing reference to fail")
 	}
 }
 
-func TestLoadLocalFileToMemoryFiltersMissingLocation(t *testing.T) {
-	ks := newTestKeyStore(t)
 
-	stored, err := ks.StoreFileLocal("filter_location.bin", randomBytes(t, int(MinBlockSize*2)))
-	if err != nil {
-		t.Fatalf("failed to store file: %v", err)
-	}
-
-	metadataPath := filepath.Join(ks.storageDir, "metadata", fmt.Sprintf("%x.toml", stored.MetaData.FileHash))
-
-	var diskFile File
-	if _, err := toml.DecodeFile(metadataPath, &diskFile); err != nil {
-		t.Fatalf("failed to decode metadata file: %v", err)
-	}
-	if len(diskFile.References) < 2 {
-		t.Fatalf("expected at least 2 references, got %d", len(diskFile.References))
-	}
-	diskFile.References[0].Location = ""
-
-	f, err := os.Create(metadataPath)
-	if err != nil {
-		t.Fatalf("failed to rewrite metadata: %v", err)
-	}
-	enc := toml.NewEncoder(f)
-	if err := enc.Encode(diskFile); err != nil {
-		f.Close()
-		t.Fatalf("failed to encode modified metadata: %v", err)
-	}
-	f.Close()
-
-	loaded, err := ks.LoadLocalFileToMemory(stored.MetaData.FileHash)
-	if err != nil {
-		t.Fatalf("LoadLocalFileToMemory failed: %v", err)
-	}
-	if loaded.References[0] != nil {
-		t.Fatal("expected reference[0] to be filtered out when location is empty")
-	}
-	if loaded.References[1] == nil {
-		t.Fatal("expected reference[1] to remain available")
-	}
-}
-
-func TestLoadAllLocalFilesToMemoryRebuildsIndexes(t *testing.T) {
-	storageDir := filepath.Join(t.TempDir(), "storage")
-	ks1 := newKeyStoreAt(t, storageDir)
-
-	fileA, err := ks1.StoreFileLocal("reload_a.bin", randomBytes(t, 1024))
-	if err != nil {
-		t.Fatalf("failed storing file A: %v", err)
-	}
-	fileB, err := ks1.StoreFileLocal("reload_b.bin", randomBytes(t, int(MinBlockSize+77)))
-	if err != nil {
-		t.Fatalf("failed storing file B: %v", err)
-	}
-
-	ks2 := newKeyStoreAt(t, storageDir)
-
-	ks2.lock.Lock()
-	ks2.files = make(map[[HashSize]byte]*File)
-	ks2.filesByName = make(map[string][HashSize]byte)
-	ks2.chunkIndex = make(map[[KeySize]byte]chunkLoc)
-	ks2.lock.Unlock()
-
-	if err := ks2.LoadAllLocalFilesToMemory(); err != nil {
-		t.Fatalf("LoadAllLocalFilesToMemory failed: %v", err)
-	}
-
-	expectedFiles := 2
-	if len(ks2.files) != expectedFiles {
-		t.Fatalf("expected %d files in memory, got %d", expectedFiles, len(ks2.files))
-	}
-	if len(ks2.filesByName) != expectedFiles {
-		t.Fatalf("expected %d name indexes, got %d", expectedFiles, len(ks2.filesByName))
-	}
-
-	expectedRefs := int(fileA.MetaData.TotalBlocks + fileB.MetaData.TotalBlocks)
-	if len(ks2.chunkIndex) != expectedRefs {
-		t.Fatalf("expected %d chunk index entries, got %d", expectedRefs, len(ks2.chunkIndex))
-	}
-
-	if _, err := ks2.GetFileByName("reload_a.bin"); err != nil {
-		t.Fatalf("expected reload_a.bin to be resolvable by name: %v", err)
-	}
-	if _, err := ks2.GetFileByName("reload_b.bin"); err != nil {
-		t.Fatalf("expected reload_b.bin to be resolvable by name: %v", err)
-	}
-
-	_ = ks1.Cleanup()
-	_ = ks2.Cleanup()
-}
 
 func TestCleanupKDHTAndMetaData(t *testing.T) {
 	// CleanupKDHT should remove chunk files but keep metadata files.
@@ -311,42 +220,6 @@ func TestCleanupKDHTAndMetaData(t *testing.T) {
 	}
 }
 
-func TestVerifyFileReferencesMovesOrphanMetadataToCache(t *testing.T) {
-	ks := newTestKeyStore(t)
-
-	stored, err := ks.StoreFileLocal("orphan.bin", randomBytes(t, int(MinBlockSize*2)))
-	if err != nil {
-		t.Fatalf("failed to store file: %v", err)
-	}
-	if len(stored.References) < 1 {
-		t.Fatal("expected at least one reference")
-	}
-
-	metadataPath := filepath.Join(ks.storageDir, "metadata", fmt.Sprintf("%x.toml", stored.MetaData.FileHash))
-	cachePath := filepath.Join(ks.storageDir, ".cache", fmt.Sprintf("%x.toml", stored.MetaData.FileHash))
-
-	if err := os.Remove(stored.References[0].Location); err != nil {
-		t.Fatalf("failed to remove chunk file to simulate orphan: %v", err)
-	}
-
-	if err := ks.verifyFileReferences(); err != nil {
-		t.Fatalf("verifyFileReferences failed: %v", err)
-	}
-
-	if _, err := os.Stat(metadataPath); !os.IsNotExist(err) {
-		t.Fatalf("expected metadata to be moved from original location, stat err: %v", err)
-	}
-	if _, err := os.Stat(cachePath); err != nil {
-		t.Fatalf("expected metadata to be moved to cache, stat err: %v", err)
-	}
-
-	if _, err := ks.fileFromMemory(stored.MetaData.FileHash); err == nil {
-		t.Fatal("expected orphaned file to be removed from in-memory map")
-	}
-	if _, err := ks.GetFileByName("orphan.bin"); err == nil {
-		t.Fatal("expected orphaned filename to be removed from name index")
-	}
-}
 
 func TestMoveToCacheDeduplicatesByHash(t *testing.T) {
 	ks := newTestKeyStore(t)
@@ -615,96 +488,9 @@ func TestUtilityFunctions(t *testing.T) {
 	if ValidateSHA256(srcData, append(copiedData, 0x01)) {
 		t.Fatal("ValidateSHA256 should fail for different payloads")
 	}
-
-	if _, err := SliceToArray20(make([]byte, KeySize-1)); err == nil {
-		t.Fatal("expected SliceToArray20 to fail for wrong length")
-	}
-	arr, err := SliceToArray20(make([]byte, KeySize))
-	if err != nil {
-		t.Fatalf("SliceToArray20 failed for valid length: %v", err)
-	}
-	if len(arr) != KeySize {
-		t.Fatalf("expected key array length %d, got %d", KeySize, len(arr))
-	}
-
-	if len(ShaCheckSum(srcData, KeySize)) != KeySize {
-		t.Fatalf("expected ShaCheckSum(KeySize) length %d", KeySize)
-	}
-	if len(ShaCheckSum(srcData, HashSize)) != HashSize {
-		t.Fatalf("expected ShaCheckSum(HashSize) length %d", HashSize)
-	}
-	if len(ShaCheckSum(srcData, CryptoSize)) != CryptoSize {
-		t.Fatalf("expected ShaCheckSum(CryptoSize) length %d", CryptoSize)
-	}
-	if len(ShaCheckSum(srcData, 13)) != KeySize {
-		t.Fatalf("expected default ShaCheckSum length %d", KeySize)
-	}
 }
 
-func TestPrepareMetaDataSecure(t *testing.T) {
-	sig := [CryptoSize]byte{}
-	copy(sig[:], randomBytes(t, CryptoSize))
 
-	data := randomBytes(t, 987)
-	md, err := PrepareMetaDataSecure("secure.bin", data, sig)
-	if err != nil {
-		t.Fatalf("PrepareMetaDataSecure failed: %v", err)
-	}
-
-	if md.FileName != "secure.bin" {
-		t.Fatalf("unexpected filename: %s", md.FileName)
-	}
-	if md.TotalSize != uint64(len(data)) {
-		t.Fatalf("unexpected total size: %d", md.TotalSize)
-	}
-	if md.Signature != sig {
-		t.Fatal("signature mismatch")
-	}
-	if md.TTL != DefaultFileTTLSeconds {
-		t.Fatalf("expected default secure TTL of 24h seconds, got %d", md.TTL)
-	}
-	if md.Modified == 0 {
-		t.Fatal("expected modified timestamp to be set")
-	}
-}
-
-func TestLoadAndStoreFileRemoteWithDefaultHandler(t *testing.T) {
-	ks := newTestKeyStore(t)
-
-	localPath := filepath.Join(t.TempDir(), "remote_input.bin")
-	input := randomBytes(t, int(MinBlockSize+333))
-	if err := os.WriteFile(localPath, input, 0644); err != nil {
-		t.Fatalf("failed to write remote input: %v", err)
-	}
-
-	handler := &DefaultRemoteHandler{}
-
-	type result struct {
-		file *File
-		err  error
-	}
-	done := make(chan result, 1)
-	go func() {
-		f, err := ks.LoadAndStoreFileRemote(localPath, handler)
-		done <- result{file: f, err: err}
-	}()
-
-	select {
-	case res := <-done:
-		if res.err != nil {
-			t.Fatalf("LoadAndStoreFileRemote failed: %v", res.err)
-		}
-		if res.file == nil || len(res.file.References) == 0 {
-			t.Fatal("expected remote store to return file with references")
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("LoadAndStoreFileRemote timed out")
-	}
-
-	if _, err := ks.GetFileByName(filepath.Base(localPath)); err != nil {
-		t.Fatalf("expected remote-stored file to be indexed by name: %v", err)
-	}
-}
 
 func TestStringAndFormattingHelpers(t *testing.T) {
 	md := MetaData{
@@ -716,7 +502,8 @@ func TestStringAndFormattingHelpers(t *testing.T) {
 		BlockSize:   1024,
 		TotalBlocks: 2,
 	}
-	copy(md.FileHash[:], ShaCheckSum([]byte("file-hash"), HashSize))
+	fh := sha256.Sum256([]byte("file-hash"))
+	copy(md.FileHash[:], fh[:])
 
 	ref := FileReference{
 		FileName:  "fmt.bin",
@@ -725,8 +512,10 @@ func TestStringAndFormattingHelpers(t *testing.T) {
 		Location:  "/tmp/fmt.kdht",
 		Protocol:  "file",
 	}
-	copy(ref.Key[:], ShaCheckSum([]byte("chunk-key"), KeySize))
-	copy(ref.DataHash[:], ShaCheckSum([]byte("chunk-hash"), HashSize))
+	rk := sha1.Sum([]byte("chunk-key"))
+	copy(ref.Key[:], rk[:])
+	dh := sha256.Sum256([]byte("chunk-hash"))
+	copy(ref.DataHash[:], dh[:])
 	copy(ref.Parent[:], md.FileHash[:])
 
 	file := File{MetaData: md, References: []*FileReference{&ref}}

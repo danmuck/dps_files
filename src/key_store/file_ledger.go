@@ -47,11 +47,7 @@ func (l *KeyStoreLedger) LoadAndStoreFileLocal(localFilePath string) (ledgers.Fi
 }
 
 func (l *KeyStoreLedger) LoadAndStoreFileRemote(localFilePath string, handler any) (ledgers.FileID, error) {
-	rh, ok := handler.(RemoteHandler)
-	if !ok {
-		return ledgers.FileID{}, fmt.Errorf("handler must implement RemoteHandler")
-	}
-	f, err := l.ks.LoadAndStoreFileRemote(localFilePath, rh)
+	f, err := l.ks.LoadAndStoreFileRemote(localFilePath, handler)
 	if err != nil {
 		return ledgers.FileID{}, err
 	}

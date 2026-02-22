@@ -1,6 +1,6 @@
 # Refactor Guard Checklist (Contracts -> Code Touchpoints)
 
-Use this checklist before and during refactors.  
+Use this checklist before and during refactors.
 Rule: no behavior/topology change is complete until contract, model, and implementation stay aligned.
 
 ## KeyStore Baseline Guardrails (Must Always Pass)
@@ -17,8 +17,7 @@ Rule: no behavior/topology change is complete until contract, model, and impleme
 - [ ] `storage_modes.local_only` semantics mapped to `dps_files/src/key_store/StoreFileLocal` and `dps_files/src/key_store/LoadAndStoreFileLocal`.
 - [ ] `storage_modes.cluster_only` semantics mapped to `dps_files/src/key_store/LoadAndStoreFileRemote`.
 - [ ] `storage_modes.hybrid` semantics implemented with local-cache fallback policy in `dps_files/src/key_store/files.go`.
-- [ ] `startup_reference_validation` rules reflected in `dps_files/src/key_store/key_store.go` (`verifyFileReferences` path).
-- [ ] `RemoteHandler` ack/nack/completion/backpressure contract reflected in `dps_files/src/key_store/config.go`.
+- [ ] `startup_reference_validation` rules reflected in `dps_files/src/key_store/key_store.go` (`VerifyAll()` path).
 - [ ] Invariants enforced or test-covered:
 - [ ] `TotalBlocks` math
 - [ ] chunk index continuity
@@ -28,35 +27,34 @@ Rule: no behavior/topology change is complete until contract, model, and impleme
 
 ## Contract: metadata_ledgers.toml -> Code Touchpoints
 
-- [ ] Introduce typed-ID adapter for current string-based metadata API in `dps_files/src/api/ledgers/net_store.go`.
-- [ ] Evolve `MetadataStore` signatures to typed file/chunk IDs in `dps_files/src/api/ledgers/net_store.go`.
+- [x] Typed-ID adapter for metadata API implemented via `ledgers.FileID`/`ledgers.ChunkID` in `dps_files/src/api/ledgers/net_store.go`.
 - [ ] Evolve `FileLedger` from void signatures to explicit C-style signatures in `dps_files/src/api/ledgers/net_store.go`.
 - [ ] Ensure key_store methods satisfy `FileLedger` target behavior in `dps_files/src/key_store/*.go`.
 
 ## Contract: transport_rpc.toml -> Code Touchpoints
 
-- [ ] Add correlation fields (`request_id`, `trace_id`) to RPC envelope in `dps_files/src/api/transport/rpc.proto` and regenerate `dps_files/src/api/transport/rpc.pb.go`.
-- [ ] Resolve frame-size mismatch (chunk payload > uint16 limit) in `dps_files/src/api/transport/encoding.go`.
-- [ ] Keep transport interface compatibility while evolving framing in `dps_files/src/api/transport/transport.go`.
-- [ ] Validate send/receive behavior and failure paths in `dps_files/src/api/transport/tcp.go` and `dps_files/src/api/transport/tcp_handler_test.go`.
+- [x] gRPC service definition in `dps_files/src/api/pb/dps.proto` with HTTP gateway annotations.
+- [x] Streaming upload/download via io.Pipe (no large in-memory buffers) in `dps_files/src/api/grpc/server.go`.
+- [ ] Add correlation fields (`request_id`, `trace_id`) to RPC messages in `dps_files/src/api/pb/dps.proto`.
+- [ ] Enforce max message sizes on inbound gRPC connections.
+- [ ] Add TLS to gRPC connections before Raft log replication carries real data.
 
 ## Contract: node_types.toml -> Code Touchpoints
 
 - [ ] Move `ClientNode` methods to explicit error-returning signatures in `dps_files/src/api/nodes/nodes.go`.
-- [ ] Implement client operation behavior in `dps_files/src/api/nodes/default.go`.
 - [ ] Replace sleep-based shutdown flow with bounded synchronization in `dps_files/src/api/nodes/default.go`.
 
 ## Contract: dht_routing.toml -> Code Touchpoints
 
 - [ ] Implement XOR distance + bucket index logic in `dps_files/src/api/nodes/routing.go`.
-- [ ] Implement `KademliaRouter` methods (`InsertNode`, `RemoveNode`, `Lookup`, `ClosestK`, `GetBucket`, `Size`) in `dps_files/src/api/nodes/routing.go`.
+- [ ] Implement `KademliaRouting` interface with methods (`InsertNode`, `RemoveNode`, `ClosestK`, `GetBucket`, `Size`) in `dps_files/src/api/nodes/routing.go`.
 - [ ] Add routing invariant tests in `dps_files/src/api/nodes/routing_test.go`.
 
 ## Contract: raft_consensus.toml -> Code Touchpoints
 
-- [ ] Add/extend consensus RPC contract surface in `dps_files/src/api/transport/rpc.proto`.
-- [ ] Implement durable log manager backend aligned to `LogManager` in `dps_files/src/api/ledgers/`.
-- [ ] Implement snapshot manager backend aligned to `SnapshotManager` in `dps_files/src/api/ledgers/`.
+- [ ] Add consensus RPC surface in `dps_files/src/api/pb/dps.proto` (or a dedicated raft.proto).
+- [ ] Implement durable log manager backend (LogManager interface will be re-introduced with Raft implementation).
+- [ ] Implement snapshot manager backend (SnapshotManager interface will be re-introduced with Raft implementation).
 - [ ] Implement server-node consensus behavior in `dps_files/src/api/nodes/`.
 
 ## Contract-Model Sync Gate
@@ -66,6 +64,7 @@ Rule: no behavior/topology change is complete until contract, model, and impleme
 
 ## Validation Commands Gate
 
-- [ ] `GOCACHE=/tmp/go-build go test -v ./src/key_store`
-- [ ] `GOCACHE=/tmp/go-build go test -short ./...`
-- [ ] `GOCACHE=/tmp/go-build go test -v ./...`
+- [ ] `go test -short ./...`
+- [ ] `go test -v ./src/key_store/...`
+- [ ] `go test -v ./...`
+- [ ] `make build`

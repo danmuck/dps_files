@@ -467,11 +467,16 @@ func (ks *KeyStore) LoadAndStoreFileLocal(localFilePath string) (*File, error) {
 	return file, nil
 }
 
-// Upload a file from your local file system and pass it to a RemoteHandler to process the
-// data elsewhere
-//
-// NOTE: this is how data is passed to the network
-func (ks *KeyStore) LoadAndStoreFileRemote(localFilePath string, handler RemoteHandler) (*File, error) {
+// remoteHandler is a local interface used by LoadAndStoreFileRemote.
+// It will be redesigned when DHT distribution is implemented.
+type remoteHandler interface {
+	StartReceiver(md *MetaData)
+	PassFileReference(fr *FileReference, d []byte)
+}
+
+// LoadAndStoreFileRemote uploads a file and passes chunks to an optional handler for network distribution.
+// handler must implement remoteHandler or be nil.
+func (ks *KeyStore) LoadAndStoreFileRemote(localFilePath string, handler any) (*File, error) {
 	// open the file
 	f, err := os.Open(localFilePath)
 	if err != nil {
@@ -529,8 +534,13 @@ func (ks *KeyStore) LoadAndStoreFileRemote(localFilePath string, handler RemoteH
 		}
 	}()
 
-	// Start receiver — StartReceiver launches its own goroutine internally
-	handler.StartReceiver(&metadata)
+	var rh remoteHandler
+	if handler != nil {
+		rh, _ = handler.(remoteHandler)
+	}
+	if rh != nil {
+		rh.StartReceiver(&metadata)
+	}
 
 	// create file object
 	file := &File{
@@ -588,7 +598,9 @@ func (ks *KeyStore) LoadAndStoreFileRemote(localFilePath string, handler RemoteH
 		// calculate chunk's dht routing key
 		block.Key = computeChunkKey(metadata.FileHash, i)
 
-		handler.PassFileReference(&block, blockData)
+		if rh != nil {
+			rh.PassFileReference(&block, blockData)
+		}
 
 		file.References[i] = &block
 

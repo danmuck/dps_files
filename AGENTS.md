@@ -20,18 +20,17 @@ Files are split into chunks, each chunk gets a 20-byte SHA-1 DHT key, chunk payl
 
 ## Current Architecture Surfaces
 
-- `cmd/server/main.go`: server node entry point (TCP listener demo)
-- `cmd/client/main.go`: client node entry point (Protobuf RPC demo)
+- `cmd/server/main.go`: gRPC ServerNode entry point (with optional gRPC-Gateway HTTP)
+- `cmd/client/main.go`: ClientNode TUI (local/remote mode)
 - `cmd/chain/main.go`: blockchain demo (AES-GCM)
-- `cmd/storage/`: file chunking integration flow (interactive CLI)
-- `cmd/fileserver/`: TCP file server (4-byte length-prefixed binary protocol)
-- `cmd/httpserver/`: HTTP file server (PUT/GET/Range/DELETE)
+- `cmd/gen_file/main.go`: test file generator (size-aware, reuses existing files)
 - `cmd/internal/logcfg/`: shared smplog config loader
-- `src/api/nodes/`: node interfaces and routing scaffolding
-- `src/api/transport/`: transport interfaces, TCP handler, protobuf encoding, `rpc.proto`
-- `src/api/ledgers/`: ledger/snapshot interfaces
-- `src/impl/`: block and crypto primitives
-- `src/key_store/`: local chunking/storage/reassembly pipeline
+- `src/api/nodes/`: Node/ServerNode/ClientNode interfaces, DefaultServerNode, DefaultClientNode, DefaultRouter, gateway.go
+- `src/api/pb/`: generated gRPC + grpc-gateway code from dps.proto
+- `src/api/grpc/`: grpcserver.Server implementing pb.DPSFilesServer
+- `src/api/ledgers/`: FileLedger interface and supporting types (LogManager/MetadataStore/Snapshot interfaces removed — deferred to Raft/blockchain stages)
+- `src/impl/`: Block, BlockData, crypto utilities (SHA, AES-GCM)
+- `src/key_store/`: KeyStore, KeyStoreLedger, File, FileReference, MetaData, chunking pipeline
 - `local/upload/`: operator upload/test input files
 - `local/storage/`: runtime layout (`data/` chunks, `.cache/`, `metadata/`)
 
@@ -39,22 +38,20 @@ Files are split into chunks, each chunk gets a 20-byte SHA-1 DHT key, chunk payl
 
 - `make test` / `make test-coverage`
 - `make build`
-- `make server`, `make client`, `make chain`
-- `make storage ARGS="..."`
-- `make fileserver ARGS="..."`
-- `make httpserver ARGS="..."`
+- `make server ARGS="--addr :9000 --http :8080 --storage local/storage"`
+- `make client ARGS="--mode local --storage local/storage"`
+- `make chain`
+- `make gen-file SIZE=256MB FILE=local/upload/test.dat`
 - `make tidy`
 - `make build-protobuf`
 
 ## Contracts And Interfaces
 
-Prioritize interfaces/contracts already defined in code and `CLAUDE.md`:
+Active interfaces defined in code and `CLAUDE.md`:
 
-- `ServerNode`, `ClientNode`, `MasterNode`
-- `TransportHandler`
-- `RemoteHandler`
-- `KademliaRouting`
-- `LogManager`, `MetadataStore`, `FileLedger`, `SnapshotManager`, `BackupLedger`
+- `ServerNode`, `ClientNode` — node lifecycle and gRPC connection
+- `FileLedger` — storage backend contract (KeyStoreLedger is the current implementation)
+- `RoutingTable` — routing table operations (DefaultRouter is the current implementation)
 
 When changing behavior, keep lifecycle and RPC semantics explicit: start/stop/status/health/version/config, identity fields (`node_id`, `service_id`, `instance_id`), and observability fields (`component`, `message`, `peer`, `request_id`, `trace_id`).
 
@@ -67,12 +64,13 @@ When changing behavior, keep lifecycle and RPC semantics explicit: start/stop/st
 
 ## Known Implementation Gaps (from `CLAUDE.md`)
 
-- smplog migration is complete project-wide; remaining gap is Phase 1C cleanup items (extract shared chunking helper, add context.Context, remove PRINT_BLOCKS from library code).
-- Kademlia routing logic is incomplete (interface stubs only).
-- UDP transport is a placeholder.
-- Raft and snapshot/backup systems are interface-only.
-- Blockchain Chain struct not yet implemented (Block works, no Chain/persistence).
-- Some transport and hashing paths contain correctness risks noted in `CLAUDE.md`.
+- `context.Context` not yet added to `StoreFileLocal` / `LoadAndStoreFileLocal` for cancellation support.
+- No TLS on gRPC connections (insecure credentials used everywhere).
+- `DefaultClientNode` connects to the first remote address only (no load balancing or failover).
+- Kademlia routing: `KademliaRouting` interface removed; will be re-introduced with XOR distance / k-bucket implementation (Stage 4).
+- Raft consensus: `LogManager`, `MetadataStore`, `SnapshotManager` interfaces removed; will be re-introduced with actual Raft implementation (Stage 5).
+- Blockchain backup: `BackupLedger`, `SnapshotManager` interfaces removed; will be re-introduced with Chain implementation (Stage 6).
+- Blockchain Chain struct not yet implemented (Block works, no Chain/persistence/Append/Validate).
 
 ## Required Reference
 

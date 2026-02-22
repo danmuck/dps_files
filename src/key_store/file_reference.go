@@ -19,7 +19,6 @@ type FileReference struct {
 	Protocol  string         `toml:"protocol"`
 	DataHash  [HashSize]byte `toml:"data_hash"`
 	Parent    [HashSize]byte `toml:"parent"`
-	// MetaData  *MetaData      `toml:"metadata,omitempty"`
 }
 
 func (ks *KeyStore) chunkDataDir() string {

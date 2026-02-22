@@ -859,57 +859,6 @@ func (ks *KeyStore) moveToCache(sourcePath string) error {
 	return nil
 }
 
-// verifyFileReferences scans all tracked files and checks that every chunk's
-// .kdht file exists on disk. Files with missing chunks are removed from
-// in-memory indexes and their metadata is moved to the cache directory.
-func (ks *KeyStore) verifyFileReferences() error {
-	if ks.config.Verbose {
-		logs.Debugf("Verifying file references ...")
-	}
-
-	// Track which files have missing chunks by their hash
-	orphanedFileHashes := make(map[[HashSize]byte]bool)
-
-	// Check each file's references for missing chunk data on disk
-	for fileHash, file := range ks.files {
-		for _, ref := range file.References {
-			if ref == nil {
-				continue
-			}
-			blockPath := ks.GetLocalBlockLocation(ref.Key)
-			if _, err := os.Stat(blockPath); os.IsNotExist(err) {
-				orphanedFileHashes[fileHash] = true
-				// Remove this reference from the chunk index
-				delete(ks.chunkIndex, ref.Key)
-			}
-		}
-	}
-
-	// Move only the affected metadata files to cache
-	if len(orphanedFileHashes) > 0 {
-		metadataDir := filepath.Join(ks.storageDir, "metadata")
-		for fileHash := range orphanedFileHashes {
-			// Remove from name index
-			if file, ok := ks.files[fileHash]; ok {
-				delete(ks.filesByName, file.MetaData.FileName)
-			}
-			// Remove the file from in-memory map
-			delete(ks.files, fileHash)
-
-			// Move its metadata file to cache
-			fileName := fmt.Sprintf("%x.toml", fileHash)
-			sourcePath := filepath.Join(metadataDir, fileName)
-			if err := ks.moveToCache(sourcePath); err != nil {
-				if ks.config.Verbose {
-					logs.Warnf("%v", err)
-				}
-			}
-		}
-	}
-
-	return nil
-}
-
 // DeleteFile removes a file and all its chunks from storage and memory.
 func (ks *KeyStore) DeleteFile(key [HashSize]byte) error {
 	ks.lock.Lock()
