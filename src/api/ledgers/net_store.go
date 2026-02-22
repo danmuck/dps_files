@@ -60,6 +60,7 @@ type FileLedger interface {
 
 	// Directory operations
 	StoreDirectory(rootPath string) (FileID, error)
+	StoreDirectoryManifest(manifestJSON []byte) (FileID, error)
 	ListDirectory(dirID FileID) ([]DirectoryEntry, error)
 	ReassembleDirectory(dirID FileID, outputRoot string) error
 }

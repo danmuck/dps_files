@@ -153,12 +153,18 @@ func (ks *KeyStore) storeDirectoryRecursive(dirPath, rootPath string) ([HashSize
 		Path:     dirRelPath,
 		Children: children,
 	}
+	return ks.storeManifestData(manifest)
+}
+
+// storeManifestData marshals manifest to JSON, stores it as a chunked file,
+// marks the entry as a directory, and links child ParentHash fields.
+func (ks *KeyStore) storeManifestData(manifest DirectoryManifest) ([HashSize]byte, error) {
 	manifestData, err := json.Marshal(manifest)
 	if err != nil {
 		return [HashSize]byte{}, fmt.Errorf("marshal manifest: %w", err)
 	}
 
-	manifestFile, err := ks.StoreFileLocal(dirRelPath, manifestData)
+	manifestFile, err := ks.StoreFileLocal(manifest.Path, manifestData)
 	if err != nil {
 		return [HashSize]byte{}, fmt.Errorf("store manifest: %w", err)
 	}
@@ -170,20 +176,18 @@ func (ks *KeyStore) storeDirectoryRecursive(dirPath, rootPath string) ([HashSize
 		stored.MetaData.EntryType = "directory"
 	}
 	ks.lock.Unlock()
+	manifestFile.MetaData.EntryType = "directory"
 	if err := ks.fileToMemory(manifestFile); err != nil {
 		return [HashSize]byte{}, fmt.Errorf("persist directory metadata: %w", err)
 	}
-	// Update the returned file copy too
-	manifestFile.MetaData.EntryType = "directory"
 
 	// Set ParentHash on children
-	for _, child := range children {
+	for _, child := range manifest.Children {
 		ks.lock.Lock()
 		if stored, ok := ks.files[child.Hash]; ok {
 			stored.MetaData.ParentHash = manifestHash
 		}
 		ks.lock.Unlock()
-		// Persist child with updated parent
 		childFile, err := ks.GetFileByHash(child.Hash)
 		if err != nil {
 			logs.Warnf("failed to get child %s for parent update: %v", child.Path, err)
@@ -196,6 +200,17 @@ func (ks *KeyStore) storeDirectoryRecursive(dirPath, rootPath string) ([HashSize
 	}
 
 	return manifestHash, nil
+}
+
+// StoreManifestJSON unmarshals a client-provided DirectoryManifest JSON blob
+// and stores it as a directory entry. Used for remote directory uploads where
+// the client traverses the local filesystem and sends the assembled manifest.
+func (ks *KeyStore) StoreManifestJSON(manifestJSON []byte) ([HashSize]byte, error) {
+	var manifest DirectoryManifest
+	if err := json.Unmarshal(manifestJSON, &manifest); err != nil {
+		return [HashSize]byte{}, fmt.Errorf("unmarshal manifest: %w", err)
+	}
+	return ks.storeManifestData(manifest)
 }
 
 // ListDirectory reads a directory manifest and returns its children.

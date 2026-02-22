@@ -472,7 +472,8 @@ func (x *ListResponse) GetFiles() []*FileEntry {
 
 type UploadDirRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	RootPath      string                 `protobuf:"bytes,1,opt,name=root_path,json=rootPath,proto3" json:"root_path,omitempty"`
+	RootPath      string                 `protobuf:"bytes,1,opt,name=root_path,json=rootPath,proto3" json:"root_path,omitempty"` // server reads from its own filesystem
+	Manifest      []byte                 `protobuf:"bytes,2,opt,name=manifest,proto3" json:"manifest,omitempty"`                 // client-provided DirectoryManifest JSON
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -512,6 +513,13 @@ func (x *UploadDirRequest) GetRootPath() string {
 		return x.RootPath
 	}
 	return ""
+}
+
+func (x *UploadDirRequest) GetManifest() []byte {
+	if x != nil {
+		return x.Manifest
+	}
+	return nil
 }
 
 type UploadDirResponse struct {
@@ -1188,9 +1196,10 @@ const file_dps_proto_rawDesc = "" +
 	"\n" +
 	"entry_type\x18\x04 \x01(\tR\tentryType\"4\n" +
 	"\fListResponse\x12$\n" +
-	"\x05files\x18\x01 \x03(\v2\x0e.dps.FileEntryR\x05files\"/\n" +
+	"\x05files\x18\x01 \x03(\v2\x0e.dps.FileEntryR\x05files\"K\n" +
 	"\x10UploadDirRequest\x12\x1b\n" +
-	"\troot_path\x18\x01 \x01(\tR\brootPath\"'\n" +
+	"\troot_path\x18\x01 \x01(\tR\brootPath\x12\x1a\n" +
+	"\bmanifest\x18\x02 \x01(\fR\bmanifest\"'\n" +
 	"\x11UploadDirResponse\x12\x12\n" +
 	"\x04hash\x18\x01 \x01(\fR\x04hash\"$\n" +
 	"\x0eListDirRequest\x12\x12\n" +

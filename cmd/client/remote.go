@@ -246,6 +246,20 @@ func (c *GRPCClient) Clean(deep bool) (RemoteCleanResult, error) {
 	}, nil
 }
 
+// UploadDirManifest sends a client-assembled DirectoryManifest JSON blob to
+// the server for storage. Returns the 32-byte root manifest hash.
+func (c *GRPCClient) UploadDirManifest(manifestJSON []byte) ([32]byte, error) {
+	var hash [32]byte
+	ctx, cancel := c.ctx()
+	defer cancel()
+	resp, err := c.stub.UploadDir(ctx, &pb.UploadDirRequest{Manifest: manifestJSON})
+	if err != nil {
+		return hash, fmt.Errorf("upload dir manifest: %w", err)
+	}
+	copy(hash[:], resp.Hash)
+	return hash, nil
+}
+
 // RemoteStorageStats fetches storage usage from the remote server.
 func (c *GRPCClient) RemoteStorageStats() (RemoteStats, error) {
 	ctx, cancel := c.ctx()

@@ -184,10 +184,20 @@ func (s *Server) List(_ context.Context, _ *pb.ListRequest) (*pb.ListResponse, e
 	return &pb.ListResponse{Files: entries}, nil
 }
 
-// UploadDir stores a directory tree that exists on the server's local filesystem.
+// UploadDir stores a directory tree. If req.Manifest is set, the client has
+// already traversed its local filesystem and assembled the manifest JSON; the
+// server stores it directly. Otherwise req.RootPath is read from the server's
+// own filesystem (legacy server-local path).
 func (s *Server) UploadDir(_ context.Context, req *pb.UploadDirRequest) (*pb.UploadDirResponse, error) {
+	if len(req.Manifest) > 0 {
+		fid, err := s.storage.StoreDirectoryManifest(req.Manifest)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "store dir manifest: %v", err)
+		}
+		return &pb.UploadDirResponse{Hash: fid[:]}, nil
+	}
 	if req.RootPath == "" {
-		return nil, status.Error(codes.InvalidArgument, "root_path is required")
+		return nil, status.Error(codes.InvalidArgument, "root_path or manifest is required")
 	}
 	fid, err := s.storage.StoreDirectory(req.RootPath)
 	if err != nil {

@@ -237,8 +237,7 @@ func executeActionOnce(cfg RuntimeConfig, keystore *key_store.KeyStore, input io
 
 		if isDir {
 			if cfg.Mode == ModeRemote {
-				logs.Println("Directory upload is not supported in remote mode. Upload files individually.")
-				return nil
+				return executeRemoteUploadDirAction(cfg, input, resolvedPath)
 			}
 			confirmed, confirmErr := confirmDirectoryUpload(input, resolvedPath)
 			if confirmErr != nil {
@@ -297,6 +296,31 @@ func clearTerminalIfInteractive(input io.Reader) {
 		return
 	}
 	fmt.Print("\033[H\033[2J")
+}
+
+func executeRemoteUploadDirAction(cfg RuntimeConfig, input io.Reader, dirPath string) error {
+	if cfg.RemoteAddr == "" {
+		return fmt.Errorf("remote mode requires an address; use %s or configure remotes", REMOTE_ADDR_FLAG)
+	}
+	confirmed, confirmErr := confirmDirectoryUpload(input, dirPath)
+	if confirmErr != nil {
+		return confirmErr
+	}
+	if !confirmed {
+		return errMenuBack
+	}
+	client, err := NewGRPCClient(cfg.RemoteAddr)
+	if err != nil {
+		return fmt.Errorf("connect to remote: %w", err)
+	}
+	defer client.Close()
+	logs.Printf("\nUploading directory %q to remote %s...\n", dirPath, cfg.RemoteAddr)
+	rootHash, err := executeRemoteUploadDir(client, dirPath, dirPath)
+	if err != nil {
+		return fmt.Errorf("remote dir upload: %w", err)
+	}
+	logs.Printf("Directory upload complete. Root hash: %x\n", rootHash)
+	return nil
 }
 
 func executeRemoteVerify(cfg RuntimeConfig) error {

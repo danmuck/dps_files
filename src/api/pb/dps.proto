@@ -50,7 +50,8 @@ message ListResponse {
 }
 
 message UploadDirRequest {
-  string root_path = 1;
+  string root_path = 1;   // server reads from its own filesystem
+  bytes  manifest  = 2;   // client-provided DirectoryManifest JSON
 }
 
 message UploadDirResponse {

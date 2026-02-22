@@ -132,6 +132,14 @@ func (l *KeyStoreLedger) StoreDirectory(rootPath string) (ledgers.FileID, error)
 	return ledgers.FileID(hash), nil
 }
 
+func (l *KeyStoreLedger) StoreDirectoryManifest(manifestJSON []byte) (ledgers.FileID, error) {
+	hash, err := l.ks.StoreManifestJSON(manifestJSON)
+	if err != nil {
+		return ledgers.FileID{}, err
+	}
+	return ledgers.FileID(hash), nil
+}
+
 func (l *KeyStoreLedger) ListDirectory(dirID ledgers.FileID) ([]ledgers.DirectoryEntry, error) {
 	entries, err := l.ks.ListDirectory([HashSize]byte(dirID))
 	if err != nil {
