@@ -364,6 +364,7 @@ type FileEntry struct {
 	Hash          []byte                 `protobuf:"bytes,2,opt,name=hash,proto3" json:"hash,omitempty"`
 	Size          uint64                 `protobuf:"varint,3,opt,name=size,proto3" json:"size,omitempty"`
 	EntryType     string                 `protobuf:"bytes,4,opt,name=entry_type,json=entryType,proto3" json:"entry_type,omitempty"`
+	ParentHash    []byte                 `protobuf:"bytes,5,opt,name=parent_hash,json=parentHash,proto3" json:"parent_hash,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -424,6 +425,13 @@ func (x *FileEntry) GetEntryType() string {
 		return x.EntryType
 	}
 	return ""
+}
+
+func (x *FileEntry) GetParentHash() []byte {
+	if x != nil {
+		return x.ParentHash
+	}
+	return nil
 }
 
 type ListResponse struct {
@@ -1188,13 +1196,15 @@ const file_dps_proto_rawDesc = "" +
 	"\rDeleteRequest\x12\x12\n" +
 	"\x04hash\x18\x01 \x01(\fR\x04hash\"\x10\n" +
 	"\x0eDeleteResponse\"\r\n" +
-	"\vListRequest\"f\n" +
+	"\vListRequest\"\x87\x01\n" +
 	"\tFileEntry\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04hash\x18\x02 \x01(\fR\x04hash\x12\x12\n" +
 	"\x04size\x18\x03 \x01(\x04R\x04size\x12\x1d\n" +
 	"\n" +
-	"entry_type\x18\x04 \x01(\tR\tentryType\"4\n" +
+	"entry_type\x18\x04 \x01(\tR\tentryType\x12\x1f\n" +
+	"\vparent_hash\x18\x05 \x01(\fR\n" +
+	"parentHash\"4\n" +
 	"\fListResponse\x12$\n" +
 	"\x05files\x18\x01 \x03(\v2\x0e.dps.FileEntryR\x05files\"K\n" +
 	"\x10UploadDirRequest\x12\x1b\n" +

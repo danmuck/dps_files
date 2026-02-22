@@ -183,8 +183,9 @@ func TestRemoteTreeNodes_DirectoryBeforeOrphan(t *testing.T) {
 }
 
 func TestRemoteTreeNodes_ChildGroupedUnderDirectory(t *testing.T) {
-	dir := RemoteFileEntry{Name: "mydir", EntryType: "directory", Size: 2048, Hash: fmt.Sprintf("%x", makeHash(1))}
-	child := RemoteFileEntry{Name: "mydir/child.txt", Size: 1024, Hash: fmt.Sprintf("%x", makeHash(2))}
+	dirHash := fmt.Sprintf("%x", makeHash(1))
+	dir := RemoteFileEntry{Name: "mydir", EntryType: "directory", Size: 2048, Hash: dirHash}
+	child := RemoteFileEntry{Name: "child.txt", Size: 1024, Hash: fmt.Sprintf("%x", makeHash(2)), ParentHash: dirHash}
 	orphan := RemoteFileEntry{Name: "orphan.txt", Size: 512, Hash: fmt.Sprintf("%x", makeHash(3))}
 
 	nodes := buildRemoteTreeNodes([]RemoteFileEntry{orphan, child, dir})
@@ -194,7 +195,7 @@ func TestRemoteTreeNodes_ChildGroupedUnderDirectory(t *testing.T) {
 		t.Fatalf("expected 3, got %d", len(entries))
 	}
 	e1 := entries[1].Node.(remoteTreeNode).Entry
-	if e1.Name != "mydir/child.txt" {
+	if e1.Name != "child.txt" {
 		t.Errorf("expected child at [1], got %q", e1.Name)
 	}
 	if entries[1].Depth == 0 {
@@ -207,9 +208,10 @@ func TestRemoteTreeNodes_ChildGroupedUnderDirectory(t *testing.T) {
 }
 
 func TestRemoteTreeNodes_ChildHasTreePrefix(t *testing.T) {
-	dir := RemoteFileEntry{Name: "d", EntryType: "directory", Size: 500, Hash: fmt.Sprintf("%x", makeHash(1))}
-	c1 := RemoteFileEntry{Name: "d/a", Size: 200, Hash: fmt.Sprintf("%x", makeHash(2))}
-	c2 := RemoteFileEntry{Name: "d/b", Size: 100, Hash: fmt.Sprintf("%x", makeHash(3))}
+	dirHash := fmt.Sprintf("%x", makeHash(1))
+	dir := RemoteFileEntry{Name: "d", EntryType: "directory", Size: 500, Hash: dirHash}
+	c1 := RemoteFileEntry{Name: "a", Size: 200, Hash: fmt.Sprintf("%x", makeHash(2)), ParentHash: dirHash}
+	c2 := RemoteFileEntry{Name: "b", Size: 100, Hash: fmt.Sprintf("%x", makeHash(3)), ParentHash: dirHash}
 
 	nodes := buildRemoteTreeNodes([]RemoteFileEntry{dir, c2, c1})
 	entries := renderTree(nodes)
@@ -226,8 +228,9 @@ func TestRemoteTreeNodes_ChildHasTreePrefix(t *testing.T) {
 }
 
 func TestRemoteTreeNodes_SequentialIndices(t *testing.T) {
-	dir := RemoteFileEntry{Name: "d", EntryType: "directory", Size: 500, Hash: fmt.Sprintf("%x", makeHash(1))}
-	child := RemoteFileEntry{Name: "d/c", Size: 200, Hash: fmt.Sprintf("%x", makeHash(2))}
+	dirHash := fmt.Sprintf("%x", makeHash(1))
+	dir := RemoteFileEntry{Name: "d", EntryType: "directory", Size: 500, Hash: dirHash}
+	child := RemoteFileEntry{Name: "c", Size: 200, Hash: fmt.Sprintf("%x", makeHash(2)), ParentHash: dirHash}
 	orphan := RemoteFileEntry{Name: "f.txt", Size: 50, Hash: fmt.Sprintf("%x", makeHash(3))}
 
 	nodes := buildRemoteTreeNodes([]RemoteFileEntry{orphan, child, dir})

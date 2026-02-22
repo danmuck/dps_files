@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/danmuck/dps_files/src/key_store"
 	tui "github.com/danmuck/tui_go"
@@ -91,11 +90,16 @@ func (n remoteTreeNode) TreeParent() string { return n.parent }
 
 // buildRemoteTreeNodes converts remote entries into tui.TreeNode slice for TreeView.
 func buildRemoteTreeNodes(entries []RemoteFileEntry) []tui.TreeNode {
-	// Build directory name → key map for parent lookup.
-	dirKeys := make(map[string]string) // dirName → key
+	var zeroHash string
+	for range 64 {
+		zeroHash += "0"
+	}
+
+	// Build directory hash → key map for parent lookup.
+	dirKeys := make(map[string]string) // hex hash → node key
 	for _, e := range entries {
 		if e.IsDirectory() {
-			dirKeys[e.Name] = makeNodeKey(e.Size, e.Hash)
+			dirKeys[e.Hash] = makeNodeKey(e.Size, e.Hash)
 		}
 	}
 
@@ -114,18 +118,15 @@ func buildRemoteTreeNodes(entries []RemoteFileEntry) []tui.TreeNode {
 
 		key := makeNodeKey(e.Size, e.Hash)
 
-		// Find parent directory by name prefix.
+		// Match children to parents via ParentHash.
 		var parent string
-		if !e.IsDirectory() {
-			for dirName, dirKey := range dirKeys {
-				if strings.HasPrefix(e.Name, dirName+"/") {
-					parent = dirKey
-					break
-				}
+		if !e.IsDirectory() && e.ParentHash != "" && e.ParentHash != zeroHash {
+			if dk, ok := dirKeys[e.ParentHash]; ok {
+				parent = dk
 			}
-			if parent != "" {
-				label = "[^] " + label
-			}
+		}
+		if parent != "" {
+			label = "[^] " + label
 		}
 
 		nodes = append(nodes, remoteTreeNode{

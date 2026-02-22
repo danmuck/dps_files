@@ -9,7 +9,8 @@ type FileMetaSummary struct {
 	Name      string `json:"name"`
 	Hash      FileID `json:"hash"`
 	Size      uint64 `json:"size"`
-	EntryType string `json:"entry_type,omitempty"`
+	EntryType  string `json:"entry_type,omitempty"`
+	ParentHash FileID `json:"parent_hash,omitempty"`
 }
 
 // DirectoryEntry represents a child in a directory manifest.

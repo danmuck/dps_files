@@ -17,10 +17,11 @@ import (
 
 // RemoteFileEntry is a file entry returned by the server List RPC.
 type RemoteFileEntry struct {
-	Name      string
-	Hash      string // hex-encoded 32-byte SHA-256
-	Size      uint64
-	EntryType string
+	Name       string
+	Hash       string // hex-encoded 32-byte SHA-256
+	Size       uint64
+	EntryType  string
+	ParentHash string // hex-encoded 32-byte SHA-256, empty if no parent
 }
 
 // IsDirectory returns true when this entry is a directory manifest.
@@ -98,10 +99,11 @@ func (c *GRPCClient) List() ([]RemoteFileEntry, error) {
 	entries := make([]RemoteFileEntry, len(resp.Files))
 	for i, f := range resp.Files {
 		entries[i] = RemoteFileEntry{
-			Name:      f.Name,
-			Hash:      hex.EncodeToString(f.Hash),
-			Size:      f.Size,
-			EntryType: f.EntryType,
+			Name:       f.Name,
+			Hash:       hex.EncodeToString(f.Hash),
+			Size:       f.Size,
+			EntryType:  f.EntryType,
+			ParentHash: hex.EncodeToString(f.ParentHash),
 		}
 	}
 	return entries, nil

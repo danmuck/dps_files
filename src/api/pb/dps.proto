@@ -43,6 +43,7 @@ message FileEntry {
   bytes  hash       = 2;
   uint64 size       = 3;
   string entry_type = 4;
+  bytes  parent_hash = 5;
 }
 
 message ListResponse {

@@ -179,10 +179,11 @@ func (s *Server) List(_ context.Context, _ *pb.ListRequest) (*pb.ListResponse, e
 	entries := make([]*pb.FileEntry, len(summaries))
 	for i, sm := range summaries {
 		entries[i] = &pb.FileEntry{
-			Name:      sm.Name,
-			Hash:      sm.Hash[:],
-			Size:      sm.Size,
-			EntryType: sm.EntryType,
+			Name:       sm.Name,
+			Hash:       sm.Hash[:],
+			Size:       sm.Size,
+			EntryType:  sm.EntryType,
+			ParentHash: sm.ParentHash[:],
 		}
 	}
 	return &pb.ListResponse{Files: entries}, nil

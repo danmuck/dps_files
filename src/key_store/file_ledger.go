@@ -116,10 +116,11 @@ func (l *KeyStoreLedger) ListKnownFilesMetadata() []ledgers.FileMetaSummary {
 			size = m.ContentSize
 		}
 		summaries[i] = ledgers.FileMetaSummary{
-			Name:      m.FileName,
-			Hash:      ledgers.FileID(m.FileHash),
-			Size:      size,
-			EntryType: m.EntryType,
+			Name:       m.FileName,
+			Hash:       ledgers.FileID(m.FileHash),
+			Size:       size,
+			EntryType:  m.EntryType,
+			ParentHash: ledgers.FileID(m.ParentHash),
 		}
 	}
 	return summaries
