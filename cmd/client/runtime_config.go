@@ -44,7 +44,6 @@ const (
 	ModeRemote = "remote"
 
 	ActionUpload    MenuAction = "upload"
-	ActionStore     MenuAction = "store"
 	ActionClean     MenuAction = "clean"
 	ActionDeepClean MenuAction = "deep-clean"
 	ActionView      MenuAction = "view"
@@ -53,7 +52,6 @@ const (
 	ActionDelete    MenuAction = "delete"
 	ActionExpire    MenuAction = "expire"
 	ActionDownload  MenuAction = "download"
-	ActionUploadDir MenuAction = "upload-dir"
 )
 
 const defaultRuntimeTTLSeconds uint64 = 1800
@@ -68,7 +66,6 @@ type RuntimeConfig struct {
 	CleanKDHTOnExit   bool
 	Action            MenuAction
 	ActionProvided    bool
-	StoreFilePath     string
 	TTLSeconds        uint64
 	KeyStore          key_store.KeyStoreConfig
 	RemoteAddr        string        // active remote host:port
@@ -90,7 +87,6 @@ func defaultConfig() RuntimeConfig {
 		CleanKDHTOnExit:   false,
 		Action:            ActionView,
 		ActionProvided:    false,
-		StoreFilePath:     "",
 		TTLSeconds:        defaultRuntimeTTLSeconds,
 		KeyStore:          ksCfg,
 	}
@@ -100,7 +96,6 @@ var defaultRuntimeConfig = defaultConfig()
 
 const REASSEMBLE_FLAG = "--reassemble"
 const TTL_SECONDS_FLAG = "--ttl-seconds"
-const STORE_PATH_FLAG = "--store-path"
 const VERBOSE_FLAG = "--verbose"
 const REMOTE_ADDR_FLAG = "--remote-addr"
 
@@ -153,20 +148,6 @@ func parseCLI(args []string, cfg RuntimeConfig) (RuntimeConfig, error) {
 			continue
 		}
 
-		if arg == STORE_PATH_FLAG {
-			if i+1 >= len(args) {
-				return runtimeCfg, fmt.Errorf("missing value after %q", STORE_PATH_FLAG)
-			}
-			i++
-			runtimeCfg.StoreFilePath = strings.TrimSpace(args[i])
-			continue
-		}
-
-		if after, ok := strings.CutPrefix(arg, STORE_PATH_FLAG+"="); ok {
-			runtimeCfg.StoreFilePath = strings.TrimSpace(after)
-			continue
-		}
-
 		if arg == REMOTE_ADDR_FLAG {
 			if i+1 >= len(args) {
 				return runtimeCfg, fmt.Errorf("missing value after %q", REMOTE_ADDR_FLAG)
@@ -194,13 +175,6 @@ func parseCLI(args []string, cfg RuntimeConfig) (RuntimeConfig, error) {
 				return runtimeCfg, fmt.Errorf("multiple actions provided: %q", arg)
 			}
 			runtimeCfg.Action = ActionUpload
-			runtimeCfg.ActionProvided = true
-			actionProvided = true
-		case string(ActionStore):
-			if actionProvided {
-				return runtimeCfg, fmt.Errorf("multiple actions provided: %q", arg)
-			}
-			runtimeCfg.Action = ActionStore
 			runtimeCfg.ActionProvided = true
 			actionProvided = true
 		case string(ActionClean):
@@ -259,13 +233,6 @@ func parseCLI(args []string, cfg RuntimeConfig) (RuntimeConfig, error) {
 			runtimeCfg.Action = ActionDownload
 			runtimeCfg.ActionProvided = true
 			actionProvided = true
-		case string(ActionUploadDir), "ud", "updir":
-			if actionProvided {
-				return runtimeCfg, fmt.Errorf("multiple actions provided: %q", arg)
-			}
-			runtimeCfg.Action = ActionUploadDir
-			runtimeCfg.ActionProvided = true
-			actionProvided = true
 		default:
 			return runtimeCfg, fmt.Errorf("unsupported argument %q", arg)
 		}
@@ -283,21 +250,19 @@ func printUsage(indexedFiles []string, cfg RuntimeConfig) {
 	sorted := append([]string(nil), indexedFiles...)
 	sort.Strings(sorted)
 
-	fmt.Printf("Usage: go run main.go [run|remote] [upload|store|clean|deep-clean|view|stats|verify|delete|expire|download] [%s] [%s] [%s N] [%s PATH]\n",
+	fmt.Printf("Usage: go run main.go [run|remote] [upload|clean|deep-clean|view|stats|verify|delete|expire|download] [%s] [%s] [%s N]\n",
 		REASSEMBLE_FLAG,
 		VERBOSE_FLAG,
 		TTL_SECONDS_FLAG,
-		STORE_PATH_FLAG,
 	)
 	fmt.Printf("No mode defaults to %q.\n", cfg.Mode)
 	fmt.Printf("No action defaults to %q.\n", cfg.Action)
 	fmt.Printf("Reassembly defaults to disabled; enable with %q.\n", REASSEMBLE_FLAG)
 	fmt.Printf("Verbose logging defaults to disabled; enable with %q.\n", VERBOSE_FLAG)
 	fmt.Printf("Default TTL is %d seconds; override with %q.\n", cfg.TTLSeconds, TTL_SECONDS_FLAG)
-	fmt.Printf("Store action accepts a direct path via %q.\n", STORE_PATH_FLAG)
 	fmt.Printf("Reassembled copy outputs are written to %s.\n", cfg.KeyStore.StorageDir)
 	fmt.Printf("\nUpload action indexes %s and excludes directories + copy.* files.\n", cfg.UploadDirectory)
-	fmt.Println("Actions: upload (from upload dir), store (explicit filepath), clean (.kdht only), deep-clean (.kdht + metadata + cache), view (inspect metadata + optional reassemble), stats (storage/system stats), verify (deep integrity scan), delete (remove a single file), expire (sweep TTL-expired files), download (write stored file to disk; legacy alias: stream).")
+	fmt.Println("Actions: upload (path prompt; empty = browse upload dir), clean (.kdht only), deep-clean (.kdht + metadata + cache), view (inspect metadata + optional reassemble), stats (storage/system stats), verify (deep integrity scan), delete (remove a single file), expire (sweep TTL-expired files), download (write stored file to disk).")
 
 	if len(sorted) == 0 {
 		fmt.Println("\nNo indexable upload files were found.")
