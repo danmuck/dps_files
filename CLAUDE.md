@@ -7,6 +7,12 @@
 - After any code or documentation update, review `docs/progress/` artifacts before concluding the pass.
 - Update the relevant `docs/progress` buildplan/checklist entries in the same pass so tracker state matches repository state.
 
+## Context Management
+
+- Use `/compact` frequently during long sessions to reduce token surface and keep context focused.
+- Use `/clear` when starting a new logical task or when prior context is no longer relevant.
+- All agents (including subagents) should `/compact` after completing major steps.
+
 ## Project Overview
 
 **dps_files** is a decentralized file storage system written in Go. It combines three distributed-systems primitives:

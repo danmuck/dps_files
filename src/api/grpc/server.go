@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/danmuck/dps_files/src/api/ledgers"
 	"github.com/danmuck/dps_files/src/api/pb"
@@ -51,6 +52,9 @@ func (s *Server) Upload(stream pb.DPSFiles_UploadServer) error {
 	if name == "" {
 		return status.Error(codes.InvalidArgument, "name is required in first chunk")
 	}
+	if strings.Contains(name, "..") || strings.HasPrefix(name, "/") || strings.Contains(name, "\\") {
+		return status.Error(codes.InvalidArgument, "invalid file name")
+	}
 
 	logs.Infof("Upload started: name=%q size=%d", name, size)
 
@@ -87,11 +91,11 @@ func (s *Server) Upload(stream pb.DPSFiles_UploadServer) error {
 
 	if storeErr != nil {
 		logs.Errorf(storeErr, "Upload store failed: name=%q", name)
-		return status.Errorf(codes.Internal, "store: %v", storeErr)
+		return status.Errorf(codes.Internal, "store failed")
 	}
 	if recvErr != nil {
 		logs.Errorf(recvErr, "Upload receive failed: name=%q", name)
-		return status.Errorf(codes.Internal, "receive: %v", recvErr)
+		return status.Errorf(codes.Internal, "upload receive failed")
 	}
 
 	logs.Infof("Upload complete: name=%q hash=%x size=%d", name, fid, size)
@@ -141,12 +145,12 @@ func (s *Server) Download(req *pb.DownloadRequest, stream pb.DPSFiles_DownloadSe
 		}
 		if err != nil {
 			<-errCh
-			return status.Errorf(codes.Internal, "read: %v", err)
+			return status.Errorf(codes.Internal, "download read failed")
 		}
 	}
 	if err := <-errCh; err != nil {
 		logs.Errorf(err, "Download stream failed: name=%q", req.Name)
-		return status.Errorf(codes.NotFound, "stream: %v", err)
+		return status.Errorf(codes.NotFound, "file not found")
 	}
 	logs.Infof("Download complete: name=%q sent=%d bytes", req.Name, sent)
 	return nil
@@ -162,7 +166,7 @@ func (s *Server) Delete(_ context.Context, req *pb.DeleteRequest) (*pb.DeleteRes
 	logs.Infof("Delete: hash=%x", req.Hash)
 	if err := s.storage.DeleteFile(fid); err != nil {
 		logs.Errorf(err, "Delete failed: hash=%x", req.Hash)
-		return nil, status.Errorf(codes.NotFound, "delete: %v", err)
+		return nil, status.Errorf(codes.NotFound, "file not found")
 	}
 	logs.Infof("Delete complete: hash=%x", req.Hash)
 	return &pb.DeleteResponse{}, nil
@@ -189,21 +193,24 @@ func (s *Server) List(_ context.Context, _ *pb.ListRequest) (*pb.ListResponse, e
 // server stores it directly. Otherwise req.RootPath is read from the server's
 // own filesystem (legacy server-local path).
 func (s *Server) UploadDir(_ context.Context, req *pb.UploadDirRequest) (*pb.UploadDirResponse, error) {
+	const maxManifestSize = 100 << 20 // 100 MiB
+	if len(req.Manifest) > maxManifestSize {
+		return nil, status.Errorf(codes.InvalidArgument,
+			"manifest too large: %d bytes (max %d)", len(req.Manifest), maxManifestSize)
+	}
 	if len(req.Manifest) > 0 {
 		fid, err := s.storage.StoreDirectoryManifest(req.Manifest)
 		if err != nil {
-			return nil, status.Errorf(codes.Internal, "store dir manifest: %v", err)
+			logs.Errorf(err, "UploadDir manifest store failed")
+			return nil, status.Errorf(codes.Internal, "store directory failed")
 		}
 		return &pb.UploadDirResponse{Hash: fid[:]}, nil
 	}
-	if req.RootPath == "" {
-		return nil, status.Error(codes.InvalidArgument, "root_path or manifest is required")
+	if req.RootPath != "" {
+		return nil, status.Error(codes.InvalidArgument,
+			"server-side root_path is disabled; provide a manifest instead")
 	}
-	fid, err := s.storage.StoreDirectory(req.RootPath)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "store directory: %v", err)
-	}
-	return &pb.UploadDirResponse{Hash: fid[:]}, nil
+	return nil, status.Error(codes.InvalidArgument, "manifest is required")
 }
 
 // ListDir returns the immediate children of a directory by its hash.
@@ -215,7 +222,8 @@ func (s *Server) ListDir(_ context.Context, req *pb.ListDirRequest) (*pb.ListDir
 	copy(fid[:], req.Hash)
 	ledgerEntries, err := s.storage.ListDirectory(fid)
 	if err != nil {
-		return nil, status.Errorf(codes.NotFound, "list directory: %v", err)
+		logs.Errorf(err, "ListDir failed: hash=%x", req.Hash)
+		return nil, status.Errorf(codes.NotFound, "directory not found")
 	}
 	entries := make([]*pb.DirEntry, len(ledgerEntries))
 	for i, e := range ledgerEntries {

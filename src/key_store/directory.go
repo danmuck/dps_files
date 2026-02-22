@@ -246,6 +246,9 @@ func (ks *KeyStore) ReassembleDirectory(dirHash [HashSize]byte, outputRoot strin
 		return fmt.Errorf("create output dir: %w", err)
 	}
 	for _, child := range children {
+		if strings.Contains(child.Name, "/") || strings.Contains(child.Name, "\\") || child.Name == ".." || child.Name == "." {
+			return fmt.Errorf("invalid directory entry name: %q", child.Name)
+		}
 		childOutput := filepath.Join(outputRoot, child.Name)
 		if child.Type == "directory" {
 			if err := ks.ReassembleDirectory(child.Hash, childOutput); err != nil {

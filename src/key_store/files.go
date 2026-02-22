@@ -234,6 +234,13 @@ func (ks *KeyStore) ReassembleFileToPath(key [HashSize]byte, outputPath string) 
 		return fmt.Errorf("failed to get file: %w", err)
 	}
 
+	// refuse to write through symlinks
+	if info, lErr := os.Lstat(outputPath); lErr == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing to write to symlink: %s", outputPath)
+		}
+	}
+
 	// create output file
 	f, err := os.OpenFile(outputPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, fs.FileMode(file.MetaData.Permissions))
 	if err != nil {
@@ -335,8 +342,8 @@ func (ks *KeyStore) StoreFromReader(name string, r io.Reader, size uint64) (*Fil
 	tmpPath := tmp.Name()
 	defer os.Remove(tmpPath)
 
-	// stream reader to disk
-	written, err := io.Copy(tmp, r)
+	// stream reader to disk (bounded to declared size + 1 to detect oversize)
+	written, err := io.Copy(tmp, io.LimitReader(r, int64(size)+1))
 	if err != nil {
 		tmp.Close()
 		return nil, fmt.Errorf("failed to write upload data: %w", err)
