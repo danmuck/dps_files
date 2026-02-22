@@ -235,6 +235,7 @@ func (s *Server) Verify(_ context.Context, _ *pb.VerifyRequest) (*pb.VerifyRespo
 			Error:      ce.Err.Error(),
 		}
 	}
+	logs.Infof("Verify complete: %d chunk error(s) found", len(chunkErrs))
 	return &pb.VerifyResponse{Errors: protoErrs}, nil
 }
 
@@ -245,6 +246,7 @@ func (s *Server) Expire(_ context.Context, _ *pb.ExpireRequest) (*pb.ExpireRespo
 		return nil, err
 	}
 	removed := ks.CleanupExpired()
+	logs.Infof("Expire complete: removed=%d", removed)
 	return &pb.ExpireResponse{Removed: int64(removed)}, nil
 }
 
@@ -259,6 +261,7 @@ func (s *Server) Clean(_ context.Context, req *pb.CleanRequest) (*pb.CleanRespon
 		if cleanErr != nil {
 			return nil, status.Errorf(codes.Internal, "deep clean: %v", cleanErr)
 		}
+		logs.Infof("Clean(deep) complete: kdht=%d meta=%d cache=%d", result.RemovedKDHT, result.RemovedMetadata, result.RemovedCache)
 		return &pb.CleanResponse{
 			RemovedKdht:     int64(result.RemovedKDHT),
 			RemovedMetadata: int64(result.RemovedMetadata),
@@ -274,6 +277,7 @@ func (s *Server) Clean(_ context.Context, req *pb.CleanRequest) (*pb.CleanRespon
 	if cleanErr := ks.CleanupKDHT(); cleanErr != nil {
 		return nil, status.Errorf(codes.Internal, "cleanup kdht: %v", cleanErr)
 	}
+	logs.Infof("Clean complete: removed_kdht=%d", len(kdhtFiles))
 	return &pb.CleanResponse{RemovedKdht: int64(len(kdhtFiles))}, nil
 }
 
@@ -307,6 +311,7 @@ func (s *Server) Stats(_ context.Context, _ *pb.StatsRequest) (*pb.StatsResponse
 		}
 	}
 	summaries := s.storage.ListKnownFilesMetadata()
+	logs.Debugf("Stats: data=%d meta=%d cache=%d files=%d", dataBytes, metaBytes, cacheBytes, len(summaries))
 	return &pb.StatsResponse{
 		DataBytes:     dataBytes,
 		MetadataBytes: metaBytes,

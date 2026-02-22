@@ -171,9 +171,16 @@ func TestCleanShallow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("clean: %v", err)
 	}
-	if resp.RemovedKdht < 0 {
-		t.Errorf("unexpected negative kdht count: %d", resp.RemovedKdht)
+	if resp.RemovedKdht < 1 {
+		t.Errorf("expected at least 1 kdht file removed, got %d", resp.RemovedKdht)
 	}
+	// Verify the List RPC still works after shallow clean.
+	// Metadata entries persist after shallow clean; only raw .kdht chunk files are removed.
+	listResp, err := client.List(context.Background(), &pb.ListRequest{})
+	if err != nil {
+		t.Fatalf("list after clean: %v", err)
+	}
+	_ = listResp // metadata entries persist after shallow clean; chunks are gone
 }
 
 func TestCleanDeep(t *testing.T) {
@@ -188,7 +195,20 @@ func TestCleanDeep(t *testing.T) {
 	if err != nil {
 		t.Fatalf("deep clean: %v", err)
 	}
-	_ = resp
+	if resp.RemovedKdht < 1 {
+		t.Errorf("expected at least 1 kdht file removed, got %d", resp.RemovedKdht)
+	}
+	if resp.RemovedMetadata < 1 {
+		t.Errorf("expected at least 1 metadata file removed, got %d", resp.RemovedMetadata)
+	}
+	// After deep clean, List should return no files (metadata wiped and in-memory map reset).
+	listResp, err := client.List(context.Background(), &pb.ListRequest{})
+	if err != nil {
+		t.Fatalf("list after deep clean: %v", err)
+	}
+	if len(listResp.Files) != 0 {
+		t.Errorf("expected 0 files after deep clean, got %d", len(listResp.Files))
+	}
 }
 
 func TestStats(t *testing.T) {
