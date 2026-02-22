@@ -7,7 +7,7 @@ owner = "dps_files"
 [scope]
 purpose = "Defines metadata and file-ledger contracts that bridge KeyStore data-plane behavior to replicated control-plane metadata."
 in_scope = "MetadataStore, FileLedger contracts, ID typing, local-vs-cluster visibility semantics, adapter requirements."
-out_of_scope = "Raft replication internals and blockchain chain mechanics."
+out_of_scope = "Raft replication internals."
 
 [entities]
 primary = "MetadataStore"

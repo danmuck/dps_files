@@ -7,7 +7,7 @@ owner = "dps_files"
 [scope]
 purpose = "Defines consensus contracts for authoritative metadata replication from LAN cluster bootstrap to cloud-scale control plane."
 in_scope = "LogManager, SnapshotManager, leader election semantics, replication invariants, failure behavior, observability."
-out_of_scope = "DHT routing internals, chunk data-plane storage internals, blockchain block encoding internals."
+out_of_scope = "DHT routing internals, chunk data-plane storage internals."
 
 [entities]
 primary = "LogManager"

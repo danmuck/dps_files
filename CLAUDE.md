@@ -13,7 +13,6 @@
 
 - **Kademlia DHT** — Peer discovery and distributed chunk routing using XOR-distance-based k-buckets.
 - **Raft Consensus** — A root cluster of server nodes maintains authoritative metadata via leader election and log replication.
-- **Blockchain Backup Ledger** — Periodic snapshots of Raft state are sealed into an append-only chain for tamper-evident history.
 
 Files are split into fixed-size chunks, each assigned a 20-byte SHA-1 DHT key (via `computeChunkKey`). Chunks are stored locally as `.kdht` files and (when networking is complete) distributed across DHT participants. Metadata is persisted as `.toml` files.
 
@@ -23,7 +22,6 @@ Files are split into fixed-size chunks, each assigned a 20-byte SHA-1 DHT key (v
 cmd/
   server/main.go      — ServerNode entry point (gRPC + optional gRPC-Gateway HTTP)
   client/main.go      — ClientNode entry point (interactive TUI, local or remote mode)
-  chain/main.go       — Blockchain demo with AES-GCM encryption
   gen_file/main.go    — Test file generator (size-aware, reuses existing files)
   internal/logcfg/    — Shared smplog config loader
 
@@ -33,7 +31,6 @@ src/
     pb/                — Generated gRPC + grpc-gateway code from dps.proto (DPSFilesClient, DPSFilesServer, all message types)
     grpc/              — grpcserver.Server: implements pb.DPSFilesServer backed by ledgers.FileLedger
     ledgers/           — Interfaces for LogManager, MetadataStore, FileLedger, SnapshotManager, BackupLedger
-  impl/                — Block, BlockData, crypto utilities (SHA, AES-GCM)
   key_store/           — KeyStore, KeyStoreLedger (FileLedger adapter), File, FileReference, MetaData, RemoteHandler, chunking pipeline
 
 tools/gen_text/        — Python test file generator (legacy, outputs should target local/upload)
@@ -54,7 +51,6 @@ make test-coverage                         # build, go test -v ./... -cover, cle
 make build                                 # go build each cmd/* into .build/<name>/
 make server ARGS="--addr :9000 --http :8080 --storage local/storage"  # run ServerNode
 make client ARGS="--mode local --storage local/storage"               # run ClientNode TUI
-make chain                                 # go run cmd/chain/main.go
 make gen-file SIZE=256MB FILE=local/upload/test.dat # generate test file
 make tidy                                  # go mod tidy
 make build-protobuf                        # protoc → src/api/pb/ (go, go-grpc, grpc-gateway plugins)
@@ -75,12 +71,6 @@ make clean                                 # rm -rf .build/
 - **`verify.go`** — `VerifyAll()`, `VerifyFile()`: deep integrity scanning of all stored chunks.
 - **`intent.go`** — Crash recovery via intent files (write-ahead before chunking).
 - **`string.go`** — String/formatting helpers.
-
-### `impl` — Blockchain & Crypto (FUNCTIONAL)
-
-- **`block.go`** — `Block` struct (all fields exported for gob encoding) with `NewBlock()` / `NewBlockEncrypt()`, hash validation, chain verification.
-- **`block_data.go`** — `BlockData` struct (Hash, Data, IV).
-- **`utils.go`** — `EncryptData()` / `DecryptData()` (AES-256-GCM), `CalculateHash()` (SHA-1/256/512), `ValidateHash()`. Handles both `*Block` and `Block` value types.
 
 ### `nodes` — Node Types & Routing (FUNCTIONAL)
 
@@ -121,7 +111,7 @@ Package name: `grpcserver`.
 - **DHT key derivation:** Always use `computeChunkKey(fileHash, chunkIndex)` — appends index as little-endian uint64, then SHA-1.
 - **File extensions:** `.kdht` for chunk data files, `.toml` for metadata.
 - **Chunk sizing:** Dynamic based on file size, bounded by `MinBlockSize` (64KB) and `MaxBlockSize` (4MB), targeting ~1000 chunks per file. Empty files produce 0 blocks.
-- **Serialization:** Protobuf for RPC messages (via gRPC), TOML for metadata persistence, gob for Block hashing.
+- **Serialization:** Protobuf for RPC messages (via gRPC), TOML for metadata persistence.
 - **Dependencies:** Minimal — `BurntSushi/toml`, `google.golang.org/grpc`, `google.golang.org/protobuf`, `github.com/grpc-ecosystem/grpc-gateway/v2`, and `github.com/danmuck/smplog` (structured logging via zerolog).
 - **Logging:** Uses `github.com/danmuck/smplog` with shared config loaded via `cmd/internal/logcfg`. Config resolves `SMPLOG_CONFIG` env var, then `./smplog.config.toml`, then `./local/smplog.config.toml`.
 
@@ -151,11 +141,6 @@ When adding new node types or storage backends:
 
 - **`RaftNode`** — Will extend `ServerNode` with: `ApplyCommand`, `CreateSnapshot`, `GetState`, `AddPeer`, `RemovePeer`.
 - **`KademliaNode`** — Will extend `ClientNode` with: `FindNode`, `FindValue`, `Store` (DHT operations).
-
-### Dual-Ledger Model
-
-1. **Raft log** — Authoritative, replicated metadata store for the root cluster.
-2. **Blockchain** — Periodic snapshots of Raft state sealed into tamper-evident blocks.
 
 ### File Storage Flow
 
@@ -188,8 +173,6 @@ Input file → calculate metadata (SHA-256, size, permissions)
 - Concurrent access safety (RWMutex)
 - Metadata persistence and loading (TOML)
 - Structured logging via smplog (project-wide)
-- AES-256-GCM encryption/decryption (`impl` package)
-- Blockchain block creation and chain validation (hash covers all exported fields)
 - Node creation, start/shutdown lifecycle with signal handling
 
 ### Future (Stubs)
@@ -201,7 +184,6 @@ Input file → calculate metadata (SHA-256, size, permissions)
 - RemoteHandler (placeholder, not wired to network)
 - Raft consensus (interfaces defined, no implementation)
 - Snapshot/backup scheduling (interfaces defined, no implementation)
-- Blockchain Chain struct (Block works, but no Chain/persistence/Append/Validate)
 - Log replication and leader election (not started)
 
 ### Remaining Known Issues

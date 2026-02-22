@@ -32,7 +32,6 @@
 - [ ] **5.1 RemoteHandler real impl** — Wire RemoteHandler to TCP transport. Stream chunks to remote KeyStore instances.
 - [ ] **5.2 Replication** — Store chunks on N peers via DHT STORE. Read from closest peer with fallback.
 - [ ] **5.3 Raft metadata** — Root cluster maintains authoritative file metadata. KeyStore becomes the local storage backend.
-- [ ] **5.4 Blockchain snapshots** — Periodic Raft state sealed into append-only chain.
 
 ## Issues to Address Along the Way
 

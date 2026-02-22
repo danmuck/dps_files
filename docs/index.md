@@ -20,7 +20,6 @@ If implementation diverges from contracts, treat contract docs as authoritative 
 - `docs/architecture/definitions/node_types.toml`
 - `docs/architecture/definitions/metadata_ledgers.toml`
 - `docs/architecture/definitions/raft_consensus.toml`
-- `docs/architecture/definitions/blockchain_backup.toml`
 
 ## Architecture Models
 

@@ -7,7 +7,7 @@ owner = "dps_files"
 [scope]
 purpose = "Defines KeyStore chunking, local persistence, distributed placement contracts, and reassembly behavior."
 in_scope = "KeyStore, File, FileReference, MetaData, storage modes, chunk locator semantics, RemoteHandler stream contract, invariants."
-out_of_scope = "Raft consensus internals, blockchain backup internals, orchestration runtime details."
+out_of_scope = "Raft consensus internals, orchestration runtime details."
 
 [entities]
 primary = "KeyStore"

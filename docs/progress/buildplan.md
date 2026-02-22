@@ -225,57 +225,21 @@
 
 ---
 
-## Stage 6: Chain & Ledgers — Blockchain Backup System
+## Stage 6: Integration & End-to-End Pipeline
 
-> **STATUS: FUTURE** — Interfaces removed. Will be designed from scratch when blockchain work begins.
-
-**Current state:** `Block` struct works with all fields exported. `CalculateHash` and `ValidateHash` handle both `*Block` and `Block` value types. AES-GCM encryption/decryption is functional. `cmd/chain/main.go` demo works. `BackupLedger` and `SnapshotManager` interfaces removed (snapshots.go deleted). No chain struct or persistence.
-
-**Key files:**
-- `src/impl/block.go` — `Block` struct (exported fields), `NewBlock`, `NewBlockEncrypt`, hash methods
-- `src/impl/block_data.go` — `BlockData` struct (Data, Hash, IV fields)
-- `src/impl/utils.go` — `CalculateHash`, `ValidateHash`, `EncryptData`, `DecryptData`
-- `cmd/chain/main.go` — Interactive blockchain demo
-
-### Phase 6A: Chain Structure
-- [x] Fix `CalculateHash` / `gob` issue — Block fields are now exported
-- [x] Fix `CalculateHash` / `ValidateHash` — handles both `*Block` and `Block` type assertions
-- [ ] Create a `Chain` struct: holds `[]*Block`, genesis block, chain height, persistence path
-- [ ] Implement `Append`: validate previous hash linkage, add block
-- [ ] Implement `Validate`: walk the full chain verifying each block's hash and prev-hash linkage
-
-### Phase 6B: Persistence
-- [ ] Implement `Write` and `Load` (gob or binary format)
-- [ ] Implement `Find`: lookup by 20-byte key or 32-byte hash
-- [ ] Re-introduce `BackupLedger` interface with actual implementation
-
-### Phase 6C: Raft Integration
-- [ ] Implement `BackupScheduler`: periodic timer triggers `CreateSnapshot` on Raft leader
-- [ ] Implement `PersistSnapshot`: serialize Raft snapshot into a new `Block` and append to chain
-
-### Phase 6D: Testing
-- [ ] Add test: create genesis → append 10 blocks → validate chain passes
-- [ ] Add test: tamper with a block's data → validate chain fails
-- [ ] Add test: chain persistence — write to disk, load from disk, validate matches
-
----
-
-## Stage 7: Integration & End-to-End Pipeline
-
-**Depends on:** Stages 1-6
+**Depends on:** Stages 1-5
 
 - [ ] End-to-end: store a file → chunk locally → distribute chunks via DHT `STORE` → verify all chunks retrievable via `FIND_VALUE`
 - [ ] End-to-end: Raft cluster of 3 nodes reaches consensus on a file metadata update
-- [ ] End-to-end: Raft leader creates a blockchain backup block, followers validate the chain
 - [ ] End-to-end: retrieve a file by hash → resolve chunks via DHT → reassemble → verify integrity
 - [ ] Add CLI or config-driven node startup (replace hardcoded addresses and node IDs in `cmd/`)
 - [ ] Connect distributed chunk distribution to transport layer so `LoadAndStoreFileRemote` actually distributes chunks over the network
 
 ---
 
-## Stage 8: Production Readiness & CI
+## Stage 7: Production Readiness & CI
 
-**Depends on:** Stages 1-7
+**Depends on:** Stages 1-6
 
 - [ ] Add CI pipeline (GitHub Actions): `make test`, `make build`, lint
 - [x] Add architecture diagrams (Mermaid) showing data flow

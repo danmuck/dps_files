@@ -315,11 +315,11 @@ func executeRemoteUploadDirAction(cfg RuntimeConfig, input io.Reader, dirPath st
 	}
 	defer client.Close()
 	logs.Printf("\nUploading directory %q to remote %s...\n", dirPath, cfg.RemoteAddr)
-	rootHash, err := executeRemoteUploadDir(client, dirPath, dirPath)
+	rootHash, totalSize, err := executeRemoteUploadDir(client, dirPath, dirPath)
 	if err != nil {
 		return fmt.Errorf("remote dir upload: %w", err)
 	}
-	logs.Printf("Directory upload complete. Root hash: %x\n", rootHash)
+	logs.Printf("Directory upload complete. Root hash: %x  total size: %s\n", rootHash, formatBytes(totalSize))
 	return nil
 }
 

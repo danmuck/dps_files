@@ -35,9 +35,6 @@ srvd:
 client:
 	clear; go run ./cmd/client $(ARGS)
 
-chain:
-	clear; go run cmd/chain/main.go
-
 # Generate an upload file: make gen-file SIZE=256MB FILE=local/upload/test.dat
 gen-file:
 	go run cmd/gen_file/main.go $(SIZE) $(FILE)

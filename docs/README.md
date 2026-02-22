@@ -11,7 +11,6 @@ Once finalized, this file is intended to replace the repository root `README.md`
 - a chunked file data plane (`key_store`)
 - a Kademlia-style discovery/routing plane
 - a Raft-based metadata authority plane
-- a blockchain-backed snapshot history plane
 
 The immediate goal is practical local-network storage.
 The long-term goal is staged expansion into distributed cloud storage.
@@ -49,7 +48,6 @@ Supporting contracts:
 
 - `docs/architecture/definitions/dht_routing.toml`
 - `docs/architecture/definitions/raft_consensus.toml`
-- `docs/architecture/definitions/blockchain_backup.toml`
 
 ## Model Views
 

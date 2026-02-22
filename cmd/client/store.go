@@ -17,71 +17,76 @@ import (
 // executeRemoteUploadDir recursively uploads a local directory to a remote server.
 // It uploads each file via client.Upload, assembles a DirectoryManifest from the
 // returned hashes, then sends the manifest via client.UploadDirManifest.
-// Returns the root manifest hash.
-func executeRemoteUploadDir(client *GRPCClient, localPath, rootPath string) ([32]byte, error) {
+// Returns the root manifest hash and the combined content size of all files.
+func executeRemoteUploadDir(client *GRPCClient, localPath, rootPath string) ([32]byte, uint64, error) {
 	entries, err := os.ReadDir(localPath)
 	if err != nil {
-		return [32]byte{}, fmt.Errorf("read dir %s: %w", localPath, err)
+		return [32]byte{}, 0, fmt.Errorf("read dir %s: %w", localPath, err)
 	}
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].Name() < entries[j].Name()
 	})
 
 	var children []key_store.DirectoryEntry
+	var totalSize uint64
 	for _, entry := range entries {
 		childPath := filepath.Join(localPath, entry.Name())
 		relPath, err := filepath.Rel(rootPath, childPath)
 		if err != nil {
-			return [32]byte{}, fmt.Errorf("rel path: %w", err)
+			return [32]byte{}, 0, fmt.Errorf("rel path: %w", err)
 		}
 		relPath = filepath.ToSlash(relPath)
 
 		if entry.IsDir() {
-			subHash, err := executeRemoteUploadDir(client, childPath, rootPath)
+			subHash, subSize, err := executeRemoteUploadDir(client, childPath, rootPath)
 			if err != nil {
-				return [32]byte{}, err
+				return [32]byte{}, 0, err
 			}
+			totalSize += subSize
 			children = append(children, key_store.DirectoryEntry{
 				Name: entry.Name(),
 				Path: relPath,
 				Hash: subHash,
 				Type: "directory",
-				Size: 0,
+				Size: subSize,
 			})
 		} else {
 			hash, err := client.Upload(childPath)
 			if err != nil {
-				return [32]byte{}, fmt.Errorf("upload %s: %w", relPath, err)
+				return [32]byte{}, 0, fmt.Errorf("upload %s: %w", relPath, err)
 			}
 			info, err := entry.Info()
 			if err != nil {
-				return [32]byte{}, fmt.Errorf("stat %s: %w", relPath, err)
+				return [32]byte{}, 0, fmt.Errorf("stat %s: %w", relPath, err)
 			}
+			fileSize := uint64(info.Size())
+			totalSize += fileSize
 			children = append(children, key_store.DirectoryEntry{
 				Name: entry.Name(),
 				Path: relPath,
 				Hash: hash,
 				Type: "file",
-				Size: uint64(info.Size()),
+				Size: fileSize,
 			})
 		}
 	}
 
 	dirRelPath, err := filepath.Rel(rootPath, localPath)
 	if err != nil {
-		return [32]byte{}, fmt.Errorf("rel path for dir: %w", err)
+		return [32]byte{}, 0, fmt.Errorf("rel path for dir: %w", err)
 	}
 	dirRelPath = filepath.ToSlash(dirRelPath)
 	if dirRelPath == "." {
 		dirRelPath = filepath.Base(rootPath)
 	}
 
-	manifest := key_store.DirectoryManifest{Path: dirRelPath, Children: children}
+	manifest := key_store.DirectoryManifest{Path: dirRelPath, Children: children, TotalSize: totalSize}
 	manifestJSON, err := json.Marshal(manifest)
 	if err != nil {
-		return [32]byte{}, fmt.Errorf("marshal manifest: %w", err)
+		return [32]byte{}, 0, fmt.Errorf("marshal manifest: %w", err)
 	}
-	return client.UploadDirManifest(manifestJSON)
+	hash, err := client.UploadDirManifest(manifestJSON)
+	return hash, totalSize, err
 }
 
 func verifyChunks(ks *key_store.KeyStore, file *key_store.File) error {

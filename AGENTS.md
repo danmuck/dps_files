@@ -14,7 +14,6 @@ This header is repository-specific and sits above the generic AGENTS footer cont
 
 - **Kademlia DHT** for peer discovery and chunk routing (XOR distance / k-buckets).
 - **Raft consensus** for authoritative replicated metadata in a root cluster.
-- **Blockchain backup ledger** for tamper-evident snapshots of Raft state.
 
 Files are split into chunks, each chunk gets a 20-byte SHA-1 DHT key, chunk payloads are stored as `.kdht`, and metadata is persisted as TOML.
 
@@ -22,14 +21,12 @@ Files are split into chunks, each chunk gets a 20-byte SHA-1 DHT key, chunk payl
 
 - `cmd/server/main.go`: gRPC ServerNode entry point (with optional gRPC-Gateway HTTP)
 - `cmd/client/main.go`: ClientNode TUI (local/remote mode)
-- `cmd/chain/main.go`: blockchain demo (AES-GCM)
 - `cmd/gen_file/main.go`: test file generator (size-aware, reuses existing files)
 - `cmd/internal/logcfg/`: shared smplog config loader
 - `src/api/nodes/`: Node/ServerNode/ClientNode interfaces, DefaultServerNode, DefaultClientNode, DefaultRouter, gateway.go
 - `src/api/pb/`: generated gRPC + grpc-gateway code from dps.proto
 - `src/api/grpc/`: grpcserver.Server implementing pb.DPSFilesServer
-- `src/api/ledgers/`: FileLedger interface and supporting types (LogManager/MetadataStore/Snapshot interfaces removed — deferred to Raft/blockchain stages)
-- `src/impl/`: Block, BlockData, crypto utilities (SHA, AES-GCM)
+- `src/api/ledgers/`: FileLedger interface and supporting types (LogManager/MetadataStore/Snapshot interfaces removed — deferred to Raft stage)
 - `src/key_store/`: KeyStore, KeyStoreLedger, File, FileReference, MetaData, chunking pipeline
 - `local/upload/`: operator upload/test input files
 - `local/storage/`: runtime layout (`data/` chunks, `.cache/`, `metadata/`)
@@ -40,7 +37,6 @@ Files are split into chunks, each chunk gets a 20-byte SHA-1 DHT key, chunk payl
 - `make build`
 - `make server ARGS="--addr :9000 --http :8080 --storage local/storage"`
 - `make client ARGS="--mode local --storage local/storage"`
-- `make chain`
 - `make gen-file SIZE=256MB FILE=local/upload/test.dat`
 - `make tidy`
 - `make build-protobuf`
@@ -69,8 +65,6 @@ When changing behavior, keep lifecycle and RPC semantics explicit: start/stop/st
 - `DefaultClientNode` connects to the first remote address only (no load balancing or failover).
 - Kademlia routing: `KademliaRouting` interface removed; will be re-introduced with XOR distance / k-bucket implementation (Stage 4).
 - Raft consensus: `LogManager`, `MetadataStore`, `SnapshotManager` interfaces removed; will be re-introduced with actual Raft implementation (Stage 5).
-- Blockchain backup: `BackupLedger`, `SnapshotManager` interfaces removed; will be re-introduced with Chain implementation (Stage 6).
-- Blockchain Chain struct not yet implemented (Block works, no Chain/persistence/Append/Validate).
 
 ## Required Reference
 
