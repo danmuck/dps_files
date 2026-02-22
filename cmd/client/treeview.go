@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/danmuck/dps_files/src/key_store"
 	tui "github.com/danmuck/tui_go"
@@ -130,4 +132,88 @@ func buildRemoteTreeNodes(entries []RemoteFileEntry) []tui.TreeNode {
 // makeNodeKey builds a sort key that orders by size descending, then by hash.
 func makeNodeKey(size uint64, hash string) string {
 	return fmt.Sprintf("%020d:%s", ^size, hash)
+}
+
+// localFSTreeNode implements tui.TreeNode for local filesystem entries.
+type localFSTreeNode struct {
+	Path  string
+	Name  string
+	IsDir bool
+	Size  int64
+	key    string
+	parent string
+	label  string
+}
+
+func (n localFSTreeNode) TreeLabel() string  { return n.label }
+func (n localFSTreeNode) TreeKey() string    { return n.key }
+func (n localFSTreeNode) TreeParent() string { return n.parent }
+
+// buildLocalFSTreeNodes walks rootPath up to 5 levels deep and returns a
+// tui.TreeNode slice for rendering with TreeViewTC.
+func buildLocalFSTreeNodes(rootPath string) ([]tui.TreeNode, error) {
+	info, err := os.Stat(rootPath)
+	if err != nil {
+		return nil, err
+	}
+	rootKey := makeNodeKey(^uint64(0), rootPath)
+	nodes := []tui.TreeNode{
+		localFSTreeNode{
+			Path:   rootPath,
+			Name:   info.Name(),
+			IsDir:  true,
+			key:    rootKey,
+			parent: "",
+			label:  info.Name() + "/",
+		},
+	}
+	if err := walkLocalFS(rootPath, rootKey, 0, 5, &nodes); err != nil {
+		return nil, err
+	}
+	return nodes, nil
+}
+
+// walkLocalFS recursively appends filesystem entries under dirPath to nodes.
+func walkLocalFS(dirPath, parentKey string, depth, maxDepth int, nodes *[]tui.TreeNode) error {
+	if depth >= maxDepth {
+		return nil
+	}
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		childPath := filepath.Join(dirPath, e.Name())
+		if e.IsDir() {
+			childKey := makeNodeKey(^uint64(0), childPath)
+			*nodes = append(*nodes, localFSTreeNode{
+				Path:   childPath,
+				Name:   e.Name(),
+				IsDir:  true,
+				key:    childKey,
+				parent: parentKey,
+				label:  e.Name() + "/",
+			})
+			if err := walkLocalFS(childPath, childKey, depth+1, maxDepth, nodes); err != nil {
+				return err
+			}
+		} else {
+			info, infoErr := e.Info()
+			if infoErr != nil {
+				continue
+			}
+			size := uint64(info.Size())
+			childKey := makeNodeKey(size, childPath)
+			*nodes = append(*nodes, localFSTreeNode{
+				Path:   childPath,
+				Name:   e.Name(),
+				IsDir:  false,
+				Size:   info.Size(),
+				key:    childKey,
+				parent: parentKey,
+				label:  e.Name() + "  size: " + formatBytes(size),
+			})
+		}
+	}
+	return nil
 }

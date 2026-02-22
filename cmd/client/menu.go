@@ -268,35 +268,46 @@ func promptUploadPath(input io.Reader, cfg RuntimeConfig) (path string, isDir bo
 		}
 
 		if candidate != "" {
-			resolved := filepath.Clean(candidate)
+			resolved := filepath.Clean(expandPath(candidate))
 			info, statErr := os.Stat(resolved)
 			if statErr != nil {
 				logs.Printf("Path not found: %v. Try again or press Enter to browse.\n", statErr)
 				continue
 			}
-			return resolved, info.IsDir(), nil
+			if !info.IsDir() {
+				return resolved, false, nil
+			}
+			// Directory path entered: show tree and let user pick.
+			selectedPath, selectedIsDir, selErr := selectFromLocalFSTree(t, reader, resolved)
+			if errors.Is(selErr, errMenuBack) {
+				continue
+			}
+			return selectedPath, selectedIsDir, selErr
 		}
 
-		// Empty input: browse local/upload/.
-		entries, listErr := getUploadDirEntries(cfg.UploadDirectory)
-		if listErr != nil || len(entries) == 0 {
-			logs.Printf("No entries found in %s. Enter a path manually.\n", cfg.UploadDirectory)
+		// Empty input: browse cfg.UploadDirectory.
+		uploadDir := filepath.Clean(expandPath(cfg.UploadDirectory))
+		selectedPath, selectedIsDir, selErr := selectFromLocalFSTree(t, reader, uploadDir)
+		if errors.Is(selErr, errMenuBack) {
 			continue
 		}
+		return selectedPath, selectedIsDir, selErr
+	}
+}
 
-		t.MenuTitleTC(&tui.TitleParams{Text: cfg.UploadDirectory})
-		for i, e := range entries {
-			if e.IsDir {
-				t.FieldFU(fmt.Sprintf("%d", i), fmt.Sprintf("[dir] %s/", e.Name))
-				nl()
-			} else {
-				t.FieldFU(fmt.Sprintf("%d", i), e.Name)
-				nl()
-			}
-		}
-		t.InputLineFU(fmt.Sprintf("Select [0-%d] or 'all' (files only)", len(entries)-1), "", true)
-		nl()
+// selectFromLocalFSTree renders a tree view of the local filesystem at rootPath
+// and returns the selected path, whether it's a directory, and any error.
+func selectFromLocalFSTree(t tui.TUI, reader *bufio.Reader, rootPath string) (string, bool, error) {
+	nodes, err := buildLocalFSTreeNodes(rootPath)
+	if err != nil {
+		return "", false, fmt.Errorf("browse %s: %w", rootPath, err)
+	}
+	t.MenuTitleTC(&tui.TitleParams{Text: rootPath})
+	tvEntries := t.TreeViewTC(&tui.TreeViewParams{Nodes: nodes, ShowIndex: true})
 
+	for {
+		t.InputLineFU(fmt.Sprintf("Select [0-%d], 'all' to upload all files, or 'e' to cancel", len(tvEntries)-1), "", true)
+		logs.Printf("\n")
 		selLine, selErr := reader.ReadString('\n')
 		if selErr != nil {
 			if selErr == io.EOF {
@@ -309,17 +320,17 @@ func promptUploadPath(input io.Reader, cfg RuntimeConfig) (path string, isDir bo
 			return "", false, errMenuBack
 		}
 		if sel == "all" || sel == "a" || sel == "*" {
-			// Sentinel: caller iterates all files in upload dir.
-			return filepath.Clean(cfg.UploadDirectory), false, nil
+			// Sentinel: caller iterates all files in rootPath.
+			return rootPath, false, nil
 		}
-
 		idx, convErr := strconv.Atoi(sel)
-		if convErr != nil || idx < 0 || idx >= len(entries) {
+		if convErr != nil || idx < 0 || idx >= len(tvEntries) {
 			logs.Printf("Invalid selection %q.\n", sel)
+			logs.Printf("\n")
 			continue
 		}
-		chosen := entries[idx]
-		return filepath.Join(cfg.UploadDirectory, chosen.Name), chosen.IsDir, nil
+		node := tvEntries[idx].Node.(localFSTreeNode)
+		return node.Path, node.IsDir, nil
 	}
 }
 

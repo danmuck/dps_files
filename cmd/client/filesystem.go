@@ -3,8 +3,18 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
+
+// expandPath expands ~ and environment variables at the start of a path.
+func expandPath(p string) string {
+	if p == "~" || strings.HasPrefix(p, "~/") {
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, p[1:])
+	}
+	return os.ExpandEnv(p)
+}
 
 func createDirPath(dir string) error {
 	if err := os.MkdirAll(dir, 0755); err != nil {
