@@ -21,6 +21,29 @@ type RemoteFileEntry struct {
 	Size uint64
 }
 
+// VerifyIssue is a single integrity error returned by the remote Verify RPC.
+type VerifyIssue struct {
+	ChunkIndex uint64
+	FileName   string
+	Err        string
+}
+
+// RemoteCleanResult holds counts from the remote Clean RPC.
+type RemoteCleanResult struct {
+	RemovedKDHT     int64
+	RemovedMetadata int64
+	RemovedCache    int64
+}
+
+// RemoteStats holds storage statistics from the remote Stats RPC.
+type RemoteStats struct {
+	DataBytes     uint64
+	MetadataBytes uint64
+	CacheBytes    uint64
+	TotalBytes    uint64
+	FileCount     int64
+}
+
 // GRPCClient wraps a pb.DPSFilesClient stub with convenience methods
 // matching the surface previously provided by FileServerClient.
 type GRPCClient struct {
@@ -176,4 +199,66 @@ func hexToHash(s string) ([32]byte, error) {
 	}
 	copy(h[:], b)
 	return h, nil
+}
+
+// Verify runs a remote integrity scan and returns any chunk errors.
+func (c *GRPCClient) Verify() ([]VerifyIssue, error) {
+	ctx, cancel := c.ctx()
+	defer cancel()
+	resp, err := c.stub.Verify(ctx, &pb.VerifyRequest{})
+	if err != nil {
+		return nil, fmt.Errorf("verify: %w", err)
+	}
+	issues := make([]VerifyIssue, len(resp.Errors))
+	for i, e := range resp.Errors {
+		issues[i] = VerifyIssue{
+			ChunkIndex: e.ChunkIndex,
+			FileName:   e.FileName,
+			Err:        e.Error,
+		}
+	}
+	return issues, nil
+}
+
+// Expire triggers TTL expiry on the remote server and returns the count removed.
+func (c *GRPCClient) Expire() (int64, error) {
+	ctx, cancel := c.ctx()
+	defer cancel()
+	resp, err := c.stub.Expire(ctx, &pb.ExpireRequest{})
+	if err != nil {
+		return 0, fmt.Errorf("expire: %w", err)
+	}
+	return resp.Removed, nil
+}
+
+// Clean removes chunk data (and optionally metadata + cache) from the remote server.
+func (c *GRPCClient) Clean(deep bool) (RemoteCleanResult, error) {
+	ctx, cancel := c.ctx()
+	defer cancel()
+	resp, err := c.stub.Clean(ctx, &pb.CleanRequest{Deep: deep})
+	if err != nil {
+		return RemoteCleanResult{}, fmt.Errorf("clean: %w", err)
+	}
+	return RemoteCleanResult{
+		RemovedKDHT:     resp.RemovedKdht,
+		RemovedMetadata: resp.RemovedMetadata,
+		RemovedCache:    resp.RemovedCache,
+	}, nil
+}
+
+// RemoteStorageStats fetches storage usage from the remote server.
+func (c *GRPCClient) RemoteStorageStats() (RemoteStats, error) {
+	ctx, cancel := c.ctx()
+	defer cancel()
+	resp, err := c.stub.Stats(ctx, &pb.StatsRequest{})
+	if err != nil {
+		return RemoteStats{}, fmt.Errorf("stats: %w", err)
+	}
+	return RemoteStats{
+		DataBytes:     resp.DataBytes,
+		MetadataBytes: resp.MetadataBytes,
+		CacheBytes:    resp.CacheBytes,
+		TotalBytes:    resp.TotalBytes,
+		FileCount:     resp.FileCount,
+	}, nil
 }
