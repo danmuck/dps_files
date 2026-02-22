@@ -25,6 +25,15 @@ type RemoteFileEntry struct {
 // IsDirectory returns true when this entry is a directory manifest.
 func (e RemoteFileEntry) IsDirectory() bool { return e.EntryType == "directory" }
 
+// RemoteDirEntry is one child returned by the ListDir RPC.
+type RemoteDirEntry struct {
+	Name string
+	Path string
+	Hash [32]byte
+	Type string
+	Size uint64
+}
+
 // VerifyIssue is a single integrity error returned by the remote Verify RPC.
 type VerifyIssue struct {
 	ChunkIndex uint64
@@ -95,6 +104,61 @@ func (c *GRPCClient) List() ([]RemoteFileEntry, error) {
 		}
 	}
 	return entries, nil
+}
+
+// ListDir returns the immediate children of a directory manifest identified by hash.
+func (c *GRPCClient) ListDir(hash [32]byte) ([]RemoteDirEntry, error) {
+	ctx, cancel := c.ctx()
+	defer cancel()
+	resp, err := c.stub.ListDir(ctx, &pb.ListDirRequest{Hash: hash[:]})
+	if err != nil {
+		return nil, fmt.Errorf("list dir: %w", err)
+	}
+	entries := make([]RemoteDirEntry, len(resp.Entries))
+	for i, e := range resp.Entries {
+		var h [32]byte
+		copy(h[:], e.Hash)
+		entries[i] = RemoteDirEntry{
+			Name: e.Name,
+			Path: e.Path,
+			Hash: h,
+			Type: e.Type,
+			Size: e.Size,
+		}
+	}
+	return entries, nil
+}
+
+// DownloadByHash fetches a file by its 32-byte SHA-256 hash and writes it to outputPath.
+func (c *GRPCClient) DownloadByHash(hash [32]byte, outputPath string) (uint64, error) {
+	stream, err := c.stub.Download(context.Background(), &pb.DownloadRequest{Hash: hash[:]})
+	if err != nil {
+		return 0, fmt.Errorf("open download stream: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+		return 0, fmt.Errorf("ensure output dir: %w", err)
+	}
+	out, err := os.Create(outputPath)
+	if err != nil {
+		return 0, fmt.Errorf("create output file: %w", err)
+	}
+	defer out.Close()
+	var written uint64
+	for {
+		chunk, err := stream.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return written, fmt.Errorf("recv chunk: %w", err)
+		}
+		n, werr := out.Write(chunk.Data)
+		written += uint64(n)
+		if werr != nil {
+			return written, fmt.Errorf("write: %w", werr)
+		}
+	}
+	return written, nil
 }
 
 // Upload sends localPath to the server and returns the 32-byte SHA-256 hash.

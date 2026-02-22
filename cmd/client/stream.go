@@ -69,6 +69,35 @@ func executeRemoteDownloadAction(cfg RuntimeConfig, input io.Reader) error {
 		break
 	}
 
+	// Directory: reassemble the full tree and return early
+	if selected.IsDirectory() {
+		manifestHash, err := hexToHash(selected.Hash)
+		if err != nil {
+			return fmt.Errorf("invalid directory hash %q: %w", selected.Hash, err)
+		}
+		outputDir := filepath.Join(cfg.KeyStore.StorageDir, selected.Name)
+		logs.Printf("\nReassembling directory %q to %s\n", selected.Name, outputDir)
+		summary := OpSummary{
+			Operation: "remote-download",
+			FileName:  selected.Name,
+			FileSize:  selected.Size,
+			StartedAt: time.Now(),
+		}
+		beginPhase(&summary.Timer, summary.Operation, "reassemble", "reconstruct directory tree from remote", 1, 1)
+		reassembleErr := remoteReassembleDirectory(client, manifestHash, outputDir)
+		summary.Timer.Stop(reassembleErr != nil)
+		if reassembleErr != nil {
+			summary.Err = reassembleErr
+			renderSummary(summary)
+			writeOpLog(summary)
+			return fmt.Errorf("reassemble directory %q: %w", selected.Name, reassembleErr)
+		}
+		logs.Printf("Directory reassembled to %s\n", outputDir)
+		renderSummary(summary)
+		writeOpLog(summary)
+		return nil
+	}
+
 	outputPath := filepath.Join(cfg.KeyStore.StorageDir, filepath.Base(selected.Name))
 	logs.Printf("\nDownloading %q to %s\n", selected.Name, outputPath)
 
@@ -94,6 +123,35 @@ func executeRemoteDownloadAction(cfg RuntimeConfig, input io.Reader) error {
 	logs.Printf("Downloaded %s to %s\n", formatBytes(written), outputPath)
 	renderSummary(summary)
 	writeOpLog(summary)
+	return nil
+}
+
+// remoteReassembleDirectory recursively downloads a directory tree from the remote server.
+// It mirrors the local ReassembleDirectory logic: ListDir gives immediate children,
+// files are fetched by hash, subdirectories are recursed.
+func remoteReassembleDirectory(c *GRPCClient, hash [32]byte, outputDir string) error {
+	entries, err := c.ListDir(hash)
+	if err != nil {
+		return fmt.Errorf("list dir: %w", err)
+	}
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		return fmt.Errorf("create output dir: %w", err)
+	}
+	for _, e := range entries {
+		childOutput := filepath.Join(outputDir, e.Name)
+		if e.Type == "directory" {
+			if err := remoteReassembleDirectory(c, e.Hash, childOutput); err != nil {
+				return fmt.Errorf("reassemble subdir %s: %w", e.Path, err)
+			}
+		} else {
+			if err := os.MkdirAll(filepath.Dir(childOutput), 0o755); err != nil {
+				return fmt.Errorf("create parent dir: %w", err)
+			}
+			if _, err := c.DownloadByHash(e.Hash, childOutput); err != nil {
+				return fmt.Errorf("download %s: %w", e.Path, err)
+			}
+		}
+	}
 	return nil
 }
 
