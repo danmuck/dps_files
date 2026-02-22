@@ -63,9 +63,7 @@ func promptAction(input io.Reader, cfg *RuntimeConfig, indexedFiles []string, me
 		logs.Printf("\n")
 		logs.Titlef("--[ dps_files | %s ]--\n\n", modeLabel)
 		logs.Menuf("  view 		(inspect metadata + reassemble)\n")
-		logs.Menuf("  store 	(chunk/store explicit filepath)\n")
-		logs.Menuf("  upload 	(chunk/store files from upload dir)\n")
-		logs.Menuf("  upload-dir 	(chunk/store entire directory)\n")
+		logs.Menuf("  upload 	(store file or directory by path)\n")
 		logs.Menuf("  delete 	(remove a single stored file + chunks)\n")
 		logs.Menuf("  download 	(write a stored file to disk)\n")
 		logs.Printf("\n")
@@ -106,12 +104,7 @@ func promptAction(input io.Reader, cfg *RuntimeConfig, indexedFiles []string, me
 			return ActionView, "view", nil
 
 		case string(ActionUpload), "u", "up":
-			if len(indexedFiles) == 0 {
-				logs.StatusWarn("No indexed files are available under " + cfg.UploadDirectory + ".")
-				logs.Printf("\n")
-				continue
-			}
-			return ActionUpload, "upload (from upload dir)", nil
+			return ActionUpload, "upload", nil
 
 		case string(ActionDownload), "dl", "down", "stream", "st":
 			if cfg.Mode != ModeRemote && metadataCount == 0 {
@@ -120,12 +113,6 @@ func promptAction(input io.Reader, cfg *RuntimeConfig, indexedFiles []string, me
 				continue
 			}
 			return ActionDownload, "download", nil
-
-		case string(ActionUploadDir), "ud", "updir":
-			return ActionUploadDir, "upload directory", nil
-
-		case string(ActionStore), "s":
-			return ActionStore, "store (explicit filepath)", nil
 
 		case string(ActionDelete), "del":
 			if cfg.Mode != ModeRemote && metadataCount == 0 {
@@ -161,11 +148,9 @@ func promptAction(input io.Reader, cfg *RuntimeConfig, indexedFiles []string, me
 			logs.Printf("\n")
 			logs.KeyHint("vi", "view — inspect metadata + reassemble")
 			logs.Printf("\n")
-			logs.KeyHint("u, up", "upload — store files from upload dir")
+			logs.KeyHint("u, up", "upload — store file or directory by path")
 			logs.Printf("\n")
 			logs.KeyHint("dl", "download — write a stored file to disk")
-			logs.Printf("\n")
-			logs.KeyHint("s", "store — store explicit filepath")
 			logs.Printf("\n")
 			logs.KeyHint("del", "delete — remove a stored file + chunks")
 			logs.Printf("\n")
@@ -251,104 +236,94 @@ func promptRemoteAddress(reader *bufio.Reader, cfg RuntimeConfig) (string, error
 	return addr, nil
 }
 
-func promptUploadSelection(indexedFiles []string, input io.Reader, cfg RuntimeConfig) ([]string, string, error) {
-	if len(indexedFiles) == 0 {
-		return nil, "", fmt.Errorf("no indexable files found in %s", cfg.UploadDirectory)
-	}
-
-	if cfg.RunAll {
-		return append([]string(nil), indexedFiles...), "all indexed files (RUN_ALL=true)", nil
-	}
-
-	if cfg.DefaultFileIndex < 0 || cfg.DefaultFileIndex >= len(indexedFiles) {
-		return nil, "", fmt.Errorf("default file index %d out of range for %d indexed files",
-			cfg.DefaultFileIndex, len(indexedFiles))
-	}
-
-	if !isInteractiveReader(input) {
-		return []string{indexedFiles[cfg.DefaultFileIndex]},
-			fmt.Sprintf("index %d (%q) [non-interactive default]", cfg.DefaultFileIndex, indexedFiles[cfg.DefaultFileIndex]), nil
-	}
-
-	logs.Titlef("\nUpload options from %s:\n", cfg.UploadDirectory)
-	for idx, file := range indexedFiles {
-		logs.Dataf("  %d) %s\n", idx, file)
-	}
-
+// promptUploadPath handles the unified upload command.
+//
+// If the user enters a non-empty path, it is stat'd and returned with isDir set appropriately.
+// If the user presses Enter with no input, browse mode lists local/upload/ entries
+// (files and [dir] subdirectories) for quick selection.
+// Returns (path, isDir, nil) on success, or errMenuBack if the user types "e".
+func promptUploadPath(input io.Reader, cfg RuntimeConfig) (path string, isDir bool, err error) {
 	reader := getBufferedReader(input)
+
 	for {
-		logs.Promptf("\nSelect upload file [0-%d] or 'all' (default: %d): ", len(indexedFiles)-1, cfg.DefaultFileIndex)
-
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			if err == io.EOF {
-				return []string{indexedFiles[cfg.DefaultFileIndex]},
-					fmt.Sprintf("index %d (%q) [EOF default]", cfg.DefaultFileIndex, indexedFiles[cfg.DefaultFileIndex]), nil
+		logs.Promptf("\nEnter path [%s]: ", cfg.UploadDirectory)
+		line, readErr := reader.ReadString('\n')
+		if readErr != nil {
+			if readErr == io.EOF {
+				return "", false, fmt.Errorf("no path provided")
 			}
-			return nil, "", fmt.Errorf("failed to read selection: %w", err)
-		}
-
-		choice := strings.TrimSpace(strings.ToLower(line))
-		if choice == "" {
-			return []string{indexedFiles[cfg.DefaultFileIndex]},
-				fmt.Sprintf("index %d (%q)", cfg.DefaultFileIndex, indexedFiles[cfg.DefaultFileIndex]), nil
-		}
-		if choice == "e" {
-			return nil, "", errMenuBack
-		}
-
-		if choice == "all" || choice == "a" || choice == "*" {
-			return append([]string(nil), indexedFiles...), fmt.Sprintf("all indexed files (%d)", len(indexedFiles)), nil
-		}
-
-		idx, convErr := strconv.Atoi(choice)
-		if convErr != nil {
-			logs.Printf("Invalid selection %q. Enter a numeric index or 'all'.\n", choice)
-			continue
-		}
-
-		if idx < 0 || idx >= len(indexedFiles) {
-			logs.Printf("Index %d out of range. Valid range is 0-%d.\n", idx, len(indexedFiles)-1)
-			continue
-		}
-
-		return []string{indexedFiles[idx]}, fmt.Sprintf("index %d (%q)", idx, indexedFiles[idx]), nil
-	}
-}
-
-func resolveStorePath(input io.Reader, cfg RuntimeConfig) (string, string, error) {
-	if cfg.StoreFilePath != "" {
-		cleaned := filepath.Clean(cfg.StoreFilePath)
-		return cleaned, fmt.Sprintf("%s (CLI)", cleaned), nil
-	}
-
-	if !isInteractiveReader(input) {
-		return "", "", fmt.Errorf("store action requires %s PATH in non-interactive mode", STORE_PATH_FLAG)
-	}
-
-	reader := getBufferedReader(input)
-	for {
-		logs.Prompt("\nEnter file path to store: ")
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			if err == io.EOF {
-				return "", "", fmt.Errorf("no file path provided")
-			}
-			return "", "", fmt.Errorf("failed to read file path: %w", err)
+			return "", false, fmt.Errorf("read path: %w", readErr)
 		}
 
 		candidate := strings.TrimSpace(line)
-		if candidate == "" {
-			logs.Println("Path cannot be empty.")
-			continue
-		}
 		if strings.EqualFold(candidate, "e") {
-			return "", "", errMenuBack
+			return "", false, errMenuBack
 		}
 
-		resolved := filepath.Clean(candidate)
-		return resolved, resolved, nil
+		if candidate != "" {
+			resolved := filepath.Clean(candidate)
+			info, statErr := os.Stat(resolved)
+			if statErr != nil {
+				logs.Printf("Path not found: %v. Try again or press Enter to browse.\n", statErr)
+				continue
+			}
+			return resolved, info.IsDir(), nil
+		}
+
+		// Empty input: browse local/upload/.
+		entries, listErr := getUploadDirEntries(cfg.UploadDirectory)
+		if listErr != nil || len(entries) == 0 {
+			logs.Printf("No entries found in %s. Enter a path manually.\n", cfg.UploadDirectory)
+			continue
+		}
+
+		logs.Titlef("\n%s:\n", cfg.UploadDirectory)
+		for i, e := range entries {
+			if e.IsDir {
+				logs.Dataf("  %d) [dir] %s/\n", i, e.Name)
+			} else {
+				logs.Dataf("  %d) %s\n", i, e.Name)
+			}
+		}
+		logs.Promptf("\nSelect [0-%d] or 'all' (files only): ", len(entries)-1)
+
+		selLine, selErr := reader.ReadString('\n')
+		if selErr != nil {
+			if selErr == io.EOF {
+				return "", false, fmt.Errorf("no selection")
+			}
+			return "", false, fmt.Errorf("read selection: %w", selErr)
+		}
+		sel := strings.TrimSpace(strings.ToLower(selLine))
+		if sel == "e" {
+			return "", false, errMenuBack
+		}
+		if sel == "all" || sel == "a" || sel == "*" {
+			// Sentinel: caller iterates all files in upload dir.
+			return cfg.UploadDirectory, false, nil
+		}
+
+		idx, convErr := strconv.Atoi(sel)
+		if convErr != nil || idx < 0 || idx >= len(entries) {
+			logs.Printf("Invalid selection %q.\n", sel)
+			continue
+		}
+		chosen := entries[idx]
+		return filepath.Join(cfg.UploadDirectory, chosen.Name), chosen.IsDir, nil
 	}
+}
+
+// confirmDirectoryUpload asks the user to confirm a recursive directory store.
+// Returns true if confirmed (user typed "y" or "yes"), false otherwise.
+func confirmDirectoryUpload(input io.Reader, dirPath string) (bool, error) {
+	reader := getBufferedReader(input)
+	logs.Promptf("Store directory %q recursively? [y/N]: ", dirPath)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return false, fmt.Errorf("read confirmation: %w", err)
+	}
+	choice := strings.ToLower(strings.TrimSpace(line))
+	return choice == "y" || choice == "yes", nil
 }
 
 func promptMetadataReassemblySelection(metadata []key_store.MetaData, input io.Reader) ([]key_store.MetaData, string, error) {
