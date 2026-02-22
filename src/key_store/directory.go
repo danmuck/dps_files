@@ -22,8 +22,9 @@ type DirectoryEntry struct {
 
 // DirectoryManifest is the JSON blob stored as a directory's chunked data.
 type DirectoryManifest struct {
-	Path     string           `json:"path"`
-	Children []DirectoryEntry `json:"children"`
+	Path      string           `json:"path"`
+	Children  []DirectoryEntry `json:"children"`
+	TotalSize uint64           `json:"total_size"` // combined size of all descendant file content
 }
 
 // NormalizePath cleans and validates a relative path for storage.
@@ -85,50 +86,55 @@ func (ks *KeyStore) StoreDirectory(rootPath string) ([HashSize]byte, error) {
 	if !info.IsDir() {
 		return [HashSize]byte{}, fmt.Errorf("%s is not a directory", rootPath)
 	}
-	return ks.storeDirectoryRecursive(rootPath, rootPath)
+	hash, _, err := ks.storeDirectoryRecursive(rootPath, rootPath)
+	return hash, err
 }
 
 // storeDirectoryRecursive processes a single directory level.
-func (ks *KeyStore) storeDirectoryRecursive(dirPath, rootPath string) ([HashSize]byte, error) {
+// Returns the manifest hash and the combined content size of all descendant files.
+func (ks *KeyStore) storeDirectoryRecursive(dirPath, rootPath string) ([HashSize]byte, uint64, error) {
 	entries, err := os.ReadDir(dirPath)
 	if err != nil {
-		return [HashSize]byte{}, fmt.Errorf("read dir %s: %w", dirPath, err)
+		return [HashSize]byte{}, 0, fmt.Errorf("read dir %s: %w", dirPath, err)
 	}
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].Name() < entries[j].Name()
 	})
 
 	var children []DirectoryEntry
+	var totalSize uint64
 
 	for _, entry := range entries {
 		childPath := filepath.Join(dirPath, entry.Name())
 		relPath, err := filepath.Rel(rootPath, childPath)
 		if err != nil {
-			return [HashSize]byte{}, fmt.Errorf("rel path: %w", err)
+			return [HashSize]byte{}, 0, fmt.Errorf("rel path: %w", err)
 		}
 		relPath = filepath.ToSlash(relPath)
 
 		if entry.IsDir() {
-			subHash, err := ks.storeDirectoryRecursive(childPath, rootPath)
+			subHash, subSize, err := ks.storeDirectoryRecursive(childPath, rootPath)
 			if err != nil {
-				return [HashSize]byte{}, err
+				return [HashSize]byte{}, 0, err
 			}
+			totalSize += subSize
 			children = append(children, DirectoryEntry{
 				Name: entry.Name(),
 				Path: relPath,
 				Hash: subHash,
 				Type: "directory",
-				Size: 0,
+				Size: subSize,
 			})
 		} else {
 			file, err := ks.LoadAndStoreFileLocal(childPath)
 			if err != nil {
-				return [HashSize]byte{}, fmt.Errorf("store file %s: %w", relPath, err)
+				return [HashSize]byte{}, 0, fmt.Errorf("store file %s: %w", relPath, err)
 			}
 			// Rename to relative path
 			if err := ks.renameFile(file.MetaData.FileHash, relPath); err != nil {
-				return [HashSize]byte{}, fmt.Errorf("rename %s: %w", relPath, err)
+				return [HashSize]byte{}, 0, fmt.Errorf("rename %s: %w", relPath, err)
 			}
+			totalSize += file.MetaData.TotalSize
 			children = append(children, DirectoryEntry{
 				Name: entry.Name(),
 				Path: relPath,
@@ -142,7 +148,7 @@ func (ks *KeyStore) storeDirectoryRecursive(dirPath, rootPath string) ([HashSize
 	// Build and store manifest
 	dirRelPath, err := filepath.Rel(rootPath, dirPath)
 	if err != nil {
-		return [HashSize]byte{}, fmt.Errorf("rel path for dir: %w", err)
+		return [HashSize]byte{}, 0, fmt.Errorf("rel path for dir: %w", err)
 	}
 	dirRelPath = filepath.ToSlash(dirRelPath)
 	if dirRelPath == "." {
@@ -150,10 +156,12 @@ func (ks *KeyStore) storeDirectoryRecursive(dirPath, rootPath string) ([HashSize
 	}
 
 	manifest := DirectoryManifest{
-		Path:     dirRelPath,
-		Children: children,
+		Path:      dirRelPath,
+		Children:  children,
+		TotalSize: totalSize,
 	}
-	return ks.storeManifestData(manifest)
+	hash, err := ks.storeManifestData(manifest)
+	return hash, totalSize, err
 }
 
 // storeManifestData marshals manifest to JSON, stores it as a chunked file,
@@ -170,13 +178,15 @@ func (ks *KeyStore) storeManifestData(manifest DirectoryManifest) ([HashSize]byt
 	}
 	manifestHash := manifestFile.MetaData.FileHash
 
-	// Mark as directory
+	// Mark as directory and record the combined descendant file content size.
 	ks.lock.Lock()
 	if stored, ok := ks.files[manifestHash]; ok {
 		stored.MetaData.EntryType = "directory"
+		stored.MetaData.ContentSize = manifest.TotalSize
 	}
 	ks.lock.Unlock()
 	manifestFile.MetaData.EntryType = "directory"
+	manifestFile.MetaData.ContentSize = manifest.TotalSize
 	if err := ks.fileToMemory(manifestFile); err != nil {
 		return [HashSize]byte{}, fmt.Errorf("persist directory metadata: %w", err)
 	}

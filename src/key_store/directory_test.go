@@ -195,6 +195,88 @@ func TestDeepNesting(t *testing.T) {
 	}
 }
 
+func TestDirectoryTotalSizeFlat(t *testing.T) {
+	tmpDir := t.TempDir()
+	storageDir := filepath.Join(tmpDir, "storage")
+	testRoot := filepath.Join(tmpDir, "upload")
+	os.MkdirAll(testRoot, 0o755)
+	os.WriteFile(filepath.Join(testRoot, "a.txt"), []byte("hello"), 0o644)     // 5 bytes
+	os.WriteFile(filepath.Join(testRoot, "b.txt"), []byte("world!!"), 0o644)   // 7 bytes
+
+	ks, _ := InitKeyStoreWithConfig(KeyStoreConfig{StorageDir: storageDir, DefaultTTLSeconds: 3600})
+	dirHash, err := ks.StoreDirectory(testRoot)
+	if err != nil {
+		t.Fatalf("StoreDirectory: %v", err)
+	}
+
+	dirFile, err := ks.GetFileByHash(dirHash)
+	if err != nil {
+		t.Fatalf("GetFileByHash: %v", err)
+	}
+	const want = uint64(5 + 7)
+	if dirFile.MetaData.ContentSize != want {
+		t.Errorf("MetaData.ContentSize = %d, want %d (combined file content size)", dirFile.MetaData.ContentSize, want)
+	}
+}
+
+func TestDirectoryTotalSizeNested(t *testing.T) {
+	tmpDir := t.TempDir()
+	storageDir := filepath.Join(tmpDir, "storage")
+	testRoot := filepath.Join(tmpDir, "upload")
+	os.MkdirAll(filepath.Join(testRoot, "sub"), 0o755)
+	os.WriteFile(filepath.Join(testRoot, "root.txt"), []byte("rootfile"), 0o644) // 8 bytes
+	os.WriteFile(filepath.Join(testRoot, "sub", "nested.txt"), []byte("nestedfile"), 0o644) // 10 bytes
+
+	ks, _ := InitKeyStoreWithConfig(KeyStoreConfig{StorageDir: storageDir, DefaultTTLSeconds: 3600})
+	dirHash, err := ks.StoreDirectory(testRoot)
+	if err != nil {
+		t.Fatalf("StoreDirectory: %v", err)
+	}
+
+	dirFile, err := ks.GetFileByHash(dirHash)
+	if err != nil {
+		t.Fatalf("GetFileByHash: %v", err)
+	}
+	const want = uint64(8 + 10)
+	if dirFile.MetaData.ContentSize != want {
+		t.Errorf("root MetaData.ContentSize = %d, want %d (recursive combined size)", dirFile.MetaData.ContentSize, want)
+	}
+}
+
+func TestDirectoryEntrySubdirSize(t *testing.T) {
+	tmpDir := t.TempDir()
+	storageDir := filepath.Join(tmpDir, "storage")
+	testRoot := filepath.Join(tmpDir, "upload")
+	os.MkdirAll(filepath.Join(testRoot, "sub"), 0o755)
+	os.WriteFile(filepath.Join(testRoot, "top.txt"), []byte("topfile"), 0o644)       // 7 bytes
+	os.WriteFile(filepath.Join(testRoot, "sub", "deep.txt"), []byte("deepfile"), 0o644) // 8 bytes
+
+	ks, _ := InitKeyStoreWithConfig(KeyStoreConfig{StorageDir: storageDir, DefaultTTLSeconds: 3600})
+	dirHash, err := ks.StoreDirectory(testRoot)
+	if err != nil {
+		t.Fatalf("StoreDirectory: %v", err)
+	}
+
+	entries, err := ks.ListDirectory(dirHash)
+	if err != nil {
+		t.Fatalf("ListDirectory: %v", err)
+	}
+
+	var subdirEntry *DirectoryEntry
+	for i := range entries {
+		if entries[i].Type == "directory" {
+			subdirEntry = &entries[i]
+		}
+	}
+	if subdirEntry == nil {
+		t.Fatal("no directory entry found in listing")
+	}
+	const want = uint64(8)
+	if subdirEntry.Size != want {
+		t.Errorf("subdir DirectoryEntry.Size = %d, want %d (combined size of subdir contents)", subdirEntry.Size, want)
+	}
+}
+
 func TestEmptyDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
 	storageDir := filepath.Join(tmpDir, "storage")

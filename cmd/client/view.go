@@ -76,7 +76,11 @@ func executeViewAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.Reade
 		}
 		logs.MenuItem(i, displayName, false)
 		logs.Printf("\n")
-		logs.Dataf("      hash: %s...  size: %s  chunks: %d\n", shortHash, formatBytes(md.TotalSize), md.TotalBlocks)
+		displaySize := md.TotalSize
+		if md.IsDirectory() && md.ContentSize > 0 {
+			displaySize = md.ContentSize
+		}
+		logs.Dataf("      hash: %s...  size: %s  chunks: %d\n", shortHash, formatBytes(displaySize), md.TotalBlocks)
 		logs.Dataf("      chunk_size: %s  last_chunk: %s  modified: %s  ttl: %s\n",
 			formatBytes(chunkSize),
 			formatBytes(lastChunk),

@@ -111,10 +111,14 @@ func (l *KeyStoreLedger) ListKnownFilesMetadata() []ledgers.FileMetaSummary {
 	metas := l.ks.ListKnownFiles()
 	summaries := make([]ledgers.FileMetaSummary, len(metas))
 	for i, m := range metas {
+		size := m.TotalSize
+		if m.IsDirectory() && m.ContentSize > 0 {
+			size = m.ContentSize
+		}
 		summaries[i] = ledgers.FileMetaSummary{
 			Name:      m.FileName,
 			Hash:      ledgers.FileID(m.FileHash),
-			Size:      m.TotalSize,
+			Size:      size,
 			EntryType: m.EntryType,
 		}
 	}

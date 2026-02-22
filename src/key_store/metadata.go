@@ -14,8 +14,9 @@ type MetaData struct {
 	TTL         uint64           `toml:"ttl"`
 	BlockSize   uint32           `toml:"chunk_size"`
 	TotalBlocks uint32           `toml:"total_chunks"`
-	EntryType   string           `toml:"entry_type,omitempty"`  // "file" (default/empty) or "directory"
-	ParentHash  [HashSize]byte   `toml:"parent_hash,omitempty"` // hash of parent directory manifest; zero for root
+	EntryType   string           `toml:"entry_type,omitempty"`   // "file" (default/empty) or "directory"
+	ParentHash  [HashSize]byte   `toml:"parent_hash,omitempty"`  // hash of parent directory manifest; zero for root
+	ContentSize uint64           `toml:"content_size,omitempty"` // for directories: combined size of all descendant files
 }
 
 // IsDirectory returns true if this entry is a directory manifest.
