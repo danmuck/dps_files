@@ -173,3 +173,26 @@ func deepCleanStorage(storageDir string) (DeepCleanResult, error) {
 func copyOutputPath(storageDir, fileName string) string {
 	return filepath.Join(storageDir, "copy."+filepath.Base(fileName))
 }
+
+// UploadEntry describes one item in the upload directory listing.
+type UploadEntry struct {
+	Name  string
+	IsDir bool
+}
+
+// getUploadDirEntries lists all non-copy.* entries in dirPath,
+// returning both files and subdirectory names, each tagged with IsDir.
+func getUploadDirEntries(dirPath string) ([]UploadEntry, error) {
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return nil, fmt.Errorf("read directory %s: %w", dirPath, err)
+	}
+	var result []UploadEntry
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasPrefix(strings.ToLower(e.Name()), "copy.") {
+			continue
+		}
+		result = append(result, UploadEntry{Name: e.Name(), IsDir: e.IsDir()})
+	}
+	return result, nil
+}
