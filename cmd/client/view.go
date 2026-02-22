@@ -33,7 +33,11 @@ func executeRemoteViewAction(cfg RuntimeConfig) error {
 		if len(shortHash) > 16 {
 			shortHash = shortHash[:16]
 		}
-		logs.MenuItem(i, logs.PadRight(30, e.Name)+"  hash: "+shortHash+"...  size: "+formatBytes(e.Size), false)
+		displayName := e.Name
+		if e.IsDirectory() {
+			displayName = "[DIR] " + displayName
+		}
+		logs.MenuItem(i, logs.PadRight(30, displayName)+"  hash: "+shortHash+"...  size: "+formatBytes(e.Size), false)
 		logs.Printf("\n")
 	}
 	return nil

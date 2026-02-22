@@ -12,9 +12,10 @@ type LogEntry struct {
 }
 
 type FileMetaSummary struct {
-	Name string `json:"name"`
-	Hash FileID `json:"hash"`
-	Size uint64 `json:"size"`
+	Name      string `json:"name"`
+	Hash      FileID `json:"hash"`
+	Size      uint64 `json:"size"`
+	EntryType string `json:"entry_type,omitempty"`
 }
 
 type LogManager interface {

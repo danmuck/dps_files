@@ -37,7 +37,11 @@ func executeRemoteDownloadAction(cfg RuntimeConfig, input io.Reader) error {
 		if len(shortHash) > 16 {
 			shortHash = shortHash[:16]
 		}
-		logs.MenuItem(i, e.Name+"  hash: "+shortHash+"...  size: "+formatBytes(e.Size), false)
+		displayName := e.Name
+		if e.IsDirectory() {
+			displayName = "[DIR] " + displayName
+		}
+		logs.MenuItem(i, displayName+"  hash: "+shortHash+"...  size: "+formatBytes(e.Size), false)
 		logs.Printf("\n")
 	}
 
@@ -65,7 +69,7 @@ func executeRemoteDownloadAction(cfg RuntimeConfig, input io.Reader) error {
 		break
 	}
 
-	outputPath := copyOutputPath(cfg.KeyStore.StorageDir, selected.Name)
+	outputPath := filepath.Join(cfg.KeyStore.StorageDir, filepath.Base(selected.Name))
 	logs.Printf("\nDownloading %q to %s\n", selected.Name, outputPath)
 
 	summary := OpSummary{

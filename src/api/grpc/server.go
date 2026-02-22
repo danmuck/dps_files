@@ -178,7 +178,7 @@ func (s *Server) List(_ context.Context, _ *pb.ListRequest) (*pb.ListResponse, e
 			Name:      sm.Name,
 			Hash:      sm.Hash[:],
 			Size:      sm.Size,
-			EntryType: "file",
+			EntryType: sm.EntryType,
 		}
 	}
 	return &pb.ListResponse{Files: entries}, nil

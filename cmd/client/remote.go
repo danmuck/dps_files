@@ -16,10 +16,14 @@ import (
 
 // RemoteFileEntry is a file entry returned by the server List RPC.
 type RemoteFileEntry struct {
-	Name string
-	Hash string // hex-encoded 32-byte SHA-256
-	Size uint64
+	Name      string
+	Hash      string // hex-encoded 32-byte SHA-256
+	Size      uint64
+	EntryType string
 }
+
+// IsDirectory returns true when this entry is a directory manifest.
+func (e RemoteFileEntry) IsDirectory() bool { return e.EntryType == "directory" }
 
 // VerifyIssue is a single integrity error returned by the remote Verify RPC.
 type VerifyIssue struct {
@@ -84,9 +88,10 @@ func (c *GRPCClient) List() ([]RemoteFileEntry, error) {
 	entries := make([]RemoteFileEntry, len(resp.Files))
 	for i, f := range resp.Files {
 		entries[i] = RemoteFileEntry{
-			Name: f.Name,
-			Hash: hex.EncodeToString(f.Hash),
-			Size: f.Size,
+			Name:      f.Name,
+			Hash:      hex.EncodeToString(f.Hash),
+			Size:      f.Size,
+			EntryType: f.EntryType,
 		}
 	}
 	return entries, nil
