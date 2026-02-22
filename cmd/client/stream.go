@@ -5,7 +5,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -30,25 +29,27 @@ func executeRemoteDownloadAction(cfg RuntimeConfig, input io.Reader) error {
 		return nil
 	}
 
-	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
-	logs.Titlef("\nRemote files (%d):\n", len(entries))
-	for i, e := range entries {
-		shortHash := e.Hash
+	items := buildRemoteTree(entries)
+	logs.Titlef("\nRemote files (%d):\n", len(items))
+	for _, it := range items {
+		shortHash := it.Entry.Hash
 		if len(shortHash) > 16 {
 			shortHash = shortHash[:16]
 		}
-		displayName := e.Name
-		if e.IsDirectory() {
-			displayName = "[DIR] " + displayName
+		displayName := it.Prefix
+		if it.Entry.IsDirectory() {
+			displayName += "[DIR] " + it.Entry.Name
+		} else {
+			displayName += it.Entry.Name
 		}
-		logs.MenuItem(i, displayName+"  hash: "+shortHash+"...  size: "+formatBytes(e.Size), false)
+		logs.MenuItem(it.Idx, displayName+"  hash: "+shortHash+"...  size: "+formatBytes(it.Entry.Size), false)
 		logs.Printf("\n")
 	}
 
 	reader := getBufferedReader(input)
-	var selected RemoteFileEntry
+	var selectedItem remoteTreeItem
 	for {
-		logs.Promptf("\nSelect file to download [0-%d] (or e to cancel): ", len(entries)-1)
+		logs.Promptf("\nSelect file to download [0-%d] (or e to cancel): ", len(items)-1)
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			if err == io.EOF {
@@ -61,13 +62,15 @@ func executeRemoteDownloadAction(cfg RuntimeConfig, input io.Reader) error {
 			return errMenuBack
 		}
 		idx, convErr := strconv.Atoi(choice)
-		if convErr != nil || idx < 0 || idx >= len(entries) {
-			logs.StatusWarn(fmt.Sprintf("Invalid selection %q.", choice)); logs.Printf("\n")
+		if convErr != nil || idx < 0 || idx >= len(items) {
+			logs.StatusWarn(fmt.Sprintf("Invalid selection %q.", choice))
+			logs.Printf("\n")
 			continue
 		}
-		selected = entries[idx]
+		selectedItem = items[idx]
 		break
 	}
+	selected := selectedItem.Entry
 
 	// Directory: reassemble the full tree and return early
 	if selected.IsDirectory() {
@@ -165,34 +168,30 @@ func executeDownloadAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.R
 		return nil
 	}
 
-	sort.Slice(metadata, func(i, j int) bool {
-		if metadata[i].FileName == metadata[j].FileName {
-			return fmt.Sprintf("%x", metadata[i].FileHash) < fmt.Sprintf("%x", metadata[j].FileHash)
-		}
-		return metadata[i].FileName < metadata[j].FileName
-	})
-
-	logs.Titlef("\nStored files (%d):\n", len(metadata))
-	for i, md := range metadata {
-		hashHex := fmt.Sprintf("%x", md.FileHash)
+	treeItems := buildLocalTree(metadata)
+	logs.Titlef("\nStored files (%d):\n", len(treeItems))
+	for _, it := range treeItems {
+		hashHex := fmt.Sprintf("%x", it.MD.FileHash)
 		shortHash := hashHex
 		if len(shortHash) > 16 {
 			shortHash = shortHash[:16]
 		}
-		displayName := md.FileName
-		if md.IsDirectory() {
-			displayName = "[DIR] " + displayName
+		displayName := it.Prefix
+		if it.MD.IsDirectory() {
+			displayName += "[DIR] " + it.MD.FileName
+		} else {
+			displayName += it.MD.FileName
 		}
-		logs.MenuItem(i, displayName+"  hash: "+shortHash+"...  chunks: "+fmt.Sprintf("%d", md.TotalBlocks)+"  size: "+formatBytes(md.TotalSize), false)
+		logs.MenuItem(it.Idx, displayName+"  hash: "+shortHash+"...  chunks: "+fmt.Sprintf("%d", it.MD.TotalBlocks)+"  size: "+formatBytes(it.MD.TotalSize), false)
 		logs.Printf("\n")
 	}
 
 	reader := getBufferedReader(input)
 
 	// Select file
-	var selectedMD key_store.MetaData
+	var selectedTreeItem localTreeItem
 	for {
-		logs.Promptf("\nSelect file to download [0-%d] (or e to cancel): ", len(metadata)-1)
+		logs.Promptf("\nSelect file to download [0-%d] (or e to cancel): ", len(treeItems)-1)
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			if err == io.EOF {
@@ -208,17 +207,20 @@ func executeDownloadAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.R
 
 		idx, convErr := strconv.Atoi(choice)
 		if convErr != nil {
-			logs.StatusWarn(fmt.Sprintf("Invalid selection %q. Enter a numeric index or e.", choice)); logs.Printf("\n")
+			logs.StatusWarn(fmt.Sprintf("Invalid selection %q. Enter a numeric index or e.", choice))
+			logs.Printf("\n")
 			continue
 		}
-		if idx < 0 || idx >= len(metadata) {
-			logs.StatusWarn(fmt.Sprintf("Index %d out of range. Valid range is 0-%d.", idx, len(metadata)-1)); logs.Printf("\n")
+		if idx < 0 || idx >= len(treeItems) {
+			logs.StatusWarn(fmt.Sprintf("Index %d out of range. Valid range is 0-%d.", idx, len(treeItems)-1))
+			logs.Printf("\n")
 			continue
 		}
 
-		selectedMD = metadata[idx]
+		selectedTreeItem = treeItems[idx]
 		break
 	}
+	selectedMD := selectedTreeItem.MD
 
 	// Directory: reassemble the full tree and return early
 	if selectedMD.IsDirectory() {
