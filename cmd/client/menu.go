@@ -300,7 +300,7 @@ func promptUploadPath(input io.Reader, cfg RuntimeConfig) (path string, isDir bo
 		}
 		if sel == "all" || sel == "a" || sel == "*" {
 			// Sentinel: caller iterates all files in upload dir.
-			return cfg.UploadDirectory, false, nil
+			return filepath.Clean(cfg.UploadDirectory), false, nil
 		}
 
 		idx, convErr := strconv.Atoi(sel)
