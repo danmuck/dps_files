@@ -64,6 +64,7 @@ make clean                                 # rm -rf .build/
 ## Key Packages & Files
 
 ### `key_store` — Local File Storage Pipeline (FUNCTIONAL)
+
 - **`key_store.go`** — `KeyStore` struct: manages chunk storage directory, metadata persistence, file operations, verification. Includes streaming (`StreamFile`, `StreamFileByName`, `StreamChunkRange`), TTL expiry (`CleanupExpired`), cache management, and `StoreFromReader`.
 - **`file_ledger.go`** — `KeyStoreLedger` adapter: wraps `*KeyStore` to implement the `ledgers.FileLedger` interface. Converts between KeyStore's concrete types and FileLedger's `FileID`/`ChunkID` typed aliases.
 - **`files.go`** — `File` struct, `StoreFileLocal`, `LoadAndStoreFileLocal`, `LoadAndStoreFileRemote`, `StoreFromReader`, `ReassembleFileToBytes`, `ReassembleFileToPath`. Contains `computeChunkKey` — the canonical DHT key derivation.
@@ -76,11 +77,13 @@ make clean                                 # rm -rf .build/
 - **`string.go`** — String/formatting helpers.
 
 ### `impl` — Blockchain & Crypto (FUNCTIONAL)
+
 - **`block.go`** — `Block` struct (all fields exported for gob encoding) with `NewBlock()` / `NewBlockEncrypt()`, hash validation, chain verification.
 - **`block_data.go`** — `BlockData` struct (Hash, Data, IV).
 - **`utils.go`** — `EncryptData()` / `DecryptData()` (AES-256-GCM), `CalculateHash()` (SHA-1/256/512), `ValidateHash()`. Handles both `*Block` and `Block` value types.
 
 ### `nodes` — Node Types & Routing (FUNCTIONAL)
+
 - **`nodes.go`** — Interfaces: `Node`, `ServerNode` (Storage), `ClientNode` (Stub/LocalServer). `NodeInfo` struct (ID, Address — moved here from the former transport package). `NodeState` enum (Follower/Candidate/Leader).
 - **`default.go`** — `DefaultNode`: identity-only base (address, pubKey, Router). No TCPHandler, no exit channel, no Start()/Shutdown(). Constructor: `NewDefaultNode(id, addr)`.
 - **`server_node.go`** — `DefaultServerNode`: embeds DefaultNode, holds `*grpc.Server` + `net.Listener`. `Start()` binds TCP and calls `grpcServer.Serve`. `WithHTTP(addr)` option starts gRPC-Gateway on a second port. `Addr()` returns the live listener address. `RawKeyStore()` exposes the underlying KeyStore for TUI access. Constructor: `NewServerNode(id, addr, storageDir, opts...)`.
@@ -89,17 +92,21 @@ make clean                                 # rm -rf .build/
 - **`routing.go`** — `RoutingTable` and `KademliaRouting` interfaces. `DefaultRouter` (map-based, functional).
 
 ### `pb` — Generated gRPC & Gateway Code (GENERATED)
+
 - **`dps.proto`** — Service definition for `DPSFiles`: `Upload` (client-streaming), `Download` (server-streaming), `Delete`, `List`, `UploadDir`, `ListDir`. HTTP annotations map each RPC to a REST route under `/v1/`. Message types: `UploadChunk`, `UploadResponse`, `DownloadRequest`, `DataChunk`, `DeleteRequest`, `DeleteResponse`, `ListRequest`, `ListResponse`, `FileEntry`, `UploadDirRequest`, `UploadDirResponse`, `ListDirRequest`, `ListDirResponse`, `DirEntry`.
 - **`dps.pb.go`** — Generated message types (protoc-gen-go).
 - **`dps_grpc.pb.go`** — Generated `DPSFilesClient`, `DPSFilesServer`, `RegisterDPSFilesServer`, `NewDPSFilesClient` (protoc-gen-go-grpc).
 - **`dps.pb.gw.go`** — Generated `RegisterDPSFilesHandlerFromEndpoint` HTTP/JSON gateway (protoc-gen-grpc-gateway).
 
 ### `grpc` — gRPC Server Implementation (FUNCTIONAL)
+
 Package name: `grpcserver`.
+
 - **`server.go`** — `Server` struct: implements `pb.DPSFilesServer` backed by `ledgers.FileLedger`. Constructor: `grpcserver.New(storage ledgers.FileLedger) *Server`. Methods: `Upload` (client-streaming via `io.Pipe`, calls `StoreFromReader`), `Download` (server-streaming via `io.Pipe`, calls `StreamFile`/`StreamFileByName`), `Delete`, `List`, `UploadDir`, `ListDir`. Upload/Download use `io.Pipe` so no large in-memory buffers are needed for large files.
 - **`server_test.go`** — Tests using `bufconn` in-memory transport: `TestUploadAndList`, `TestDownloadByHash`, `TestDeleteFile`.
 
 ### `ledgers` — Consensus & Backup Interfaces (INTERFACES ONLY)
+
 - **`net_store.go`** — `LogManager`, `MetadataStore`, `FileLedger` interfaces (including directory operations). `FileID`, `ChunkID` typed aliases. `FileMetaSummary`, `DirectoryEntry` structs.
 - **`snapshots.go`** — `SnapshotManager`, `BackupLedger` interfaces.
 
@@ -121,6 +128,7 @@ Package name: `grpcserver`.
 ## Architecture Patterns
 
 ### Node Hierarchy
+
 ```
 Node (base interface: ID, Address, NodeInfo, Start, Shutdown, Peers)
 ├── ServerNode (extends Node: Storage() FileLedger)
@@ -130,6 +138,7 @@ Node (base interface: ID, Address, NodeInfo, Start, Shutdown, Peers)
 ```
 
 ### Interfaces to Implement
+
 When adding new node types or storage backends:
 
 - **`ServerNode`** — For storage servers: `Storage() FileLedger`.
@@ -139,14 +148,17 @@ When adding new node types or storage backends:
 - **`KademliaRouting`** — For DHT routing (future): `K()`, `A()`, `GetBucket()`, `ClosestK()`, `Size()`.
 
 ### Future Extension Interfaces (not yet implemented)
+
 - **`RaftNode`** — Will extend `ServerNode` with: `ApplyCommand`, `CreateSnapshot`, `GetState`, `AddPeer`, `RemovePeer`.
 - **`KademliaNode`** — Will extend `ClientNode` with: `FindNode`, `FindValue`, `Store` (DHT operations).
 
 ### Dual-Ledger Model
+
 1. **Raft log** — Authoritative, replicated metadata store for the root cluster.
 2. **Blockchain** — Periodic snapshots of Raft state sealed into tamper-evident blocks.
 
 ### File Storage Flow
+
 ```
 Input file → calculate metadata (SHA-256, size, permissions)
   → split into chunks (dynamic size, ~1000 chunks target)
@@ -159,6 +171,7 @@ Input file → calculate metadata (SHA-256, size, permissions)
 ## Current State
 
 ### Working
+
 - File chunking, storage, and reassembly (`key_store` package)
 - FileLedger adapter (`KeyStoreLedger`) bridging KeyStore to the ledger interface
 - gRPC transport: Upload/Download/List/Delete/UploadDir/ListDir via `DPSFiles` service
@@ -192,6 +205,7 @@ Input file → calculate metadata (SHA-256, size, permissions)
 - Log replication and leader election (not started)
 
 ### Remaining Known Issues
+
 - No TLS on gRPC connections (insecure credentials used everywhere)
 - `DefaultClientNode` connects to the first remote address only (no load balancing or failover)
 
@@ -200,26 +214,31 @@ For detailed per-module issue tracking, see `docs/progress/buildplan.md`.
 ## Common Tasks
 
 ### Add a New Node Type
+
 1. Define a struct in `src/api/nodes/` that embeds `*DefaultNode`.
 2. Implement `ServerNode` or `ClientNode` interface.
 3. Add a constructor following `NewServerNode` or `NewClientNode` patterns.
 4. Add a `cmd/` entry point if needed.
 
 ### Add a New RPC Method
+
 1. Add the RPC to the `DPSFiles` service in `src/api/pb/dps.proto` (with `google.api.http` annotation for gateway).
 2. Run `make build-protobuf` to regenerate `src/api/pb/` (go, go-grpc, grpc-gateway outputs).
 3. Implement the method in `grpcserver.Server` in `src/api/grpc/server.go`.
 4. Add a client helper using the generated `pb.DPSFilesClient` stub where needed.
 
 ### Generate Test Files
+
 ```sh
 go run cmd/gen_file/main.go 256MB local/upload/test_256mb.dat
 # Or via Makefile:
 make gen-file SIZE=256MB FILE=local/upload/test_256mb.dat
 ```
+
 Files are reused if they already exist with the matching size.
 
 ### Run the Interactive Client
+
 ```sh
 make client
 # Or with flags:
@@ -228,12 +247,15 @@ make client ARGS="--mode remote --remotes localhost:9000"
 ```
 
 ### Run a Server Node
+
 ```sh
 make server ARGS="--addr :9000 --http :8080 --storage local/storage"
 ```
 
 ### Add a New Transport Protocol
+
 The canonical transport layer is now gRPC. To add a parallel transport (e.g., for Kademlia UDP):
+
 1. Define a new interface or extend `src/api/nodes/nodes.go` for the new protocol.
 2. Implement send/receive using the same `ledgers.FileLedger` storage backend.
 3. Wire the new transport into the relevant node type.
@@ -247,6 +269,7 @@ make test-coverage   # Run with coverage report
 ```
 
 Test files follow `*_test.go` convention in their respective packages:
+
 - `src/key_store/store_test.go` — chunking (1KB-256MB), empty file, single chunk, exact block size, persistence, corruption detection, cleanup, key consistency, streaming, TTL, deletion, cache dedup, utility functions
 - `src/key_store/hardening_test.go` — concurrent stores/reads/deletes, crash recovery intents, integrity verification, error injection cleanup, stale cache pruning, non-destructive startup, reupload after restart
 - `src/key_store/config_test.go` — KeyStoreConfig defaults, configurable TTL
@@ -257,3 +280,8 @@ Test files follow `*_test.go` convention in their respective packages:
 - `src/api/grpc/server_test.go` — gRPC server via bufconn: upload+list, download by hash, delete
 
 Test data goes in `./local/upload/` (created by tests, reused across runs). The `local/storage/` directory is used at runtime and is gitignored.
+
+## Git
+
+- Do not commit changes unless explicitly instructed to do so.
+- Include feature size breakpoints in task lists to ask if I would like to commit the changes, giving me time to look them over before they are committed.
