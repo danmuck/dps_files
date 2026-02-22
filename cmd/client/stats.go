@@ -63,16 +63,20 @@ func executeStatsAction(cfg RuntimeConfig) error {
 			logs.Dataf("  Status: unreachable (%v)\n", dialErr)
 		} else {
 			defer client.Close()
-			entries, listErr := client.List()
-			if listErr != nil {
-				logs.Dataf("  Status: unreachable (%v)\n", listErr)
+			rs, statsErr := client.RemoteStorageStats()
+			if statsErr != nil {
+				logs.Dataf("  Status: unreachable (%v)\n", statsErr)
 			} else {
-				var totalSize uint64
-				for _, e := range entries {
-					totalSize += e.Size
-				}
 				logs.Dataf("  Status: reachable\n")
-				logs.Dataf("  Files: %d  Total size: %s\n", len(entries), formatBytes(totalSize))
+				logs.Dataf("  Files: %d\n", rs.FileCount)
+				logs.Field("  data/", formatBytes(rs.DataBytes))
+				logs.Printf("\n")
+				logs.Field("  metadata/", formatBytes(rs.MetadataBytes))
+				logs.Printf("\n")
+				logs.Field("  .cache/", formatBytes(rs.CacheBytes))
+				logs.Printf("\n")
+				logs.Field("  total", formatBytes(rs.TotalBytes))
+				logs.Printf("\n")
 			}
 		}
 	}

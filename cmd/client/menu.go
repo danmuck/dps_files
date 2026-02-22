@@ -41,7 +41,7 @@ func getBufferedReader(input io.Reader) *bufio.Reader {
 	return bufio.NewReader(input)
 }
 
-func promptAction(input io.Reader, cfg *RuntimeConfig, indexedFiles []string, metadataCount int) (MenuAction, string, error) {
+func promptAction(input io.Reader, cfg *RuntimeConfig, metadataCount int) (MenuAction, string, error) {
 	if cfg.ActionProvided {
 		return cfg.Action, fmt.Sprintf("%s (CLI)", cfg.Action), nil
 	}

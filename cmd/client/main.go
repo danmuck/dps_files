@@ -101,12 +101,12 @@ func main() {
 		return
 	}
 
-	indexedFiles, metadataCount, err := refreshMenuContext(cfg, keystore)
+	metadataCount, err := refreshMenuContext(cfg, keystore)
 	if err != nil {
 		logs.Fatalf(err, "Failed to prepare runtime context")
 	}
 
-	action, actionSource, err := promptAction(os.Stdin, &cfg, indexedFiles, metadataCount)
+	action, actionSource, err := promptAction(os.Stdin, &cfg, metadataCount)
 	if errors.Is(err, errMenuExit) {
 		return
 	}
@@ -116,7 +116,7 @@ func main() {
 	cfg.Action = action
 
 	printRuntimeSummary(cfg, actionSource)
-	if err := executeActionOnce(cfg, keystore, os.Stdin, indexedFiles); err != nil {
+	if err := executeActionOnce(cfg, keystore, os.Stdin); err != nil {
 		if errors.Is(err, errMenuBack) {
 			logs.Println("Action cancelled.")
 			return
@@ -134,12 +134,12 @@ func runInteractiveSession(cfg RuntimeConfig, keystore *key_store.KeyStore, inpu
 	clearTerminalIfInteractive(input)
 
 	for {
-		indexedFiles, metadataCount, err := refreshMenuContext(cfg, keystore)
+		metadataCount, err := refreshMenuContext(cfg, keystore)
 		if err != nil {
 			return err
 		}
 
-		action, actionSource, err := promptAction(reader, &cfg, indexedFiles, metadataCount)
+		action, actionSource, err := promptAction(reader, &cfg, metadataCount)
 		if errors.Is(err, errMenuExit) {
 			clearTerminalIfInteractive(input)
 			logs.Println("Exited keystore menu.")
@@ -152,7 +152,7 @@ func runInteractiveSession(cfg RuntimeConfig, keystore *key_store.KeyStore, inpu
 		cfg.Action = action
 		clearTerminalIfInteractive(input)
 		printRuntimeSummary(cfg, actionSource)
-		err = executeActionOnce(cfg, keystore, reader, indexedFiles)
+		err = executeActionOnce(cfg, keystore, reader)
 		if err != nil && !errors.Is(err, errMenuBack) {
 			logs.Printf("\nAction %q failed: %v\n", cfg.Action, err)
 		}
@@ -163,20 +163,11 @@ func runInteractiveSession(cfg RuntimeConfig, keystore *key_store.KeyStore, inpu
 	}
 }
 
-func refreshMenuContext(cfg RuntimeConfig, keystore *key_store.KeyStore) ([]string, int, error) {
+func refreshMenuContext(cfg RuntimeConfig, keystore *key_store.KeyStore) (int, error) {
 	if err := keystore.ReloadLocalState(); err != nil {
-		return nil, 0, fmt.Errorf("failed to reload keystore state: %w", err)
+		return 0, fmt.Errorf("failed to reload keystore state: %w", err)
 	}
-
-	indexedFiles, err := getFilesInDirectory(cfg.UploadDirectory)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to index files in %s: %w", cfg.UploadDirectory, err)
-	}
-	sort.Strings(indexedFiles)
-
-	metadataCount := len(keystore.ListKnownFiles())
-
-	return indexedFiles, metadataCount, nil
+	return len(keystore.ListKnownFiles()), nil
 }
 
 func printRuntimeSummary(cfg RuntimeConfig, actionSource string) {
@@ -193,19 +184,12 @@ func printRuntimeSummary(cfg RuntimeConfig, actionSource string) {
 	logs.Printf("\n")
 }
 
-func executeActionOnce(cfg RuntimeConfig, keystore *key_store.KeyStore, input io.Reader, indexedFiles []string) error {
-	var selectedTargets []string
-
-	switch cfg.Action {
-	case ActionClean, ActionDeepClean, ActionVerify, ActionExpire:
-		if cfg.Mode == ModeRemote {
-			logs.Printf("Action %q is local-only. Switch to local mode to use it.\n", cfg.Action)
-			return nil
-		}
-	}
-
+func executeActionOnce(cfg RuntimeConfig, keystore *key_store.KeyStore, input io.Reader) error {
 	switch cfg.Action {
 	case ActionClean:
+		if cfg.Mode == ModeRemote {
+			return executeRemoteClean(cfg, false)
+		}
 		removed, err := cleanupAllKDHTFiles(cfg.KeyStore.StorageDir)
 		if err != nil {
 			return fmt.Errorf("failed to clean .kdht files: %w", err)
@@ -213,6 +197,9 @@ func executeActionOnce(cfg RuntimeConfig, keystore *key_store.KeyStore, input io
 		logs.Printf("Clean complete: removed %d .kdht file(s) from %s\n", removed, filepath.Join(cfg.KeyStore.StorageDir, "data"))
 		return nil
 	case ActionDeepClean:
+		if cfg.Mode == ModeRemote {
+			return executeRemoteClean(cfg, true)
+		}
 		result, err := deepCleanStorage(cfg.KeyStore.StorageDir)
 		if err != nil {
 			return fmt.Errorf("failed to deep clean storage: %w", err)
@@ -229,72 +216,80 @@ func executeActionOnce(cfg RuntimeConfig, keystore *key_store.KeyStore, input io
 		}
 		return nil
 	case ActionVerify:
+		if cfg.Mode == ModeRemote {
+			return executeRemoteVerify(cfg)
+		}
 		return executeVerifyAction(cfg, keystore)
 	case ActionDelete:
 		return executeDeleteAction(cfg, keystore, input)
 	case ActionExpire:
+		if cfg.Mode == ModeRemote {
+			return executeRemoteExpire(cfg)
+		}
 		return executeExpireAction(cfg, keystore)
 	case ActionDownload:
 		return executeDownloadAction(cfg, keystore, input)
-	case ActionUploadDir:
-		return executeUploadDirAction(cfg, keystore, input)
 	case ActionUpload:
-		selectedUploads, selection, err := promptUploadSelection(indexedFiles, input, cfg)
-		if err != nil {
-			return err
+		resolvedPath, isDir, resolveErr := promptUploadPath(input, cfg)
+		if resolveErr != nil {
+			return resolveErr
 		}
-		logs.Printf("Selection: %s\n", selection)
 
-		selectedTargets = make([]string, 0, len(selectedUploads))
-		for _, name := range selectedUploads {
-			selectedTargets = append(selectedTargets, filepath.Join(cfg.UploadDirectory, name))
+		if isDir {
+			if cfg.Mode == ModeRemote {
+				logs.Println("Directory upload is not supported in remote mode. Upload files individually.")
+				return nil
+			}
+			confirmed, confirmErr := confirmDirectoryUpload(input, resolvedPath)
+			if confirmErr != nil {
+				return confirmErr
+			}
+			if !confirmed {
+				return errMenuBack
+			}
+			logs.Printf("\nUploading directory %q...\n", resolvedPath)
+			dirHash, storeErr := keystore.StoreDirectory(resolvedPath)
+			if storeErr != nil {
+				return fmt.Errorf("store directory: %w", storeErr)
+			}
+			logs.Printf("Directory stored. Root hash: %x\n", dirHash)
+			return nil
 		}
-	case ActionStore:
-		storePath, selection, err := resolveStorePath(input, cfg)
-		if err != nil {
-			return err
-		}
-		logs.Printf("Selection: %s\n", selection)
-		selectedTargets = []string{storePath}
-	}
 
-	switch cfg.Action {
-	case ActionUpload:
+		// File path. Check for the "all" sentinel (upload dir itself was returned).
+		var filePaths []string
+		if resolvedPath == filepath.Clean(cfg.UploadDirectory) {
+			entries, entErr := getUploadDirEntries(cfg.UploadDirectory)
+			if entErr != nil {
+				return fmt.Errorf("index upload dir: %w", entErr)
+			}
+			for _, e := range entries {
+				if !e.IsDir {
+					filePaths = append(filePaths, filepath.Join(cfg.UploadDirectory, e.Name))
+				}
+			}
+			if len(filePaths) == 0 {
+				logs.Println("No files found in upload directory.")
+				return nil
+			}
+		} else {
+			filePaths = []string{resolvedPath}
+		}
+
 		if cfg.CleanCopyFiles {
 			if err := cleanupCopyFiles(cfg.KeyStore.StorageDir); err != nil {
-				logs.Warnf("cleanup copy files failed: %v", err)
+				logs.Warnf("cleanup copy files: %v", err)
 			}
 		}
-		if err := executeStoreTargets(cfg, keystore, selectedTargets); err != nil {
-			return fmt.Errorf("upload action failed: %w", err)
-		}
-	case ActionStore:
-		if cfg.CleanCopyFiles {
-			if err := cleanupCopyFiles(cfg.KeyStore.StorageDir); err != nil {
-				logs.Warnf("cleanup copy files failed: %v", err)
-			}
-		}
-		if err := executeStoreTargets(cfg, keystore, selectedTargets); err != nil {
-			return fmt.Errorf("store action failed: %w", err)
-		}
+		return executeStoreTargets(cfg, keystore, filePaths)
 	case ActionView:
 		if err := executeViewAction(cfg, keystore, input); err != nil {
 			return fmt.Errorf("view action failed: %w", err)
 		}
+		return nil
 	default:
 		return fmt.Errorf("unsupported action: %s", cfg.Action)
 	}
-
-	if cfg.Mode == ModeRun {
-		kdhtCount, err := countKDHTFiles(cfg.KeyStore.StorageDir)
-		if err != nil {
-			logs.Warnf("failed to count .kdht files: %v", err)
-		} else {
-			logs.Printf("\nStored .kdht files currently present: %d\n", kdhtCount)
-		}
-	}
-
-	return nil
 }
 
 func clearTerminalIfInteractive(input io.Reader) {
@@ -302,4 +297,69 @@ func clearTerminalIfInteractive(input io.Reader) {
 		return
 	}
 	fmt.Print("\033[H\033[2J")
+}
+
+func executeRemoteVerify(cfg RuntimeConfig) error {
+	if cfg.RemoteAddr == "" {
+		return fmt.Errorf("remote mode requires an address")
+	}
+	client, err := NewGRPCClient(cfg.RemoteAddr)
+	if err != nil {
+		return fmt.Errorf("connect to remote: %w", err)
+	}
+	defer client.Close()
+	issues, err := client.Verify()
+	if err != nil {
+		return fmt.Errorf("remote verify: %w", err)
+	}
+	if len(issues) == 0 {
+		logs.StatusInfo("Remote: all chunks verified — healthy.")
+		logs.Printf("\n")
+		return nil
+	}
+	logs.Printf("Remote found %d integrity error(s):\n", len(issues))
+	for _, iss := range issues {
+		logs.MenuItem(int(iss.ChunkIndex), iss.FileName+" — "+iss.Err, false)
+		logs.Printf("\n")
+	}
+	return nil
+}
+
+func executeRemoteExpire(cfg RuntimeConfig) error {
+	if cfg.RemoteAddr == "" {
+		return fmt.Errorf("remote mode requires an address")
+	}
+	client, err := NewGRPCClient(cfg.RemoteAddr)
+	if err != nil {
+		return fmt.Errorf("connect to remote: %w", err)
+	}
+	defer client.Close()
+	removed, err := client.Expire()
+	if err != nil {
+		return fmt.Errorf("remote expire: %w", err)
+	}
+	logs.Printf("Remote expire complete: %d file(s) removed.\n", removed)
+	return nil
+}
+
+func executeRemoteClean(cfg RuntimeConfig, deep bool) error {
+	if cfg.RemoteAddr == "" {
+		return fmt.Errorf("remote mode requires an address")
+	}
+	client, err := NewGRPCClient(cfg.RemoteAddr)
+	if err != nil {
+		return fmt.Errorf("connect to remote: %w", err)
+	}
+	defer client.Close()
+	result, err := client.Clean(deep)
+	if err != nil {
+		return fmt.Errorf("remote clean: %w", err)
+	}
+	if deep {
+		logs.Printf("Remote deep clean: removed %d .kdht, %d metadata, %d cache file(s).\n",
+			result.RemovedKDHT, result.RemovedMetadata, result.RemovedCache)
+	} else {
+		logs.Printf("Remote clean: removed %d .kdht file(s).\n", result.RemovedKDHT)
+	}
+	return nil
 }
