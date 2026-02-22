@@ -49,7 +49,7 @@ func buildLocalTreeNodes(metadata []key_store.MetaData) []tui.TreeNode {
 
 		var label string
 		if md.IsDirectory() {
-			label = "[DIR] " + md.FileName + "  hash: " + shortHash + "...  size: " + formatBytes(displaySize)
+			label = md.FileName + "  hash: " + shortHash + "...  size: " + formatBytes(displaySize)
 		} else {
 			label = md.FileName + "  hash: " + shortHash + "...  chunks: " + fmt.Sprintf("%d", md.TotalBlocks) + "  size: " + formatBytes(displaySize)
 		}
@@ -62,10 +62,6 @@ func buildLocalTreeNodes(metadata []key_store.MetaData) []tui.TreeNode {
 				parent = dk
 			}
 		}
-		if parent != "" {
-			label = "[^] " + label
-		}
-
 		nodes = append(nodes, localTreeNode{
 			MD:     md,
 			key:    key,
@@ -110,11 +106,7 @@ func buildRemoteTreeNodes(entries []RemoteFileEntry) []tui.TreeNode {
 			shortHash = shortHash[:16]
 		}
 		var label string
-		if e.IsDirectory() {
-			label = "[DIR] " + e.Name + "  hash: " + shortHash + "...  size: " + formatBytes(e.Size)
-		} else {
-			label = e.Name + "  hash: " + shortHash + "...  size: " + formatBytes(e.Size)
-		}
+		label = e.Name + "  hash: " + shortHash + "...  size: " + formatBytes(e.Size)
 
 		key := makeNodeKey(e.Size, e.Hash)
 
@@ -125,10 +117,6 @@ func buildRemoteTreeNodes(entries []RemoteFileEntry) []tui.TreeNode {
 				parent = dk
 			}
 		}
-		if parent != "" {
-			label = "[^] " + label
-		}
-
 		nodes = append(nodes, remoteTreeNode{
 			Entry:  e,
 			key:    key,
