@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/danmuck/dps_files/src/key_store"
+	tui "github.com/danmuck/tui_go"
 	logs "github.com/danmuck/smplog"
 )
 
@@ -29,27 +30,16 @@ func executeRemoteDownloadAction(cfg RuntimeConfig, input io.Reader) error {
 		return nil
 	}
 
-	items := buildRemoteTree(entries)
-	logs.Titlef("\nRemote files (%d):\n", len(items))
-	for _, it := range items {
-		shortHash := it.Entry.Hash
-		if len(shortHash) > 16 {
-			shortHash = shortHash[:16]
-		}
-		displayName := it.Prefix
-		if it.Entry.IsDirectory() {
-			displayName += "[DIR] " + it.Entry.Name
-		} else {
-			displayName += it.Entry.Name
-		}
-		logs.MenuItem(it.Idx, displayName+"  hash: "+shortHash+"...  size: "+formatBytes(it.Entry.Size), false)
-		logs.Printf("\n")
-	}
+	t := cfg.TUI
+	t.MenuTitleTC(&tui.TitleParams{Text: fmt.Sprintf("Remote files (%d)", len(entries))})
+	nodes := buildRemoteTreeNodes(entries)
+	tvEntries := t.TreeViewTC(&tui.TreeViewParams{Nodes: nodes, ShowIndex: true})
 
 	reader := getBufferedReader(input)
-	var selectedItem remoteTreeItem
+	var selectedEntry RemoteFileEntry
 	for {
-		logs.Promptf("\nSelect file to download [0-%d] (or e to cancel): ", len(items)-1)
+		t.InputLineFU(fmt.Sprintf("Select file to download [0-%d] (or e to cancel)", len(tvEntries)-1), "", true)
+		logs.Printf("\n")
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			if err == io.EOF {
@@ -62,76 +52,75 @@ func executeRemoteDownloadAction(cfg RuntimeConfig, input io.Reader) error {
 			return errMenuBack
 		}
 		idx, convErr := strconv.Atoi(choice)
-		if convErr != nil || idx < 0 || idx >= len(items) {
-			logs.StatusWarn(fmt.Sprintf("Invalid selection %q.", choice))
+		if convErr != nil || idx < 0 || idx >= len(tvEntries) {
+			t.StatusWarnFU(fmt.Sprintf("Invalid selection %q.", choice))
 			logs.Printf("\n")
 			continue
 		}
-		selectedItem = items[idx]
+		selectedEntry = tvEntries[idx].Node.(remoteTreeNode).Entry
 		break
 	}
-	selected := selectedItem.Entry
 
 	// Directory: reassemble the full tree and return early
-	if selected.IsDirectory() {
-		manifestHash, err := hexToHash(selected.Hash)
+	if selectedEntry.IsDirectory() {
+		manifestHash, err := hexToHash(selectedEntry.Hash)
 		if err != nil {
-			return fmt.Errorf("invalid directory hash %q: %w", selected.Hash, err)
+			return fmt.Errorf("invalid directory hash %q: %w", selectedEntry.Hash, err)
 		}
-		outputDir := filepath.Join(cfg.KeyStore.StorageDir, selected.Name)
-		logs.Printf("\nReassembling directory %q to %s\n", selected.Name, outputDir)
+		outputDir := filepath.Join(cfg.KeyStore.StorageDir, selectedEntry.Name)
+		logs.Printf("\nReassembling directory %q to %s\n", selectedEntry.Name, outputDir)
 		summary := OpSummary{
 			Operation: "remote-download",
-			FileName:  selected.Name,
-			FileSize:  selected.Size,
+			FileName:  selectedEntry.Name,
+			FileSize:  selectedEntry.Size,
+			Timer:     tui.NewPhaseTimer(),
 			StartedAt: time.Now(),
 		}
-		beginPhase(&summary.Timer, summary.Operation, "reassemble", "reconstruct directory tree from remote", 1, 1)
+		beginPhase(summary.Timer, summary.Operation, "reassemble", "reconstruct directory tree from remote", 1, 1)
 		reassembleErr := remoteReassembleDirectory(client, manifestHash, outputDir)
-		summary.Timer.Stop(reassembleErr != nil)
+		summary.Timer.End()
 		if reassembleErr != nil {
 			summary.Err = reassembleErr
-			renderSummary(summary)
+			renderSummary(t, summary)
 			writeOpLog(summary)
-			return fmt.Errorf("reassemble directory %q: %w", selected.Name, reassembleErr)
+			return fmt.Errorf("reassemble directory %q: %w", selectedEntry.Name, reassembleErr)
 		}
 		logs.Printf("Directory reassembled to %s\n", outputDir)
-		renderSummary(summary)
+		renderSummary(t, summary)
 		writeOpLog(summary)
 		return nil
 	}
 
-	outputPath := filepath.Join(cfg.KeyStore.StorageDir, filepath.Base(selected.Name))
-	logs.Printf("\nDownloading %q to %s\n", selected.Name, outputPath)
+	outputPath := filepath.Join(cfg.KeyStore.StorageDir, filepath.Base(selectedEntry.Name))
+	logs.Printf("\nDownloading %q to %s\n", selectedEntry.Name, outputPath)
 
 	summary := OpSummary{
 		Operation: "remote-download",
-		FileName:  selected.Name,
-		FileSize:  selected.Size,
+		FileName:  selectedEntry.Name,
+		FileSize:  selectedEntry.Size,
+		Timer:     tui.NewPhaseTimer(),
 		StartedAt: time.Now(),
 	}
 
-	beginPhase(&summary.Timer, summary.Operation, "download", "download file bytes from remote server", 1, 1)
-	written, downloadErr := client.Download(selected.Name, outputPath, selected.Size)
-	summary.Timer.Stop(downloadErr != nil)
+	beginPhase(summary.Timer, summary.Operation, "download", "download file bytes from remote server", 1, 1)
+	written, downloadErr := client.Download(selectedEntry.Name, outputPath, selectedEntry.Size)
+	summary.Timer.End()
 
 	summary.Bytes = written
 	if downloadErr != nil {
 		summary.Err = downloadErr
-		renderSummary(summary)
+		renderSummary(t, summary)
 		writeOpLog(summary)
-		return fmt.Errorf("download %q: %w", selected.Name, downloadErr)
+		return fmt.Errorf("download %q: %w", selectedEntry.Name, downloadErr)
 	}
 
 	logs.Printf("Downloaded %s to %s\n", formatBytes(written), outputPath)
-	renderSummary(summary)
+	renderSummary(t, summary)
 	writeOpLog(summary)
 	return nil
 }
 
 // remoteReassembleDirectory recursively downloads a directory tree from the remote server.
-// It mirrors the local ReassembleDirectory logic: ListDir gives immediate children,
-// files are fetched by hash, subdirectories are recursed.
 func remoteReassembleDirectory(c *GRPCClient, hash [32]byte, outputDir string) error {
 	entries, err := c.ListDir(hash)
 	if err != nil {
@@ -168,30 +157,18 @@ func executeDownloadAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.R
 		return nil
 	}
 
-	treeItems := buildLocalTree(metadata)
-	logs.Titlef("\nStored files (%d):\n", len(treeItems))
-	for _, it := range treeItems {
-		hashHex := fmt.Sprintf("%x", it.MD.FileHash)
-		shortHash := hashHex
-		if len(shortHash) > 16 {
-			shortHash = shortHash[:16]
-		}
-		displayName := it.Prefix
-		if it.MD.IsDirectory() {
-			displayName += "[DIR] " + it.MD.FileName
-		} else {
-			displayName += it.MD.FileName
-		}
-		logs.MenuItem(it.Idx, displayName+"  hash: "+shortHash+"...  chunks: "+fmt.Sprintf("%d", it.MD.TotalBlocks)+"  size: "+formatBytes(it.MD.TotalSize), false)
-		logs.Printf("\n")
-	}
+	t := cfg.TUI
+	t.MenuTitleTC(&tui.TitleParams{Text: fmt.Sprintf("Stored files (%d)", len(metadata))})
+	nodes := buildLocalTreeNodes(metadata)
+	tvEntries := t.TreeViewTC(&tui.TreeViewParams{Nodes: nodes, ShowIndex: true})
 
 	reader := getBufferedReader(input)
 
 	// Select file
-	var selectedTreeItem localTreeItem
+	var selectedMD key_store.MetaData
 	for {
-		logs.Promptf("\nSelect file to download [0-%d] (or e to cancel): ", len(treeItems)-1)
+		t.InputLineFU(fmt.Sprintf("Select file to download [0-%d] (or e to cancel)", len(tvEntries)-1), "", true)
+		logs.Printf("\n")
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			if err == io.EOF {
@@ -207,20 +184,19 @@ func executeDownloadAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.R
 
 		idx, convErr := strconv.Atoi(choice)
 		if convErr != nil {
-			logs.StatusWarn(fmt.Sprintf("Invalid selection %q. Enter a numeric index or e.", choice))
+			t.StatusWarnFU(fmt.Sprintf("Invalid selection %q. Enter a numeric index or e.", choice))
 			logs.Printf("\n")
 			continue
 		}
-		if idx < 0 || idx >= len(treeItems) {
-			logs.StatusWarn(fmt.Sprintf("Index %d out of range. Valid range is 0-%d.", idx, len(treeItems)-1))
+		if idx < 0 || idx >= len(tvEntries) {
+			t.StatusWarnFU(fmt.Sprintf("Index %d out of range. Valid range is 0-%d.", idx, len(tvEntries)-1))
 			logs.Printf("\n")
 			continue
 		}
 
-		selectedTreeItem = treeItems[idx]
+		selectedMD = tvEntries[idx].Node.(localTreeNode).MD
 		break
 	}
-	selectedMD := selectedTreeItem.MD
 
 	// Directory: reassemble the full tree and return early
 	if selectedMD.IsDirectory() {
@@ -230,19 +206,20 @@ func executeDownloadAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.R
 			Operation: "local-download",
 			FileName:  selectedMD.FileName,
 			FileSize:  selectedMD.TotalSize,
+			Timer:     tui.NewPhaseTimer(),
 			StartedAt: time.Now(),
 		}
-		beginPhase(&summary.Timer, summary.Operation, "reassemble", "reconstruct directory tree", 1, 1)
+		beginPhase(summary.Timer, summary.Operation, "reassemble", "reconstruct directory tree", 1, 1)
 		reassembleErr := ks.ReassembleDirectory(selectedMD.FileHash, outputDir)
-		summary.Timer.Stop(reassembleErr != nil)
+		summary.Timer.End()
 		if reassembleErr != nil {
 			summary.Err = reassembleErr
-			renderSummary(summary)
+			renderSummary(t, summary)
 			writeOpLog(summary)
 			return fmt.Errorf("reassemble directory: %w", reassembleErr)
 		}
 		logs.Printf("Directory reassembled to %s\n", outputDir)
-		renderSummary(summary)
+		renderSummary(t, summary)
 		writeOpLog(summary)
 		return nil
 	}
@@ -252,7 +229,8 @@ func executeDownloadAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.R
 	var chunkStart, chunkEnd uint32
 	useRange := false
 
-	logs.Promptf("\nChunk range (total: %d chunks). Enter start end (e.g. '0 10') or press Enter for full file: ", totalChunks)
+	t.InputLineFU(fmt.Sprintf("Chunk range (total: %d chunks). Enter start end (e.g. '0 10') or press Enter for full file", totalChunks), "", true)
+	logs.Printf("\n")
 	line, err := reader.ReadString('\n')
 	if err != nil && err != io.EOF {
 		return fmt.Errorf("failed to read chunk range: %w", err)
@@ -311,6 +289,7 @@ func executeDownloadAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.R
 		Operation: "local-download",
 		FileName:  selectedMD.FileName,
 		FileSize:  selectedMD.TotalSize,
+		Timer:     tui.NewPhaseTimer(),
 		StartedAt: time.Now(),
 	}
 
@@ -322,42 +301,50 @@ func executeDownloadAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.R
 		streamTotal = selectedMD.TotalSize
 	}
 
-	pw := newProgressWriter(f, streamTotal, "download", showBar)
+	var pbOut io.Writer = os.Stderr
+	if !showBar {
+		pbOut = io.Discard
+	}
+	pb := tui.NewProgressBar(f, tui.ProgressBarParams{
+		Label: "download",
+		Total: int64(streamTotal),
+		Out:   pbOut,
+	})
 
 	stageLabel := "download full file to output path"
 	if useRange {
 		stageLabel = "download selected chunk range to output path"
 	}
-	beginPhase(&summary.Timer, summary.Operation, "download", stageLabel, 1, 1)
+	beginPhase(summary.Timer, summary.Operation, "download", stageLabel, 1, 1)
 	if useRange {
 		logs.Printf("\nDownloading chunks [%d, %d) of %q to %s\n", chunkStart, chunkEnd, selectedMD.FileName, outputPath)
-		_, downloadErr := ks.StreamChunkRange(selectedMD.FileHash, chunkStart, chunkEnd, pw)
-		pw.Finish()
-		summary.Timer.Stop(downloadErr != nil)
-		summary.Bytes = pw.Written()
+		_, downloadErr := ks.StreamChunkRange(selectedMD.FileHash, chunkStart, chunkEnd, pb)
+		pb.Done()
+		summary.Timer.End()
+		summary.Bytes = uint64(pb.Written())
 		if downloadErr != nil {
 			summary.Err = downloadErr
-			renderSummary(summary)
+			renderSummary(t, summary)
 			writeOpLog(summary)
 			return fmt.Errorf("download failed: %w", downloadErr)
 		}
 		logs.Printf("Downloaded %s to %s\n", formatBytes(summary.Bytes), outputPath)
 	} else {
 		logs.Printf("\nDownloading %q to %s\n", selectedMD.FileName, outputPath)
-		downloadErr := ks.StreamFile(selectedMD.FileHash, pw)
-		pw.Finish()
-		summary.Timer.Stop(downloadErr != nil)
-		summary.Bytes = pw.Written()
+		downloadErr := ks.StreamFile(selectedMD.FileHash, pb)
+		pb.Done()
+		summary.Timer.End()
+		summary.Bytes = uint64(pb.Written())
 		if downloadErr != nil {
 			summary.Err = downloadErr
-			renderSummary(summary)
+			renderSummary(t, summary)
 			writeOpLog(summary)
 			return fmt.Errorf("download failed: %w", downloadErr)
 		}
 		logs.Printf("Downloaded %s to %s\n", formatBytes(summary.Bytes), outputPath)
 	}
 
-	renderSummary(summary)
+	renderSummary(t, summary)
 	writeOpLog(summary)
 	return nil
 }

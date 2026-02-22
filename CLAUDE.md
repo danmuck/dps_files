@@ -6,12 +6,7 @@
 
 - After any code or documentation update, review `docs/progress/` artifacts before concluding the pass.
 - Update the relevant `docs/progress` buildplan/checklist entries in the same pass so tracker state matches repository state.
-
-## Context Management
-
-- Use `/compact` frequently during long sessions to reduce token surface and keep context focused.
-- Use `/clear` when starting a new logical task or when prior context is no longer relevant.
-- All agents (including subagents) should `/compact` after completing major steps.
+- Never leave trailing `client` executable in root directory, all builds go to `.build/` so that `make client` properly runs.
 
 ## Project Overview
 
@@ -274,3 +269,9 @@ Test data goes in `./local/upload/` (created by tests, reused across runs). The 
 - Do not commit changes unless explicitly instructed to do so.
 - Include feature size breakpoints in task lists to ask if I would like to commit the changes, giving me time to look them over before I commit them.
 - By default, I make all commits
+
+## Context Management
+
+- Use `/compact` frequently during long sessions to reduce token surface and keep context focused.
+- Use `/clear` when starting a new logical task or when prior context is no longer relevant.
+- All agents (including subagents) should `/compact` after completing major steps.

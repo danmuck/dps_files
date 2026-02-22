@@ -9,6 +9,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/danmuck/dps_files/src/key_store"
+	tui "github.com/danmuck/tui_go"
 )
 
 // RemoteEntry represents a named remote fileserver address in local/remotes.toml.
@@ -57,6 +58,7 @@ const (
 const defaultRuntimeTTLSeconds uint64 = 1800
 
 type RuntimeConfig struct {
+	TUI               tui.TUI
 	UploadDirectory   string
 	RunAll            bool
 	DefaultFileIndex  int

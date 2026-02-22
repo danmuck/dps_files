@@ -1,146 +1,144 @@
 package main
 
 import (
-	"sort"
+	"fmt"
 	"strings"
 
 	"github.com/danmuck/dps_files/src/key_store"
+	tui "github.com/danmuck/tui_go"
 )
 
-// localTreeItem is one row in the flat-indexed tree display for local metadata.
-// Prefix is "" for root entries and "  ├─ " / "  └─ " for directory children.
-type localTreeItem struct {
-	Idx    int
+// localTreeNode implements tui.TreeNode for local metadata entries.
+type localTreeNode struct {
 	MD     key_store.MetaData
-	Prefix string
+	key    string // unique key = inverted-size:hash (used for both identity and sort)
+	parent string // parent's key, or "" for root
+	label  string
 }
 
-// buildLocalTree groups metadata into a visual tree:
-//   - directories sorted by ContentSize desc (fallback TotalSize), each immediately
-//     followed by its children sorted by TotalSize desc
-//   - orphan files (no ParentHash, not a directory) sorted by TotalSize desc
-//
-// Returns a flat sequentially-indexed list suitable for menu display and selection.
-func buildLocalTree(metadata []key_store.MetaData) []localTreeItem {
+func (n localTreeNode) TreeLabel() string  { return n.label }
+func (n localTreeNode) TreeKey() string    { return n.key }
+func (n localTreeNode) TreeParent() string { return n.parent }
+
+// buildLocalTreeNodes converts metadata into tui.TreeNode slice for TreeView.
+func buildLocalTreeNodes(metadata []key_store.MetaData) []tui.TreeNode {
 	var zero [key_store.HashSize]byte
-	var dirs, orphans []key_store.MetaData
-	childrenOf := make(map[[key_store.HashSize]byte][]key_store.MetaData)
 
+	// First pass: build key map for directories so children can reference them.
+	dirKeys := make(map[[key_store.HashSize]byte]string) // FileHash → key
 	for _, md := range metadata {
-		switch {
-		case md.IsDirectory():
-			dirs = append(dirs, md)
-		case md.ParentHash != zero:
-			childrenOf[md.ParentHash] = append(childrenOf[md.ParentHash], md)
-		default:
-			orphans = append(orphans, md)
-		}
-	}
-
-	sort.Slice(dirs, func(i, j int) bool {
-		si := dirs[i].ContentSize
-		if si == 0 {
-			si = dirs[i].TotalSize
-		}
-		sj := dirs[j].ContentSize
-		if sj == 0 {
-			sj = dirs[j].TotalSize
-		}
-		return si > sj
-	})
-
-	sort.Slice(orphans, func(i, j int) bool {
-		return orphans[i].TotalSize > orphans[j].TotalSize
-	})
-
-	var items []localTreeItem
-	idx := 0
-
-	for _, dir := range dirs {
-		items = append(items, localTreeItem{Idx: idx, MD: dir, Prefix: ""})
-		idx++
-
-		children := append([]key_store.MetaData(nil), childrenOf[dir.FileHash]...)
-		sort.Slice(children, func(i, j int) bool {
-			return children[i].TotalSize > children[j].TotalSize
-		})
-		for ci, child := range children {
-			prefix := "  ├─ "
-			if ci == len(children)-1 {
-				prefix = "  └─ "
+		if md.IsDirectory() {
+			displaySize := md.ContentSize
+			if displaySize == 0 {
+				displaySize = md.TotalSize
 			}
-			items = append(items, localTreeItem{Idx: idx, MD: child, Prefix: prefix})
-			idx++
+			dirKeys[md.FileHash] = makeNodeKey(displaySize, fmt.Sprintf("%x", md.FileHash))
 		}
 	}
 
-	for _, f := range orphans {
-		items = append(items, localTreeItem{Idx: idx, MD: f, Prefix: ""})
-		idx++
+	nodes := make([]tui.TreeNode, 0, len(metadata))
+	for _, md := range metadata {
+		hashHex := fmt.Sprintf("%x", md.FileHash)
+		shortHash := hashHex
+		if len(shortHash) > 16 {
+			shortHash = shortHash[:16]
+		}
+		displaySize := md.TotalSize
+		if md.IsDirectory() && md.ContentSize > 0 {
+			displaySize = md.ContentSize
+		}
+
+		var label string
+		if md.IsDirectory() {
+			label = "[DIR] " + md.FileName + "  hash: " + shortHash + "...  size: " + formatBytes(displaySize)
+		} else {
+			label = md.FileName + "  hash: " + shortHash + "...  chunks: " + fmt.Sprintf("%d", md.TotalBlocks) + "  size: " + formatBytes(displaySize)
+		}
+
+		key := makeNodeKey(displaySize, hashHex)
+
+		var parent string
+		if !md.IsDirectory() && md.ParentHash != zero {
+			if dk, ok := dirKeys[md.ParentHash]; ok {
+				parent = dk
+			}
+		}
+		if parent != "" {
+			label = "[^] " + label
+		}
+
+		nodes = append(nodes, localTreeNode{
+			MD:     md,
+			key:    key,
+			parent: parent,
+			label:  label,
+		})
 	}
-
-	return items
+	return nodes
 }
 
-// remoteTreeItem is one row in the flat-indexed tree display for remote entries.
-type remoteTreeItem struct {
-	Idx    int
+// remoteTreeNode implements tui.TreeNode for remote file entries.
+type remoteTreeNode struct {
 	Entry  RemoteFileEntry
-	Prefix string
+	key    string
+	parent string
+	label  string
 }
 
-// buildRemoteTree groups remote entries into a visual tree using name-prefix
-// matching: a non-directory entry whose Name starts with dirName+"/" is treated
-// as a child of that directory.
-//
-// Ordering: directories (Size desc) with children (Size desc) grouped below,
-// then orphan files (Size desc).
-func buildRemoteTree(entries []RemoteFileEntry) []remoteTreeItem {
-	var dirs []RemoteFileEntry
+func (n remoteTreeNode) TreeLabel() string  { return n.label }
+func (n remoteTreeNode) TreeKey() string    { return n.key }
+func (n remoteTreeNode) TreeParent() string { return n.parent }
+
+// buildRemoteTreeNodes converts remote entries into tui.TreeNode slice for TreeView.
+func buildRemoteTreeNodes(entries []RemoteFileEntry) []tui.TreeNode {
+	// Build directory name → key map for parent lookup.
+	dirKeys := make(map[string]string) // dirName → key
 	for _, e := range entries {
 		if e.IsDirectory() {
-			dirs = append(dirs, e)
-		}
-	}
-	sort.Slice(dirs, func(i, j int) bool { return dirs[i].Size > dirs[j].Size })
-
-	assigned := make(map[string]bool)
-	var items []remoteTreeItem
-	idx := 0
-
-	for _, dir := range dirs {
-		items = append(items, remoteTreeItem{Idx: idx, Entry: dir, Prefix: ""})
-		idx++
-
-		var children []RemoteFileEntry
-		for _, e := range entries {
-			if !e.IsDirectory() && strings.HasPrefix(e.Name, dir.Name+"/") {
-				children = append(children, e)
-				assigned[e.Name] = true
-			}
-		}
-		sort.Slice(children, func(i, j int) bool { return children[i].Size > children[j].Size })
-		for ci, child := range children {
-			prefix := "  ├─ "
-			if ci == len(children)-1 {
-				prefix = "  └─ "
-			}
-			items = append(items, remoteTreeItem{Idx: idx, Entry: child, Prefix: prefix})
-			idx++
+			dirKeys[e.Name] = makeNodeKey(e.Size, e.Hash)
 		}
 	}
 
-	var orphans []RemoteFileEntry
+	nodes := make([]tui.TreeNode, 0, len(entries))
 	for _, e := range entries {
-		if !e.IsDirectory() && !assigned[e.Name] {
-			orphans = append(orphans, e)
+		shortHash := e.Hash
+		if len(shortHash) > 16 {
+			shortHash = shortHash[:16]
 		}
-	}
-	sort.Slice(orphans, func(i, j int) bool { return orphans[i].Size > orphans[j].Size })
-	for _, f := range orphans {
-		items = append(items, remoteTreeItem{Idx: idx, Entry: f, Prefix: ""})
-		idx++
-	}
+		var label string
+		if e.IsDirectory() {
+			label = "[DIR] " + e.Name + "  hash: " + shortHash + "...  size: " + formatBytes(e.Size)
+		} else {
+			label = e.Name + "  hash: " + shortHash + "...  size: " + formatBytes(e.Size)
+		}
 
-	return items
+		key := makeNodeKey(e.Size, e.Hash)
+
+		// Find parent directory by name prefix.
+		var parent string
+		if !e.IsDirectory() {
+			for dirName, dirKey := range dirKeys {
+				if strings.HasPrefix(e.Name, dirName+"/") {
+					parent = dirKey
+					break
+				}
+			}
+			if parent != "" {
+				label = "[^] " + label
+			}
+		}
+
+		nodes = append(nodes, remoteTreeNode{
+			Entry:  e,
+			key:    key,
+			parent: parent,
+			label:  label,
+		})
+	}
+	return nodes
+}
+
+// makeNodeKey builds a sort key that orders by size descending, then by hash.
+func makeNodeKey(size uint64, hash string) string {
+	return fmt.Sprintf("%020d:%s", ^size, hash)
 }

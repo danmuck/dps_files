@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"time"
 
+	tui "github.com/danmuck/tui_go"
 	logs "github.com/danmuck/smplog"
 )
 
@@ -37,46 +38,44 @@ func executeStatsAction(cfg RuntimeConfig) error {
 		return err
 	}
 
-	logs.Titlef("\nSystem Stats\n")
-	logs.Field("Generated at", time.Now().Format(time.RFC3339)); logs.Printf("\n")
-	logs.Field("Go version", runtimeStats.GoVersion); logs.Printf("\n")
-	logs.Dataf("CPUs: %d  Goroutines: %d\n", runtimeStats.NumCPU, runtimeStats.NumGoroutine)
-	logs.Dataf("Memory: alloc=%s  total_alloc=%s  sys=%s  num_gc=%d\n",
-		formatBytes(runtimeStats.AllocBytes),
-		formatBytes(runtimeStats.TotalAlloc),
-		formatBytes(runtimeStats.SysBytes),
-		runtimeStats.NumGC,
-	)
+	t := cfg.TUI
+	nl := func() { logs.Printf("\n") }
 
-	logs.Titlef("\nStorage Usage\n")
-	logs.Field("Root", storageStats.RootPath); logs.Printf("\n")
-	logs.Field("data/", formatBytes(storageStats.DataBytes)); logs.Printf("\n")
-	logs.Field("metadata/", formatBytes(storageStats.MetadataBytes)); logs.Printf("\n")
-	logs.Field(".cache/", formatBytes(storageStats.CacheBytes)); logs.Printf("\n")
-	logs.Field("other in storage/", formatBytes(storageStats.OtherBytes)); logs.Printf("\n")
-	logs.Field("total storage/", formatBytes(storageStats.TotalBytes)); logs.Printf("\n")
+	t.MenuTitleTC(&tui.TitleParams{Text: "System Stats"})
+	t.FieldFU("Generated at", time.Now().Format(time.RFC3339)); nl()
+	t.FieldFU("Go version", runtimeStats.GoVersion); nl()
+	t.FieldFU("CPUs", runtimeStats.NumCPU); nl()
+	t.FieldFU("Goroutines", runtimeStats.NumGoroutine); nl()
+	t.FieldFU("Memory alloc", formatBytes(runtimeStats.AllocBytes)); nl()
+	t.FieldFU("Memory total_alloc", formatBytes(runtimeStats.TotalAlloc)); nl()
+	t.FieldFU("Memory sys", formatBytes(runtimeStats.SysBytes)); nl()
+	t.FieldFU("GC cycles", runtimeStats.NumGC); nl()
+
+	t.MenuTitleTC(&tui.TitleParams{Text: "Storage Usage"})
+	t.FieldFU("Root", storageStats.RootPath); nl()
+	t.FieldFU("data/", formatBytes(storageStats.DataBytes)); nl()
+	t.FieldFU("metadata/", formatBytes(storageStats.MetadataBytes)); nl()
+	t.FieldFU(".cache/", formatBytes(storageStats.CacheBytes)); nl()
+	t.FieldFU("other in storage/", formatBytes(storageStats.OtherBytes)); nl()
+	t.FieldFU("total storage/", formatBytes(storageStats.TotalBytes)); nl()
 
 	if cfg.Mode == ModeRemote && cfg.RemoteAddr != "" {
-		logs.Titlef("\nRemote Server: %s\n", cfg.RemoteAddr)
+		t.MenuTitleTC(&tui.TitleParams{Text: fmt.Sprintf("Remote Server: %s", cfg.RemoteAddr)})
 		client, dialErr := NewGRPCClient(cfg.RemoteAddr)
 		if dialErr != nil {
-			logs.Dataf("  Status: unreachable (%v)\n", dialErr)
+			t.StatusErrorFU(fmt.Sprintf("Status: unreachable (%v)", dialErr)); nl()
 		} else {
 			defer client.Close()
 			rs, statsErr := client.RemoteStorageStats()
 			if statsErr != nil {
-				logs.Dataf("  Status: unreachable (%v)\n", statsErr)
+				t.StatusErrorFU(fmt.Sprintf("Status: unreachable (%v)", statsErr)); nl()
 			} else {
-				logs.Dataf("  Status: reachable\n")
-				logs.Dataf("  Files: %d\n", rs.FileCount)
-				logs.Field("  data/", formatBytes(rs.DataBytes))
-				logs.Printf("\n")
-				logs.Field("  metadata/", formatBytes(rs.MetadataBytes))
-				logs.Printf("\n")
-				logs.Field("  .cache/", formatBytes(rs.CacheBytes))
-				logs.Printf("\n")
-				logs.Field("  total", formatBytes(rs.TotalBytes))
-				logs.Printf("\n")
+				t.StatusInfoFU("Status: reachable"); nl()
+				t.FieldFU("Files", rs.FileCount); nl()
+				t.FieldFU("data/", formatBytes(rs.DataBytes)); nl()
+				t.FieldFU("metadata/", formatBytes(rs.MetadataBytes)); nl()
+				t.FieldFU(".cache/", formatBytes(rs.CacheBytes)); nl()
+				t.FieldFU("total", formatBytes(rs.TotalBytes)); nl()
 			}
 		}
 	}

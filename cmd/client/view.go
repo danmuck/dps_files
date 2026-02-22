@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/danmuck/dps_files/src/key_store"
+	tui "github.com/danmuck/tui_go"
 	logs "github.com/danmuck/smplog"
 )
 
@@ -25,22 +26,10 @@ func executeRemoteViewAction(cfg RuntimeConfig) error {
 		logs.Println("No files on remote server.")
 		return nil
 	}
-	items := buildRemoteTree(entries)
-	logs.Titlef("\nRemote files (%d):\n", len(items))
-	for _, it := range items {
-		shortHash := it.Entry.Hash
-		if len(shortHash) > 16 {
-			shortHash = shortHash[:16]
-		}
-		displayName := it.Prefix
-		if it.Entry.IsDirectory() {
-			displayName += "[DIR] " + it.Entry.Name
-		} else {
-			displayName += it.Entry.Name
-		}
-		logs.MenuItem(it.Idx, logs.PadRight(30, displayName)+"  hash: "+shortHash+"...  size: "+formatBytes(it.Entry.Size), false)
-		logs.Printf("\n")
-	}
+	t := cfg.TUI
+	t.MenuTitleTC(&tui.TitleParams{Text: fmt.Sprintf("Remote files (%d)", len(entries))})
+	nodes := buildRemoteTreeNodes(entries)
+	t.TreeViewTC(&tui.TreeViewParams{Nodes: nodes, ShowIndex: true})
 	return nil
 }
 
@@ -54,42 +43,17 @@ func executeViewAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.Reade
 		return nil
 	}
 
-	items := buildLocalTree(metadata)
-	logs.Titlef("\nStored metadata entries (%d):\n", len(items))
-	for _, it := range items {
-		lastChunk := calculateLastChunkSize(it.MD)
-		chunkSize := uint64(it.MD.BlockSize)
-		hashHex := fmt.Sprintf("%x", it.MD.FileHash)
-		shortHash := hashHex
-		if len(shortHash) > 16 {
-			shortHash = shortHash[:16]
-		}
-		displayName := it.Prefix
-		if it.MD.IsDirectory() {
-			displayName += "[DIR] " + it.MD.FileName
-		} else {
-			displayName += it.MD.FileName
-		}
-		displaySize := it.MD.TotalSize
-		if it.MD.IsDirectory() && it.MD.ContentSize > 0 {
-			displaySize = it.MD.ContentSize
-		}
-		logs.MenuItem(it.Idx, displayName, false)
-		logs.Printf("\n")
-		logs.Dataf("      hash: %s...  size: %s  chunks: %d\n", shortHash, formatBytes(displaySize), it.MD.TotalBlocks)
-		logs.Dataf("      chunk_size: %s  last_chunk: %s  modified: %s  ttl: %s\n",
-			formatBytes(chunkSize),
-			formatBytes(lastChunk),
-			formatUnixNano(it.MD.Modified),
-			formatTTLSeconds(it.MD.TTL),
-		)
-	}
+	t := cfg.TUI
+	t.MenuTitleTC(&tui.TitleParams{Text: fmt.Sprintf("Stored metadata entries (%d)", len(metadata))})
+	nodes := buildLocalTreeNodes(metadata)
+	tvEntries := t.TreeViewTC(&tui.TreeViewParams{Nodes: nodes, ShowIndex: true})
 
-	orderedMDs := make([]key_store.MetaData, len(items))
-	for i, it := range items {
-		orderedMDs[i] = it.MD
+	// Build ordered metadata list matching tree indices.
+	orderedMDs := make([]key_store.MetaData, len(tvEntries))
+	for i, e := range tvEntries {
+		orderedMDs[i] = e.Node.(localTreeNode).MD
 	}
-	selected, selection, err := promptMetadataReassemblySelection(orderedMDs, input)
+	selected, selection, err := promptMetadataReassemblySelection(t, orderedMDs, input)
 	if err != nil {
 		return err
 	}

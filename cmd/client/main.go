@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"crypto/rand"
 	"errors"
 	"fmt"
@@ -10,15 +11,19 @@ import (
 	"sort"
 
 	"github.com/danmuck/dps_files/cmd/internal/logcfg"
+	"github.com/danmuck/dps_files/cmd/internal/tuicfg"
 	"github.com/danmuck/dps_files/src/api/nodes"
 	"github.com/danmuck/dps_files/src/key_store"
+	tui "github.com/danmuck/tui_go"
 	logs "github.com/danmuck/smplog"
 )
 
 func main() {
 	logs.Configure(logcfg.Load())
+	tui.Configure(tuicfg.Load())
 
 	cfg, err := parseCLI(os.Args[1:], defaultRuntimeConfig)
+	cfg.TUI = tui.NewTUI(os.Stdout)
 	if err != nil {
 		indexedFiles, indexErr := getFilesInDirectory(defaultRuntimeConfig.UploadDirectory)
 		if indexErr == nil {
@@ -156,10 +161,10 @@ func runInteractiveSession(cfg RuntimeConfig, keystore *key_store.KeyStore, inpu
 		if err != nil && !errors.Is(err, errMenuBack) {
 			logs.Printf("\nAction %q failed: %v\n", cfg.Action, err)
 		}
-		if errors.Is(err, errMenuBack) {
-			clearTerminalIfInteractive(input)
-			continue
+		if !errors.Is(err, errMenuBack) {
+			waitForEnter(reader, input)
 		}
+		clearTerminalIfInteractive(input)
 	}
 }
 
@@ -172,15 +177,15 @@ func refreshMenuContext(cfg RuntimeConfig, keystore *key_store.KeyStore) (int, e
 
 func printRuntimeSummary(cfg RuntimeConfig, actionSource string) {
 	logs.Printf("\n")
-	logs.Field("Execution mode", cfg.Mode)
+	cfg.TUI.FieldFU("Execution mode", cfg.Mode)
 	logs.Printf("\n")
-	logs.Field("TTL seconds", cfg.TTLSeconds)
+	cfg.TUI.FieldFU("TTL seconds", cfg.TTLSeconds)
 	logs.Printf("\n")
-	logs.Field("Reassembly enabled", cfg.ReassembleEnabled)
+	cfg.TUI.FieldFU("Reassembly enabled", cfg.ReassembleEnabled)
 	logs.Printf("\n")
-	logs.Field("Action", actionSource)
+	cfg.TUI.FieldFU("Action", actionSource)
 	logs.Printf("\n")
-	logs.Field("Storage root path", cfg.KeyStore.StorageDir)
+	cfg.TUI.FieldFU("Storage root path", cfg.KeyStore.StorageDir)
 	logs.Printf("\n")
 }
 
@@ -239,7 +244,7 @@ func executeActionOnce(cfg RuntimeConfig, keystore *key_store.KeyStore, input io
 			if cfg.Mode == ModeRemote {
 				return executeRemoteUploadDirAction(cfg, input, resolvedPath)
 			}
-			confirmed, confirmErr := confirmDirectoryUpload(input, resolvedPath)
+			confirmed, confirmErr := confirmDirectoryUpload(input, cfg, resolvedPath)
 			if confirmErr != nil {
 				return confirmErr
 			}
@@ -291,6 +296,14 @@ func executeActionOnce(cfg RuntimeConfig, keystore *key_store.KeyStore, input io
 	}
 }
 
+func waitForEnter(reader *bufio.Reader, input io.Reader) {
+	if !isInteractiveReader(input) {
+		return
+	}
+	fmt.Print("\nPress Enter to continue...")
+	reader.ReadString('\n')
+}
+
 func clearTerminalIfInteractive(input io.Reader) {
 	if !isInteractiveReader(input) {
 		return
@@ -302,7 +315,7 @@ func executeRemoteUploadDirAction(cfg RuntimeConfig, input io.Reader, dirPath st
 	if cfg.RemoteAddr == "" {
 		return fmt.Errorf("remote mode requires an address; use %s or configure remotes", REMOTE_ADDR_FLAG)
 	}
-	confirmed, confirmErr := confirmDirectoryUpload(input, dirPath)
+	confirmed, confirmErr := confirmDirectoryUpload(input, cfg, dirPath)
 	if confirmErr != nil {
 		return confirmErr
 	}
@@ -337,13 +350,13 @@ func executeRemoteVerify(cfg RuntimeConfig) error {
 		return fmt.Errorf("remote verify: %w", err)
 	}
 	if len(issues) == 0 {
-		logs.StatusInfo("Remote: all chunks verified — healthy.")
+		cfg.TUI.StatusInfoFU("Remote: all chunks verified — healthy.")
 		logs.Printf("\n")
 		return nil
 	}
 	logs.Printf("Remote found %d integrity error(s):\n", len(issues))
 	for _, iss := range issues {
-		logs.MenuItem(int(iss.ChunkIndex), iss.FileName+" — "+iss.Err, false)
+		cfg.TUI.MenuItemFU(int(iss.ChunkIndex), iss.FileName+" — "+iss.Err, false)
 		logs.Printf("\n")
 	}
 	return nil

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/danmuck/dps_files/src/key_store"
+	tui "github.com/danmuck/tui_go"
 	logs "github.com/danmuck/smplog"
 )
 
@@ -89,7 +90,7 @@ func executeRemoteUploadDir(client *GRPCClient, localPath, rootPath string) ([32
 	return hash, totalSize, err
 }
 
-func verifyChunks(ks *key_store.KeyStore, file *key_store.File) error {
+func verifyChunks(t tui.TUI, ks *key_store.KeyStore, file *key_store.File) error {
 	logs.Printf("\nVerifying stored chunks: %d\n", len(file.References))
 
 	for i, ref := range file.References {
@@ -112,8 +113,9 @@ func verifyChunks(ks *key_store.KeyStore, file *key_store.File) error {
 		}
 
 		if i%500 == 0 || i == int(file.MetaData.TotalBlocks-1) {
-			logs.Dataf("Verified chunk %d/%d: size=%d index=%d hash=%x\n",
-				i, file.MetaData.TotalBlocks-1, len(chunkData), ref.FileIndex, dataHash)
+			t.FieldFU(fmt.Sprintf("Verified chunk %d/%d", i, file.MetaData.TotalBlocks-1),
+				fmt.Sprintf("size=%d index=%d hash=%x", len(chunkData), ref.FileIndex, dataHash))
+			logs.Printf("\n")
 		}
 	}
 
@@ -121,12 +123,14 @@ func verifyChunks(ks *key_store.KeyStore, file *key_store.File) error {
 }
 
 func executeStoreTargets(cfg RuntimeConfig, ks *key_store.KeyStore, filePaths []string) error {
+	t := cfg.TUI
 	for _, sourcePath := range filePaths {
 		displayName := filepath.Base(sourcePath)
 
 		summary := OpSummary{
 			Operation: "local-store",
 			FileName:  displayName,
+			Timer:     tui.NewPhaseTimer(),
 			StartedAt: time.Now(),
 		}
 		if cfg.Mode == ModeRemote {
@@ -142,23 +146,23 @@ func executeStoreTargets(cfg RuntimeConfig, ks *key_store.KeyStore, filePaths []
 		phaseIndex := 0
 		startPhase := func(phaseName, stageLabel string) {
 			phaseIndex++
-			beginPhase(&summary.Timer, summary.Operation, phaseName, stageLabel, phaseIndex, phaseTotal)
+			beginPhase(summary.Timer, summary.Operation, phaseName, stageLabel, phaseIndex, phaseTotal)
 		}
 
 		// Phase: hash
 		startPhase("hash", "hash source file")
 		originalHash, originalSize, err := key_store.HashFile(sourcePath)
-		summary.Timer.Stop(err != nil)
+		summary.Timer.End()
 		if err != nil {
 			summary.Err = err
-			renderSummary(summary)
+			renderSummary(t, summary)
 			writeOpLog(summary)
 			return fmt.Errorf("failed to hash source file %s: %w", sourcePath, err)
 		}
 		if originalSize < 0 {
 			sizeErr := fmt.Errorf("negative source file size for %s", sourcePath)
 			summary.Err = sizeErr
-			renderSummary(summary)
+			renderSummary(t, summary)
 			writeOpLog(summary)
 			return sizeErr
 		}
@@ -166,9 +170,9 @@ func executeStoreTargets(cfg RuntimeConfig, ks *key_store.KeyStore, filePaths []
 		summary.FileSize = sourceSize
 
 		logs.Printf("\n")
-		logs.Field("Source", sourcePath); logs.Printf("\n")
-		logs.Field("Original file size", fmt.Sprintf("%d bytes", originalSize)); logs.Printf("\n")
-		logs.Field("Original file hash", fmt.Sprintf("%x", originalHash)); logs.Printf("\n")
+		t.FieldFU("Source", sourcePath); logs.Printf("\n")
+		t.FieldFU("Original file size", fmt.Sprintf("%d bytes", originalSize)); logs.Printf("\n")
+		t.FieldFU("Original file hash", fmt.Sprintf("%x", originalHash)); logs.Printf("\n")
 
 		var file *key_store.File
 		switch cfg.Mode {
@@ -176,19 +180,19 @@ func executeStoreTargets(cfg RuntimeConfig, ks *key_store.KeyStore, filePaths []
 			// Phase: chunk+store
 			startPhase("chunk+store", "chunk and store local blocks")
 			file, err = ks.LoadAndStoreFileLocal(sourcePath)
-			summary.Timer.Stop(err != nil)
+			summary.Timer.End()
 
 		case ModeRemote:
 			if cfg.RemoteAddr == "" {
 				summary.Err = fmt.Errorf("remote mode requires an address")
-				renderSummary(summary)
+				renderSummary(t, summary)
 				writeOpLog(summary)
 				return fmt.Errorf("remote mode requires an address; use %s or toggle mode in the menu", REMOTE_ADDR_FLAG)
 			}
 			client, dialErr := NewGRPCClient(cfg.RemoteAddr)
 			if dialErr != nil {
 				summary.Err = dialErr
-				renderSummary(summary)
+				renderSummary(t, summary)
 				writeOpLog(summary)
 				return fmt.Errorf("connect to remote: %w", dialErr)
 			}
@@ -196,36 +200,36 @@ func executeStoreTargets(cfg RuntimeConfig, ks *key_store.KeyStore, filePaths []
 			startPhase("upload", "upload file bytes to remote server")
 			hash, uploadErr := client.Upload(sourcePath)
 			client.Close()
-			summary.Timer.Stop(uploadErr != nil)
+			summary.Timer.End()
 
 			summary.Bytes = sourceSize
 			if uploadErr != nil {
 				summary.Err = uploadErr
-				renderSummary(summary)
+				renderSummary(t, summary)
 				writeOpLog(summary)
 				return fmt.Errorf("remote upload %s: %w", sourcePath, uploadErr)
 			}
 			logs.Printf("Remote upload complete. Server hash: %x\n", hash)
-			renderSummary(summary)
+			renderSummary(t, summary)
 			writeOpLog(summary)
 			continue
 
 		default:
 			summary.Err = fmt.Errorf("unsupported mode %q", cfg.Mode)
-			renderSummary(summary)
+			renderSummary(t, summary)
 			writeOpLog(summary)
 			return fmt.Errorf("unsupported mode %q", cfg.Mode)
 		}
 
 		if errors.Is(err, key_store.ErrFileHashCached) {
 			logs.Printf("Skipping store for %q: %v\n", displayName, err)
-			renderSummary(summary)
+			renderSummary(t, summary)
 			writeOpLog(summary)
 			continue
 		}
 		if err != nil {
 			summary.Err = err
-			renderSummary(summary)
+			renderSummary(t, summary)
 			writeOpLog(summary)
 			return fmt.Errorf("failed to store file %s: %w", sourcePath, err)
 		}
@@ -233,43 +237,43 @@ func executeStoreTargets(cfg RuntimeConfig, ks *key_store.KeyStore, filePaths []
 		summary.Bytes = file.MetaData.TotalSize
 
 		logs.Printf("\n")
-		logs.Titlef("Stored metadata:\n")
-		logs.Field("File name", file.MetaData.FileName); logs.Printf("\n")
-		logs.Field("Total size", fmt.Sprintf("%d bytes", file.MetaData.TotalSize)); logs.Printf("\n")
-		logs.Field("Chunk size", fmt.Sprintf("%d bytes", file.MetaData.BlockSize)); logs.Printf("\n")
-		logs.Field("Total chunks", file.MetaData.TotalBlocks); logs.Printf("\n")
+		t.MenuTitleTC(&tui.TitleParams{Text: "Stored metadata"})
+		t.FieldFU("File name", file.MetaData.FileName); logs.Printf("\n")
+		t.FieldFU("Total size", fmt.Sprintf("%d bytes", file.MetaData.TotalSize)); logs.Printf("\n")
+		t.FieldFU("Chunk size", fmt.Sprintf("%d bytes", file.MetaData.BlockSize)); logs.Printf("\n")
+		t.FieldFU("Total chunks", file.MetaData.TotalBlocks); logs.Printf("\n")
 		if file.MetaData.TotalBlocks > 0 {
-			logs.Field("Last chunk size", fmt.Sprintf("%d bytes",
+			t.FieldFU("Last chunk size", fmt.Sprintf("%d bytes",
 				file.MetaData.TotalSize-uint64(file.MetaData.BlockSize*(file.MetaData.TotalBlocks-1))))
 			logs.Printf("\n")
 		}
 		if len(file.References) > 0 {
 			first := file.References[0]
 			last := file.References[len(file.References)-1]
-			logs.Field("First chunk", first.Location); logs.Printf("\n")
-			logs.Field("Last chunk", last.Location); logs.Printf("\n")
+			t.FieldFU("First chunk", first.Location); logs.Printf("\n")
+			t.FieldFU("Last chunk", last.Location); logs.Printf("\n")
 		}
 
 		if cfg.Mode != ModeRun {
-			renderSummary(summary)
+			renderSummary(t, summary)
 			writeOpLog(summary)
 			continue
 		}
 
 		// Phase: verify
 		startPhase("verify", "verify stored chunks")
-		verifyErr := verifyChunks(ks, file)
-		summary.Timer.Stop(verifyErr != nil)
+		verifyErr := verifyChunks(t, ks, file)
+		summary.Timer.End()
 		if verifyErr != nil {
 			summary.Err = verifyErr
-			renderSummary(summary)
+			renderSummary(t, summary)
 			writeOpLog(summary)
 			return fmt.Errorf("chunk verification failed for %s: %w", sourcePath, verifyErr)
 		}
 
 		if !cfg.ReassembleEnabled {
 			logs.Printf("Reassembly skipped (set %q to enable)\n", REASSEMBLE_FLAG)
-			renderSummary(summary)
+			renderSummary(t, summary)
 			writeOpLog(summary)
 			continue
 		}
@@ -277,7 +281,7 @@ func executeStoreTargets(cfg RuntimeConfig, ks *key_store.KeyStore, filePaths []
 		outputPath := copyOutputPath(cfg.KeyStore.StorageDir, displayName)
 		if err := createDirPath(filepath.Dir(outputPath)); err != nil {
 			summary.Err = err
-			renderSummary(summary)
+			renderSummary(t, summary)
 			writeOpLog(summary)
 			return fmt.Errorf("failed to ensure output directory: %w", err)
 		}
@@ -287,10 +291,10 @@ func executeStoreTargets(cfg RuntimeConfig, ks *key_store.KeyStore, filePaths []
 		// Phase: reassemble
 		startPhase("reassemble", "reassemble output file")
 		reassembleErr := ks.ReassembleFileToPath(file.MetaData.FileHash, outputPath)
-		summary.Timer.Stop(reassembleErr != nil)
+		summary.Timer.End()
 		if reassembleErr != nil {
 			summary.Err = reassembleErr
-			renderSummary(summary)
+			renderSummary(t, summary)
 			writeOpLog(summary)
 			return fmt.Errorf("failed to reassemble file %s: %w", sourcePath, reassembleErr)
 		}
@@ -298,31 +302,31 @@ func executeStoreTargets(cfg RuntimeConfig, ks *key_store.KeyStore, filePaths []
 		// Phase: hash-check
 		startPhase("hash-check", "hash-check reassembled output")
 		reassembledHash, length, err := key_store.HashFile(outputPath)
-		summary.Timer.Stop(err != nil)
+		summary.Timer.End()
 		if err != nil {
 			summary.Err = err
-			renderSummary(summary)
+			renderSummary(t, summary)
 			writeOpLog(summary)
 			return fmt.Errorf("failed to verify reassembled file %s: %w", outputPath, err)
 		}
 
 		logs.Printf("\n")
-		logs.Titlef("Reassembly complete:\n")
-		logs.Field("Original size", fmt.Sprintf("%d bytes", file.MetaData.TotalSize)); logs.Printf("\n")
-		logs.Field("Original hash", fmt.Sprintf("%x", file.MetaData.FileHash)); logs.Printf("\n")
-		logs.Field("Reassembled size", fmt.Sprintf("%d bytes", length)); logs.Printf("\n")
-		logs.Field("Reassembled hash", fmt.Sprintf("%x", reassembledHash)); logs.Printf("\n")
+		t.MenuTitleTC(&tui.TitleParams{Text: "Reassembly complete"})
+		t.FieldFU("Original size", fmt.Sprintf("%d bytes", file.MetaData.TotalSize)); logs.Printf("\n")
+		t.FieldFU("Original hash", fmt.Sprintf("%x", file.MetaData.FileHash)); logs.Printf("\n")
+		t.FieldFU("Reassembled size", fmt.Sprintf("%d bytes", length)); logs.Printf("\n")
+		t.FieldFU("Reassembled hash", fmt.Sprintf("%x", reassembledHash)); logs.Printf("\n")
 
 		if file.MetaData.FileHash != reassembledHash {
 			hashErr := fmt.Errorf("hash mismatch after reassembly for %s", sourcePath)
 			summary.Err = hashErr
-			renderSummary(summary)
+			renderSummary(t, summary)
 			writeOpLog(summary)
 			return hashErr
 		}
 
 		logs.Printf("Successfully reassembled file to: %s\n", outputPath)
-		renderSummary(summary)
+		renderSummary(t, summary)
 		writeOpLog(summary)
 	}
 

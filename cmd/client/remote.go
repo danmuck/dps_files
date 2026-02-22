@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/danmuck/dps_files/src/api/pb"
+	tui "github.com/danmuck/tui_go"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -175,8 +176,11 @@ func (c *GRPCClient) Upload(localPath string) ([32]byte, error) {
 	defer f.Close()
 
 	size := uint64(info.Size())
-	pr := newProgressReader(f, size, "upload", true)
-	defer pr.Finish()
+	progress := tui.NewProgressBar(io.Discard, tui.ProgressBarParams{
+		Label: "upload",
+		Total: int64(size),
+		Out:   os.Stderr,
+	})
 
 	// No deadline for large transfers.
 	stream, err := c.stub.Upload(context.Background())
@@ -191,11 +195,12 @@ func (c *GRPCClient) Upload(localPath string) ([32]byte, error) {
 	}
 	buf := make([]byte, 1<<20) // 1 MiB chunks
 	for {
-		n, readErr := pr.Read(buf)
+		n, readErr := f.Read(buf)
 		if n > 0 {
 			if err := stream.Send(&pb.UploadChunk{Data: buf[:n]}); err != nil {
 				return hash, fmt.Errorf("send chunk: %w", err)
 			}
+			progress.Write(buf[:n]) //nolint:errcheck
 		}
 		if readErr == io.EOF {
 			break
@@ -204,6 +209,7 @@ func (c *GRPCClient) Upload(localPath string) ([32]byte, error) {
 			return hash, fmt.Errorf("read file: %w", readErr)
 		}
 	}
+	progress.Done()
 	resp, err := stream.CloseAndRecv()
 	if err != nil {
 		return hash, fmt.Errorf("finish upload: %w", err)
@@ -230,8 +236,11 @@ func (c *GRPCClient) Download(name, outputPath string, size uint64) (uint64, err
 	}
 	defer out.Close()
 
-	pw := newProgressWriter(out, size, "download", true)
-	defer pw.Finish()
+	progress := tui.NewProgressBar(out, tui.ProgressBarParams{
+		Label: "download",
+		Total: int64(size),
+		Out:   os.Stderr,
+	})
 
 	for {
 		chunk, err := stream.Recv()
@@ -239,13 +248,14 @@ func (c *GRPCClient) Download(name, outputPath string, size uint64) (uint64, err
 			break
 		}
 		if err != nil {
-			return pw.Written(), fmt.Errorf("recv chunk: %w", err)
+			return uint64(progress.Written()), fmt.Errorf("recv chunk: %w", err)
 		}
-		if _, err := pw.Write(chunk.Data); err != nil {
-			return pw.Written(), fmt.Errorf("write: %w", err)
+		if _, err := progress.Write(chunk.Data); err != nil {
+			return uint64(progress.Written()), fmt.Errorf("write: %w", err)
 		}
 	}
-	return pw.Written(), nil
+	progress.Done()
+	return uint64(progress.Written()), nil
 }
 
 // Delete removes the file identified by its 32-byte SHA-256 hash.

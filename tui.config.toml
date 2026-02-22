@@ -1,0 +1,27 @@
+# tui_go configuration file
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# USAGE
+#   cfg, err := tui.ConfigFromFile("tui.config.toml")
+#   if err != nil { log.Fatal(err) }
+#   tui.Configure(cfg)
+#
+# ─────────────────────────────────────────────────────────────────────────────
+
+[tui]
+menu_selected_prefix   = ">"
+menu_unselected_prefix = " "
+menu_index_width       = 2
+input_cursor           = " :>"
+divider_width          = 32
+max_width              = 64
+centered               = true
+menu_title_prefix      = "-+[ "
+menu_title_postfix     = " ]~-"
+
+[colors]
+menu    = 14   # BrightCyan
+title   = 6    # Cyan
+data    = 7    # White
+prompt  = 3    # Yellow
+divider = 8    # BrightBlack

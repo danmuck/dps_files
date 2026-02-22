@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/danmuck/dps_files/src/key_store"
+	tui "github.com/danmuck/tui_go"
 	logs "github.com/danmuck/smplog"
 )
 
@@ -50,6 +51,8 @@ func promptAction(input io.Reader, cfg *RuntimeConfig, metadataCount int) (MenuA
 		return cfg.Action, fmt.Sprintf("%s (non-interactive default)", cfg.Action), nil
 	}
 
+	t := cfg.TUI
+	nl := func() { logs.Printf("\n") }
 	reader := getBufferedReader(input)
 	for {
 		modeLabel := cfg.Mode
@@ -60,24 +63,31 @@ func promptAction(input io.Reader, cfg *RuntimeConfig, metadataCount int) (MenuA
 				modeLabel = "remote (no address)"
 			}
 		}
-		logs.Printf("\n")
-		logs.Titlef("--[ dps_files | %s ]--\n\n", modeLabel)
-		logs.Menuf("  view 		(inspect metadata + reassemble)\n")
-		logs.Menuf("  upload 	(store file or directory by path)\n")
-		logs.Menuf("  delete 	(remove a single stored file + chunks)\n")
-		logs.Menuf("  download 	(write a stored file to disk)\n")
-		logs.Printf("\n")
-		logs.Menuf("  verify 	(deep integrity scan of all chunks)\n")
-		logs.Menuf("  expire 	(sweep and remove TTL-expired files)\n")
-		logs.Menuf("  clean 	(.kdht only)\n")
-		logs.Menuf("  deep cln 	(.kdht + metadata + cache)\n")
-		logs.Printf("\n")
-		logs.Menuf("  stats 	(storage + system)\n")
-		logs.Menuf("  mode 		(toggle local / remote)\n")
-		logs.Menuf("  exit\n")
-		logs.Printf("\n")
-		logs.DividerRune(0, '=')
-		logs.Promptf("\nChoose action (default: %s): ", cfg.Action)
+		nl()
+		t.MenuTitleTC(&tui.TitleParams{Text: fmt.Sprintf("dps_files | %s", modeLabel)})
+		t.MenuTC(&tui.MenuParams{Items: []tui.MenuEntry{
+			{Label: "view      inspect metadata + reassemble"},
+			{Label: "upload    store file or directory by path"},
+			{Label: "delete    remove a single stored file + chunks"},
+			{Label: "download  write a stored file to disk"},
+		}})
+		nl()
+		t.MenuTC(&tui.MenuParams{Items: []tui.MenuEntry{
+			{Label: "verify    deep integrity scan of all chunks"},
+			{Label: "expire    sweep and remove TTL-expired files"},
+			{Label: "clean     .kdht only"},
+			{Label: "deep cln  .kdht + metadata + cache"},
+		}})
+		nl()
+		t.MenuTC(&tui.MenuParams{Items: []tui.MenuEntry{
+			{Label: "stats     storage + system"},
+			{Label: "mode      toggle local / remote"},
+			{Label: "exit"},
+		}})
+		nl()
+		t.DividerTC(&tui.DividerParams{Rune: '='})
+		t.InputLineFU(fmt.Sprintf("Choose action (default: %s)", string(cfg.Action)), "", true)
+		nl()
 
 		line, err := reader.ReadString('\n')
 		if err != nil {
@@ -97,8 +107,8 @@ func promptAction(input io.Reader, cfg *RuntimeConfig, metadataCount int) (MenuA
 
 		case "", string(ActionView), "vi":
 			if cfg.Mode != ModeRemote && metadataCount == 0 {
-				logs.StatusWarn("No metadata entries found in storage/metadata.")
-				logs.Printf("\n")
+				t.StatusWarnFU("No metadata entries found in storage/metadata.")
+				nl()
 				continue
 			}
 			return ActionView, "view", nil
@@ -108,16 +118,16 @@ func promptAction(input io.Reader, cfg *RuntimeConfig, metadataCount int) (MenuA
 
 		case string(ActionDownload), "dl", "down", "stream", "st":
 			if cfg.Mode != ModeRemote && metadataCount == 0 {
-				logs.StatusWarn("No stored files to download.")
-				logs.Printf("\n")
+				t.StatusWarnFU("No stored files to download.")
+				nl()
 				continue
 			}
 			return ActionDownload, "download", nil
 
 		case string(ActionDelete), "del":
 			if cfg.Mode != ModeRemote && metadataCount == 0 {
-				logs.StatusWarn("No stored files to delete.")
-				logs.Printf("\n")
+				t.StatusWarnFU("No stored files to delete.")
+				nl()
 				continue
 			}
 			return ActionDelete, "delete", nil
@@ -142,63 +152,57 @@ func promptAction(input io.Reader, cfg *RuntimeConfig, metadataCount int) (MenuA
 
 		default:
 			logs.Printf("Invalid action %q.\n\n", choice)
-			logs.Divider(0)
-			logs.Printf("\n")
-			logs.KeyHint("m", "mode — toggle local / remote")
-			logs.Printf("\n")
-			logs.KeyHint("vi", "view — inspect metadata + reassemble")
-			logs.Printf("\n")
-			logs.KeyHint("u, up", "upload — store file or directory by path")
-			logs.Printf("\n")
-			logs.KeyHint("dl", "download — write a stored file to disk")
-			logs.Printf("\n")
-			logs.KeyHint("del", "delete — remove a stored file + chunks")
-			logs.Printf("\n")
-			logs.KeyHint("ve", "verify — deep integrity scan of all chunks")
-			logs.Printf("\n")
-			logs.KeyHint("exp, ex", "expire — sweep and remove TTL-expired files")
-			logs.Printf("\n")
-			logs.KeyHint("cl", "clean — remove .kdht chunk files only")
-			logs.Printf("\n")
-			logs.KeyHint("dc, cleand", "deep clean — remove .kdht + metadata + cache")
-			logs.Printf("\n")
-			logs.KeyHint("stat", "stats — storage + system info")
-			logs.Printf("\n")
-			logs.KeyHint("e, q", "exit — quit")
-			logs.Printf("\n")
+			t.DividerTC(&tui.DividerParams{})
+			nl()
+			t.KeyHintFU("m", "mode — toggle local / remote"); nl()
+			t.KeyHintFU("vi", "view — inspect metadata + reassemble"); nl()
+			t.KeyHintFU("u, up", "upload — store file or directory by path"); nl()
+			t.KeyHintFU("dl", "download — write a stored file to disk"); nl()
+			t.KeyHintFU("del", "delete — remove a stored file + chunks"); nl()
+			t.KeyHintFU("ve", "verify — deep integrity scan of all chunks"); nl()
+			t.KeyHintFU("exp, ex", "expire — sweep and remove TTL-expired files"); nl()
+			t.KeyHintFU("cl", "clean — remove .kdht chunk files only"); nl()
+			t.KeyHintFU("dc, cleand", "deep clean — remove .kdht + metadata + cache"); nl()
+			t.KeyHintFU("stat", "stats — storage + system info"); nl()
+			t.KeyHintFU("e, q", "exit — quit"); nl()
 		}
 	}
 }
 
 // handleModeToggle switches between ModeRun and ModeRemote.
-// When switching to remote, prompts the user to select or enter a remote address.
 func handleModeToggle(reader *bufio.Reader, cfg *RuntimeConfig) error {
 	if cfg.Mode == ModeRemote {
 		cfg.Mode = ModeRun
 		cfg.RemoteAddr = ""
+		clearTerminalIfInteractive(os.Stdin)
 		logs.Println("Switched to local mode.")
 		return nil
 	}
-	addr, err := promptRemoteAddress(reader, *cfg)
+	clearTerminalIfInteractive(os.Stdin)
+	addr, err := promptRemoteAddress(reader, cfg)
 	if err != nil {
 		return err
 	}
 	cfg.Mode = ModeRemote
 	cfg.RemoteAddr = addr
+	clearTerminalIfInteractive(os.Stdin)
 	logs.Printf("Switched to remote mode @ %s\n", addr)
 	return nil
 }
 
 // promptRemoteAddress displays known remotes and lets the user pick one or enter a custom address.
-func promptRemoteAddress(reader *bufio.Reader, cfg RuntimeConfig) (string, error) {
+func promptRemoteAddress(reader *bufio.Reader, cfg *RuntimeConfig) (string, error) {
+	t := cfg.TUI
+	nl := func() { logs.Printf("\n") }
+
 	if len(cfg.KnownRemotes) > 0 {
-		logs.Titlef("\nKnown remotes:\n")
+		t.MenuTitleTC(&tui.TitleParams{Text: "Known remotes"})
 		for i, r := range cfg.KnownRemotes {
-			logs.Dataf("  [%d] %s (%s)\n", i, r.Name, r.Address)
+			t.FieldFU(fmt.Sprintf("[%d] %s", i, r.Name), r.Address); nl()
 		}
-		logs.Dataf("  [%d] Enter custom address\n", len(cfg.KnownRemotes))
+		t.FieldFU(fmt.Sprintf("[%d]", len(cfg.KnownRemotes)), "Enter custom address"); nl()
 	}
-	logs.Prompt("\nSelect remote or enter address directly: ")
+	t.InputLineFU("Select remote or enter address directly", "", true); nl()
 	line, err := reader.ReadString('\n')
 	if err != nil {
 		if err == io.EOF {
@@ -221,7 +225,7 @@ func promptRemoteAddress(reader *bufio.Reader, cfg RuntimeConfig) (string, error
 		return choice, nil
 	}
 	// Custom address prompt
-	logs.Prompt("Enter remote address (host:port): ")
+	t.InputLineFU("Enter remote address (host:port)", "", true); nl()
 	line, err = reader.ReadString('\n')
 	if err != nil {
 		if err == io.EOF {
@@ -237,16 +241,13 @@ func promptRemoteAddress(reader *bufio.Reader, cfg RuntimeConfig) (string, error
 }
 
 // promptUploadPath handles the unified upload command.
-//
-// If the user enters a non-empty path, it is stat'd and returned with isDir set appropriately.
-// If the user presses Enter with no input, browse mode lists local/upload/ entries
-// (files and [dir] subdirectories) for quick selection.
-// Returns (path, isDir, nil) on success, or errMenuBack if the user types "e".
 func promptUploadPath(input io.Reader, cfg RuntimeConfig) (path string, isDir bool, err error) {
+	t := cfg.TUI
+	nl := func() { logs.Printf("\n") }
 	reader := getBufferedReader(input)
 
 	for {
-		logs.Promptf("\nEnter path [%s]: ", cfg.UploadDirectory)
+		t.InputLineFU(fmt.Sprintf("Enter path [%s]", cfg.UploadDirectory), "", true); nl()
 		line, readErr := reader.ReadString('\n')
 		if readErr != nil {
 			if readErr == io.EOF {
@@ -277,15 +278,15 @@ func promptUploadPath(input io.Reader, cfg RuntimeConfig) (path string, isDir bo
 			continue
 		}
 
-		logs.Titlef("\n%s:\n", cfg.UploadDirectory)
+		t.MenuTitleTC(&tui.TitleParams{Text: cfg.UploadDirectory})
 		for i, e := range entries {
 			if e.IsDir {
-				logs.Dataf("  %d) [dir] %s/\n", i, e.Name)
+				t.FieldFU(fmt.Sprintf("%d", i), fmt.Sprintf("[dir] %s/", e.Name)); nl()
 			} else {
-				logs.Dataf("  %d) %s\n", i, e.Name)
+				t.FieldFU(fmt.Sprintf("%d", i), e.Name); nl()
 			}
 		}
-		logs.Promptf("\nSelect [0-%d] or 'all' (files only): ", len(entries)-1)
+		t.InputLineFU(fmt.Sprintf("Select [0-%d] or 'all' (files only)", len(entries)-1), "", true); nl()
 
 		selLine, selErr := reader.ReadString('\n')
 		if selErr != nil {
@@ -314,19 +315,19 @@ func promptUploadPath(input io.Reader, cfg RuntimeConfig) (path string, isDir bo
 }
 
 // confirmDirectoryUpload asks the user to confirm a recursive directory store.
-// Returns true if confirmed (user typed "y" or "yes"), false otherwise.
-func confirmDirectoryUpload(input io.Reader, dirPath string) (bool, error) {
+func confirmDirectoryUpload(input io.Reader, cfg RuntimeConfig, dirPath string) (bool, error) {
+	nl := func() { logs.Printf("\n") }
 	reader := getBufferedReader(input)
-	logs.Promptf("Store directory %q recursively? [y/N]: ", dirPath)
+	cfg.TUI.InputLineFU(fmt.Sprintf("Store directory %q recursively? [Y/n]", dirPath), "", true); nl()
 	line, err := reader.ReadString('\n')
 	if err != nil {
 		return false, fmt.Errorf("read confirmation: %w", err)
 	}
 	choice := strings.ToLower(strings.TrimSpace(line))
-	return choice == "y" || choice == "yes", nil
+	return choice != "n" && choice != "no", nil
 }
 
-func promptMetadataReassemblySelection(metadata []key_store.MetaData, input io.Reader) ([]key_store.MetaData, string, error) {
+func promptMetadataReassemblySelection(t tui.TUI, metadata []key_store.MetaData, input io.Reader) ([]key_store.MetaData, string, error) {
 	if len(metadata) == 0 {
 		return nil, "none", nil
 	}
@@ -335,9 +336,10 @@ func promptMetadataReassemblySelection(metadata []key_store.MetaData, input io.R
 		return nil, "none [non-interactive]", nil
 	}
 
+	nl := func() { logs.Printf("\n") }
 	reader := getBufferedReader(input)
 	for {
-		logs.Promptf("\nReassemble which metadata entry [0-%d], 'all', or 'none' (default: none): ", len(metadata)-1)
+		t.InputLineFU(fmt.Sprintf("Reassemble which metadata entry [0-%d], 'all', or 'none' (default: none)", len(metadata)-1), "", true); nl()
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			if err == io.EOF {

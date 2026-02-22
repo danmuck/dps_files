@@ -1,9 +1,12 @@
 package main
 
 import (
+	"fmt"
+	"os"
 	"testing"
 
 	"github.com/danmuck/dps_files/src/key_store"
+	tui "github.com/danmuck/tui_go"
 )
 
 // makeHash returns a [HashSize]byte with b in position 0 — a unique test hash.
@@ -13,9 +16,15 @@ func makeHash(b byte) [key_store.HashSize]byte {
 	return h
 }
 
-// --- buildLocalTree tests ---
+// renderTree is a test helper that renders TreeView and returns the flattened entries.
+func renderTree(nodes []tui.TreeNode) []tui.TreeViewEntry {
+	t := tui.NewTUI(os.Stdout)
+	return t.TreeViewTC(&tui.TreeViewParams{Nodes: nodes, ShowIndex: true})
+}
 
-func TestBuildLocalTree_DirectoryBeforeOrphan(t *testing.T) {
+// --- buildLocalTreeNodes tests ---
+
+func TestLocalTreeNodes_DirectoryBeforeOrphan(t *testing.T) {
 	dirHash := makeHash(1)
 	dir := key_store.MetaData{
 		FileName:    "mydir",
@@ -29,20 +38,23 @@ func TestBuildLocalTree_DirectoryBeforeOrphan(t *testing.T) {
 		TotalSize: 512,
 	}
 
-	items := buildLocalTree([]key_store.MetaData{orphan, dir})
+	nodes := buildLocalTreeNodes([]key_store.MetaData{orphan, dir})
+	entries := renderTree(nodes)
 
-	if len(items) != 2 {
-		t.Fatalf("expected 2 items, got %d", len(items))
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(entries))
 	}
-	if !items[0].MD.IsDirectory() {
-		t.Errorf("expected directory first, got %q", items[0].MD.FileName)
+	md0 := entries[0].Node.(localTreeNode).MD
+	if !md0.IsDirectory() {
+		t.Errorf("expected directory first, got %q", md0.FileName)
 	}
-	if items[1].MD.FileName != "orphan.txt" {
-		t.Errorf("expected orphan second, got %q", items[1].MD.FileName)
+	md1 := entries[1].Node.(localTreeNode).MD
+	if md1.FileName != "orphan.txt" {
+		t.Errorf("expected orphan second, got %q", md1.FileName)
 	}
 }
 
-func TestBuildLocalTree_ChildGroupedUnderDirectory(t *testing.T) {
+func TestLocalTreeNodes_ChildGroupedUnderDirectory(t *testing.T) {
 	dirHash := makeHash(1)
 	dir := key_store.MetaData{
 		FileName:    "mydir",
@@ -62,143 +74,168 @@ func TestBuildLocalTree_ChildGroupedUnderDirectory(t *testing.T) {
 		TotalSize: 512,
 	}
 
-	items := buildLocalTree([]key_store.MetaData{orphan, child, dir})
+	nodes := buildLocalTreeNodes([]key_store.MetaData{orphan, child, dir})
+	entries := renderTree(nodes)
 
-	if len(items) != 3 {
-		t.Fatalf("expected 3 items, got %d", len(items))
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 items, got %d", len(entries))
 	}
-	if !items[0].MD.IsDirectory() {
-		t.Errorf("item[0] should be dir, got %q", items[0].MD.FileName)
+	md0 := entries[0].Node.(localTreeNode).MD
+	if !md0.IsDirectory() {
+		t.Errorf("item[0] should be dir, got %q", md0.FileName)
 	}
-	if items[1].MD.FileName != "mydir/child.txt" {
-		t.Errorf("item[1] should be child, got %q", items[1].MD.FileName)
+	md1 := entries[1].Node.(localTreeNode).MD
+	if md1.FileName != "mydir/child.txt" {
+		t.Errorf("item[1] should be child, got %q", md1.FileName)
 	}
-	if items[1].Prefix == "" {
-		t.Errorf("child should have a non-empty indent prefix")
+	if entries[1].Depth == 0 {
+		t.Errorf("child should have depth > 0")
 	}
-	if items[2].MD.FileName != "orphan.txt" {
-		t.Errorf("item[2] should be orphan, got %q", items[2].MD.FileName)
+	md2 := entries[2].Node.(localTreeNode).MD
+	if md2.FileName != "orphan.txt" {
+		t.Errorf("item[2] should be orphan, got %q", md2.FileName)
 	}
 }
 
-func TestBuildLocalTree_LastChildGetsCornerPrefix(t *testing.T) {
+func TestLocalTreeNodes_ChildHasTreePrefix(t *testing.T) {
 	dirHash := makeHash(1)
-	dir := key_store.MetaData{FileHash: dirHash, EntryType: "directory", FileName: "d"}
+	dir := key_store.MetaData{FileHash: dirHash, EntryType: "directory", FileName: "d", ContentSize: 500}
 	c1 := key_store.MetaData{ParentHash: dirHash, TotalSize: 200, FileName: "d/a", FileHash: makeHash(2)}
 	c2 := key_store.MetaData{ParentHash: dirHash, TotalSize: 100, FileName: "d/b", FileHash: makeHash(3)}
 
-	items := buildLocalTree([]key_store.MetaData{dir, c2, c1})
-	// items: [dir, c1(200), c2(100)]
-	if items[1].Prefix != "  ├─ " {
-		t.Errorf("non-last child prefix: got %q, want %q", items[1].Prefix, "  ├─ ")
+	nodes := buildLocalTreeNodes([]key_store.MetaData{dir, c2, c1})
+	entries := renderTree(nodes)
+
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(entries))
 	}
-	if items[2].Prefix != "  └─ " {
-		t.Errorf("last child prefix: got %q, want %q", items[2].Prefix, "  └─ ")
+	// Children should have non-empty prefix (tree connectors)
+	if entries[1].Prefix == "" {
+		t.Errorf("non-last child should have tree prefix")
+	}
+	if entries[2].Prefix == "" {
+		t.Errorf("last child should have tree prefix")
 	}
 }
 
-func TestBuildLocalTree_SizeDescendingOrphans(t *testing.T) {
+func TestLocalTreeNodes_SizeDescendingOrphans(t *testing.T) {
 	small := key_store.MetaData{FileName: "small.txt", FileHash: makeHash(1), TotalSize: 100}
 	big := key_store.MetaData{FileName: "big.txt", FileHash: makeHash(2), TotalSize: 1000}
 
-	items := buildLocalTree([]key_store.MetaData{small, big})
+	nodes := buildLocalTreeNodes([]key_store.MetaData{small, big})
+	entries := renderTree(nodes)
 
-	if items[0].MD.FileName != "big.txt" {
-		t.Errorf("expected big.txt first (size desc), got %q", items[0].MD.FileName)
+	md0 := entries[0].Node.(localTreeNode).MD
+	if md0.FileName != "big.txt" {
+		t.Errorf("expected big.txt first (size desc), got %q", md0.FileName)
 	}
 }
 
-func TestBuildLocalTree_SizeDescendingDirs(t *testing.T) {
+func TestLocalTreeNodes_SizeDescendingDirs(t *testing.T) {
 	small := key_store.MetaData{FileName: "small", FileHash: makeHash(1), EntryType: "directory", ContentSize: 100}
 	big := key_store.MetaData{FileName: "big", FileHash: makeHash(2), EntryType: "directory", ContentSize: 1000}
 
-	items := buildLocalTree([]key_store.MetaData{small, big})
+	nodes := buildLocalTreeNodes([]key_store.MetaData{small, big})
+	entries := renderTree(nodes)
 
-	if items[0].MD.FileName != "big" {
-		t.Errorf("expected big dir first, got %q", items[0].MD.FileName)
+	md0 := entries[0].Node.(localTreeNode).MD
+	if md0.FileName != "big" {
+		t.Errorf("expected big dir first, got %q", md0.FileName)
 	}
 }
 
-func TestBuildLocalTree_SequentialIndices(t *testing.T) {
+func TestLocalTreeNodes_SequentialIndices(t *testing.T) {
 	dirHash := makeHash(1)
 	dir := key_store.MetaData{FileHash: dirHash, EntryType: "directory", FileName: "d", ContentSize: 500}
 	child := key_store.MetaData{ParentHash: dirHash, TotalSize: 200, FileName: "d/c", FileHash: makeHash(2)}
 	orphan := key_store.MetaData{FileName: "f.txt", FileHash: makeHash(3), TotalSize: 50}
 
-	items := buildLocalTree([]key_store.MetaData{orphan, child, dir})
+	nodes := buildLocalTreeNodes([]key_store.MetaData{orphan, child, dir})
+	entries := renderTree(nodes)
 
-	for i, it := range items {
-		if it.Idx != i {
-			t.Errorf("item[%d].Idx = %d, want %d", i, it.Idx, i)
+	for i, e := range entries {
+		if e.Index != i {
+			t.Errorf("entry[%d].Index = %d, want %d", i, e.Index, i)
 		}
 	}
 }
 
-// --- buildRemoteTree tests ---
+// --- buildRemoteTreeNodes tests ---
 
-func TestBuildRemoteTree_DirectoryBeforeOrphan(t *testing.T) {
-	dir := RemoteFileEntry{Name: "mydir", EntryType: "directory", Size: 2048}
-	orphan := RemoteFileEntry{Name: "orphan.txt", Size: 512}
+func TestRemoteTreeNodes_DirectoryBeforeOrphan(t *testing.T) {
+	dir := RemoteFileEntry{Name: "mydir", EntryType: "directory", Size: 2048, Hash: fmt.Sprintf("%x", makeHash(1))}
+	orphan := RemoteFileEntry{Name: "orphan.txt", Size: 512, Hash: fmt.Sprintf("%x", makeHash(2))}
 
-	items := buildRemoteTree([]RemoteFileEntry{orphan, dir})
+	nodes := buildRemoteTreeNodes([]RemoteFileEntry{orphan, dir})
+	entries := renderTree(nodes)
 
-	if len(items) != 2 {
-		t.Fatalf("expected 2, got %d", len(items))
+	if len(entries) != 2 {
+		t.Fatalf("expected 2, got %d", len(entries))
 	}
-	if !items[0].Entry.IsDirectory() {
+	e0 := entries[0].Node.(remoteTreeNode).Entry
+	if !e0.IsDirectory() {
 		t.Errorf("expected directory first")
 	}
-	if items[1].Entry.Name != "orphan.txt" {
-		t.Errorf("expected orphan second, got %q", items[1].Entry.Name)
+	e1 := entries[1].Node.(remoteTreeNode).Entry
+	if e1.Name != "orphan.txt" {
+		t.Errorf("expected orphan second, got %q", e1.Name)
 	}
 }
 
-func TestBuildRemoteTree_ChildGroupedUnderDirectory(t *testing.T) {
-	dir := RemoteFileEntry{Name: "mydir", EntryType: "directory", Size: 2048}
-	child := RemoteFileEntry{Name: "mydir/child.txt", Size: 1024}
-	orphan := RemoteFileEntry{Name: "orphan.txt", Size: 512}
+func TestRemoteTreeNodes_ChildGroupedUnderDirectory(t *testing.T) {
+	dir := RemoteFileEntry{Name: "mydir", EntryType: "directory", Size: 2048, Hash: fmt.Sprintf("%x", makeHash(1))}
+	child := RemoteFileEntry{Name: "mydir/child.txt", Size: 1024, Hash: fmt.Sprintf("%x", makeHash(2))}
+	orphan := RemoteFileEntry{Name: "orphan.txt", Size: 512, Hash: fmt.Sprintf("%x", makeHash(3))}
 
-	items := buildRemoteTree([]RemoteFileEntry{orphan, child, dir})
+	nodes := buildRemoteTreeNodes([]RemoteFileEntry{orphan, child, dir})
+	entries := renderTree(nodes)
 
-	if len(items) != 3 {
-		t.Fatalf("expected 3, got %d", len(items))
+	if len(entries) != 3 {
+		t.Fatalf("expected 3, got %d", len(entries))
 	}
-	if items[1].Entry.Name != "mydir/child.txt" {
-		t.Errorf("expected child at [1], got %q", items[1].Entry.Name)
+	e1 := entries[1].Node.(remoteTreeNode).Entry
+	if e1.Name != "mydir/child.txt" {
+		t.Errorf("expected child at [1], got %q", e1.Name)
 	}
-	if items[1].Prefix == "" {
-		t.Errorf("child should have indent prefix")
+	if entries[1].Depth == 0 {
+		t.Errorf("child should have depth > 0")
 	}
-	if items[2].Entry.Name != "orphan.txt" {
-		t.Errorf("expected orphan at [2], got %q", items[2].Entry.Name)
-	}
-}
-
-func TestBuildRemoteTree_LastChildGetsCornerPrefix(t *testing.T) {
-	dir := RemoteFileEntry{Name: "d", EntryType: "directory", Size: 500}
-	c1 := RemoteFileEntry{Name: "d/a", Size: 200}
-	c2 := RemoteFileEntry{Name: "d/b", Size: 100}
-
-	items := buildRemoteTree([]RemoteFileEntry{dir, c2, c1})
-	// items: [dir, c1(200), c2(100)]
-	if items[1].Prefix != "  ├─ " {
-		t.Errorf("non-last prefix: got %q, want %q", items[1].Prefix, "  ├─ ")
-	}
-	if items[2].Prefix != "  └─ " {
-		t.Errorf("last prefix: got %q, want %q", items[2].Prefix, "  └─ ")
+	e2 := entries[2].Node.(remoteTreeNode).Entry
+	if e2.Name != "orphan.txt" {
+		t.Errorf("expected orphan at [2], got %q", e2.Name)
 	}
 }
 
-func TestBuildRemoteTree_SequentialIndices(t *testing.T) {
-	dir := RemoteFileEntry{Name: "d", EntryType: "directory", Size: 500}
-	child := RemoteFileEntry{Name: "d/c", Size: 200}
-	orphan := RemoteFileEntry{Name: "f.txt", Size: 50}
+func TestRemoteTreeNodes_ChildHasTreePrefix(t *testing.T) {
+	dir := RemoteFileEntry{Name: "d", EntryType: "directory", Size: 500, Hash: fmt.Sprintf("%x", makeHash(1))}
+	c1 := RemoteFileEntry{Name: "d/a", Size: 200, Hash: fmt.Sprintf("%x", makeHash(2))}
+	c2 := RemoteFileEntry{Name: "d/b", Size: 100, Hash: fmt.Sprintf("%x", makeHash(3))}
 
-	items := buildRemoteTree([]RemoteFileEntry{orphan, child, dir})
+	nodes := buildRemoteTreeNodes([]RemoteFileEntry{dir, c2, c1})
+	entries := renderTree(nodes)
 
-	for i, it := range items {
-		if it.Idx != i {
-			t.Errorf("item[%d].Idx = %d, want %d", i, it.Idx, i)
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(entries))
+	}
+	if entries[1].Prefix == "" {
+		t.Errorf("non-last child should have tree prefix")
+	}
+	if entries[2].Prefix == "" {
+		t.Errorf("last child should have tree prefix")
+	}
+}
+
+func TestRemoteTreeNodes_SequentialIndices(t *testing.T) {
+	dir := RemoteFileEntry{Name: "d", EntryType: "directory", Size: 500, Hash: fmt.Sprintf("%x", makeHash(1))}
+	child := RemoteFileEntry{Name: "d/c", Size: 200, Hash: fmt.Sprintf("%x", makeHash(2))}
+	orphan := RemoteFileEntry{Name: "f.txt", Size: 50, Hash: fmt.Sprintf("%x", makeHash(3))}
+
+	nodes := buildRemoteTreeNodes([]RemoteFileEntry{orphan, child, dir})
+	entries := renderTree(nodes)
+
+	for i, e := range entries {
+		if e.Index != i {
+			t.Errorf("entry[%d].Index = %d, want %d", i, e.Index, i)
 		}
 	}
 }
