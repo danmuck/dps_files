@@ -117,7 +117,11 @@ func executeDownloadAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.R
 		if len(shortHash) > 16 {
 			shortHash = shortHash[:16]
 		}
-		logs.MenuItem(i, md.FileName+"  hash: "+shortHash+"...  chunks: "+fmt.Sprintf("%d", md.TotalBlocks)+"  size: "+formatBytes(md.TotalSize), false)
+		displayName := md.FileName
+		if md.IsDirectory() {
+			displayName = "[DIR] " + displayName
+		}
+		logs.MenuItem(i, displayName+"  hash: "+shortHash+"...  chunks: "+fmt.Sprintf("%d", md.TotalBlocks)+"  size: "+formatBytes(md.TotalSize), false)
 		logs.Printf("\n")
 	}
 
@@ -152,6 +156,31 @@ func executeDownloadAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.R
 
 		selectedMD = metadata[idx]
 		break
+	}
+
+	// Directory: reassemble the full tree and return early
+	if selectedMD.IsDirectory() {
+		outputDir := filepath.Join(cfg.KeyStore.StorageDir, selectedMD.FileName)
+		logs.Printf("\nReassembling directory %q to %s\n", selectedMD.FileName, outputDir)
+		summary := OpSummary{
+			Operation: "local-download",
+			FileName:  selectedMD.FileName,
+			FileSize:  selectedMD.TotalSize,
+			StartedAt: time.Now(),
+		}
+		beginPhase(&summary.Timer, summary.Operation, "reassemble", "reconstruct directory tree", 1, 1)
+		reassembleErr := ks.ReassembleDirectory(selectedMD.FileHash, outputDir)
+		summary.Timer.Stop(reassembleErr != nil)
+		if reassembleErr != nil {
+			summary.Err = reassembleErr
+			renderSummary(summary)
+			writeOpLog(summary)
+			return fmt.Errorf("reassemble directory: %w", reassembleErr)
+		}
+		logs.Printf("Directory reassembled to %s\n", outputDir)
+		renderSummary(summary)
+		writeOpLog(summary)
+		return nil
 	}
 
 	// Optional chunk range
@@ -195,12 +224,12 @@ func executeDownloadAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.R
 	}
 
 	// Resolve output path
-	outputPath := copyOutputPath(cfg.KeyStore.StorageDir, selectedMD.FileName)
+	outputPath := filepath.Join(cfg.KeyStore.StorageDir, filepath.Base(selectedMD.FileName))
 	if useRange {
 		base := strings.TrimSuffix(filepath.Base(selectedMD.FileName), filepath.Ext(selectedMD.FileName))
 		ext := filepath.Ext(selectedMD.FileName)
 		outputPath = filepath.Join(cfg.KeyStore.StorageDir,
-			fmt.Sprintf("copy.%s.chunks_%d_%d%s", base, chunkStart, chunkEnd, ext))
+			fmt.Sprintf("%s.chunks_%d_%d%s", base, chunkStart, chunkEnd, ext))
 	}
 
 	if err := createDirPath(filepath.Dir(outputPath)); err != nil {

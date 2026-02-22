@@ -284,4 +284,5 @@ Test data goes in `./local/upload/` (created by tests, reused across runs). The 
 ## Git
 
 - Do not commit changes unless explicitly instructed to do so.
-- Include feature size breakpoints in task lists to ask if I would like to commit the changes, giving me time to look them over before they are committed.
+- Include feature size breakpoints in task lists to ask if I would like to commit the changes, giving me time to look them over before I commit them.
+- By default, I make all commits

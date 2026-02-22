@@ -91,16 +91,24 @@ func executeViewAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.Reade
 	}
 
 	for _, md := range selected {
-		outputPath := copyOutputPath(cfg.KeyStore.StorageDir, md.FileName)
-		if err := createDirPath(filepath.Dir(outputPath)); err != nil {
-			return fmt.Errorf("failed to ensure output directory: %w", err)
+		if md.IsDirectory() {
+			outputDir := filepath.Join(cfg.KeyStore.StorageDir, md.FileName)
+			logs.Printf("\nReassembling directory %q to %s\n", md.FileName, outputDir)
+			if err := ks.ReassembleDirectory(md.FileHash, outputDir); err != nil {
+				return fmt.Errorf("failed to reassemble directory %q: %w", md.FileName, err)
+			}
+			logs.Printf("Reassembled: %s\n", outputDir)
+		} else {
+			outputPath := filepath.Join(cfg.KeyStore.StorageDir, filepath.Base(md.FileName))
+			if err := createDirPath(filepath.Dir(outputPath)); err != nil {
+				return fmt.Errorf("failed to ensure output directory: %w", err)
+			}
+			logs.Printf("\nReassembling %q to %s\n", md.FileName, outputPath)
+			if err := ks.ReassembleFileToPath(md.FileHash, outputPath); err != nil {
+				return fmt.Errorf("failed to reassemble %q: %w", md.FileName, err)
+			}
+			logs.Printf("Reassembled: %s\n", outputPath)
 		}
-
-		logs.Printf("\nReassembling %q to %s\n", md.FileName, outputPath)
-		if err := ks.ReassembleFileToPath(md.FileHash, outputPath); err != nil {
-			return fmt.Errorf("failed to reassemble %q: %w", md.FileName, err)
-		}
-		logs.Printf("Reassembled: %s\n", outputPath)
 	}
 
 	return nil

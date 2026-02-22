@@ -24,6 +24,7 @@ build:
 # Clean up build artifacts
 clean:
 	rm -rf .build/
+	rm -rf client
 
 server:
 	clear; go run ./cmd/server $(ARGS)
