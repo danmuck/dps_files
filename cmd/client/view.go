@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -26,18 +25,20 @@ func executeRemoteViewAction(cfg RuntimeConfig) error {
 		logs.Println("No files on remote server.")
 		return nil
 	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
-	logs.Titlef("\nRemote files (%d):\n", len(entries))
-	for i, e := range entries {
-		shortHash := e.Hash
+	items := buildRemoteTree(entries)
+	logs.Titlef("\nRemote files (%d):\n", len(items))
+	for _, it := range items {
+		shortHash := it.Entry.Hash
 		if len(shortHash) > 16 {
 			shortHash = shortHash[:16]
 		}
-		displayName := e.Name
-		if e.IsDirectory() {
-			displayName = "[DIR] " + displayName
+		displayName := it.Prefix
+		if it.Entry.IsDirectory() {
+			displayName += "[DIR] " + it.Entry.Name
+		} else {
+			displayName += it.Entry.Name
 		}
-		logs.MenuItem(i, logs.PadRight(30, displayName)+"  hash: "+shortHash+"...  size: "+formatBytes(e.Size), false)
+		logs.MenuItem(it.Idx, logs.PadRight(30, displayName)+"  hash: "+shortHash+"...  size: "+formatBytes(it.Entry.Size), false)
 		logs.Printf("\n")
 	}
 	return nil
@@ -53,43 +54,42 @@ func executeViewAction(cfg RuntimeConfig, ks *key_store.KeyStore, input io.Reade
 		return nil
 	}
 
-	sort.Slice(metadata, func(i, j int) bool {
-		if metadata[i].FileName == metadata[j].FileName {
-			return fmt.Sprintf("%x", metadata[i].FileHash) < fmt.Sprintf("%x", metadata[j].FileHash)
-		}
-		return metadata[i].FileName < metadata[j].FileName
-	})
-
-	logs.Titlef("\nStored metadata entries (%d):\n", len(metadata))
-	for i, md := range metadata {
-		lastChunk := calculateLastChunkSize(md)
-		chunkSize := uint64(md.BlockSize)
-		hashHex := fmt.Sprintf("%x", md.FileHash)
+	items := buildLocalTree(metadata)
+	logs.Titlef("\nStored metadata entries (%d):\n", len(items))
+	for _, it := range items {
+		lastChunk := calculateLastChunkSize(it.MD)
+		chunkSize := uint64(it.MD.BlockSize)
+		hashHex := fmt.Sprintf("%x", it.MD.FileHash)
 		shortHash := hashHex
 		if len(shortHash) > 16 {
 			shortHash = shortHash[:16]
 		}
-
-		displayName := md.FileName
-		if md.IsDirectory() {
-			displayName = "[DIR] " + displayName
+		displayName := it.Prefix
+		if it.MD.IsDirectory() {
+			displayName += "[DIR] " + it.MD.FileName
+		} else {
+			displayName += it.MD.FileName
 		}
-		logs.MenuItem(i, displayName, false)
+		displaySize := it.MD.TotalSize
+		if it.MD.IsDirectory() && it.MD.ContentSize > 0 {
+			displaySize = it.MD.ContentSize
+		}
+		logs.MenuItem(it.Idx, displayName, false)
 		logs.Printf("\n")
-		displaySize := md.TotalSize
-		if md.IsDirectory() && md.ContentSize > 0 {
-			displaySize = md.ContentSize
-		}
-		logs.Dataf("      hash: %s...  size: %s  chunks: %d\n", shortHash, formatBytes(displaySize), md.TotalBlocks)
+		logs.Dataf("      hash: %s...  size: %s  chunks: %d\n", shortHash, formatBytes(displaySize), it.MD.TotalBlocks)
 		logs.Dataf("      chunk_size: %s  last_chunk: %s  modified: %s  ttl: %s\n",
 			formatBytes(chunkSize),
 			formatBytes(lastChunk),
-			formatUnixNano(md.Modified),
-			formatTTLSeconds(md.TTL),
+			formatUnixNano(it.MD.Modified),
+			formatTTLSeconds(it.MD.TTL),
 		)
 	}
 
-	selected, selection, err := promptMetadataReassemblySelection(metadata, input)
+	orderedMDs := make([]key_store.MetaData, len(items))
+	for i, it := range items {
+		orderedMDs[i] = it.MD
+	}
+	selected, selection, err := promptMetadataReassemblySelection(orderedMDs, input)
 	if err != nil {
 		return err
 	}
