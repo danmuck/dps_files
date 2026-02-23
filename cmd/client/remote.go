@@ -45,9 +45,11 @@ type VerifyIssue struct {
 
 // RemoteCleanResult holds counts from the remote Clean RPC.
 type RemoteCleanResult struct {
-	RemovedKDHT     int64
-	RemovedMetadata int64
-	RemovedCache    int64
+	RemovedKDHT        int64
+	RemovedMetadata    int64
+	RemovedCache       int64
+	RemovedIntents     int64
+	RemovedStorageRoot int64
 }
 
 // RemoteStats holds storage statistics from the remote Stats RPC.
@@ -315,18 +317,22 @@ func (c *GRPCClient) Expire() (int64, error) {
 	return resp.Removed, nil
 }
 
-// Clean removes chunk data (and optionally metadata + cache) from the remote server.
-func (c *GRPCClient) Clean(deep bool) (RemoteCleanResult, error) {
+// Clean removes stored data from the remote server.
+// deep=false: removes .cache and .intents files.
+// deep=true: removes .kdht chunks and metadata; nukeRoot also wipes storage root entries.
+func (c *GRPCClient) Clean(deep, nukeRoot bool) (RemoteCleanResult, error) {
 	ctx, cancel := c.ctx()
 	defer cancel()
-	resp, err := c.stub.Clean(ctx, &pb.CleanRequest{Deep: deep})
+	resp, err := c.stub.Clean(ctx, &pb.CleanRequest{Deep: deep, NukeRoot: nukeRoot})
 	if err != nil {
 		return RemoteCleanResult{}, fmt.Errorf("clean: %w", err)
 	}
 	return RemoteCleanResult{
-		RemovedKDHT:     resp.RemovedKdht,
-		RemovedMetadata: resp.RemovedMetadata,
-		RemovedCache:    resp.RemovedCache,
+		RemovedKDHT:        resp.RemovedKdht,
+		RemovedMetadata:    resp.RemovedMetadata,
+		RemovedCache:       resp.RemovedCache,
+		RemovedIntents:     resp.RemovedIntents,
+		RemovedStorageRoot: resp.RemovedStorageRoot,
 	}, nil
 }
 

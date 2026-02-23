@@ -209,19 +209,26 @@ func printRuntimeSummary(cfg RuntimeConfig, actionSource string) {
 func executeActionOnce(cfg RuntimeConfig, client *GRPCClient, input io.Reader) error {
 	switch cfg.Action {
 	case ActionClean:
-		result, err := client.Clean(false)
+		result, err := client.Clean(false, false)
 		if err != nil {
 			return fmt.Errorf("clean: %w", err)
 		}
-		logs.Printf("Clean complete: removed %d .kdht file(s).\n", result.RemovedKDHT)
+		logs.Printf("Clean complete: removed %d cache, %d intent file(s).\n", result.RemovedCache, result.RemovedIntents)
 		return nil
 	case ActionDeepClean:
-		result, err := client.Clean(true)
+		nukeRoot, promptErr := promptNukeRoot(input, cfg)
+		if promptErr != nil {
+			return promptErr
+		}
+		result, err := client.Clean(true, nukeRoot)
 		if err != nil {
 			return fmt.Errorf("deep clean: %w", err)
 		}
-		logs.Printf("Deep clean complete: removed %d .kdht, %d metadata, %d cache file(s).\n",
-			result.RemovedKDHT, result.RemovedMetadata, result.RemovedCache)
+		logs.Printf("Deep clean complete: removed %d .kdht, %d metadata file(s).\n",
+			result.RemovedKDHT, result.RemovedMetadata)
+		if nukeRoot {
+			logs.Printf("Storage root wiped: %d entries removed.\n", result.RemovedStorageRoot)
+		}
 		return nil
 	case ActionStats:
 		if err := executeStatsAction(cfg, client); err != nil {

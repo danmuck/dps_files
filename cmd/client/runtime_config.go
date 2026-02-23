@@ -240,7 +240,7 @@ func printUsage(indexedFiles []string, cfg RuntimeConfig) {
 	fmt.Printf("Default TTL is %d seconds; override with %q.\n", cfg.TTLSeconds, TTL_SECONDS_FLAG)
 	fmt.Printf("Reassembled copy outputs are written to %s.\n", cfg.KeyStore.StorageDir)
 	fmt.Printf("\nUpload action indexes %s and excludes directories + copy.* files.\n", cfg.UploadDirectory)
-	fmt.Println("Actions: upload (path prompt; empty = browse upload dir), clean (.kdht only), deep-clean (.kdht + metadata + cache), view (inspect metadata), stats (storage/system stats), verify (deep integrity scan), delete (remove a single file), expire (sweep TTL-expired files), download (write stored file to disk).")
+	fmt.Println("Actions: upload (path prompt; empty = browse upload dir), clean (.cache + .intents), deep-clean (.kdht + metadata; prompts to also nuke storage root), view (inspect metadata), stats (storage/system stats), verify (deep integrity scan), delete (remove a single file), expire (sweep TTL-expired files), download (write stored file to disk).")
 
 	if len(sorted) == 0 {
 		fmt.Println("\nNo indexable upload files were found.")

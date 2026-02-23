@@ -74,8 +74,8 @@ func promptAction(input io.Reader, cfg *RuntimeConfig, metadataCount int) (MenuA
 		t.MenuTC(&tui.MenuParams{Items: []tui.MenuEntry{
 			{Label: "verify    deep integrity scan of all chunks"},
 			{Label: "expire    sweep and remove TTL-expired files"},
-			{Label: "clean     .kdht only"},
-			{Label: "deep cln  .kdht + metadata + cache"},
+			{Label: "clean     .cache + .intents"},
+			{Label: "deep cln  .kdht + metadata (+ storage root prompt)"},
 		}})
 		nl()
 		t.MenuTC(&tui.MenuParams{Items: []tui.MenuEntry{
@@ -173,9 +173,9 @@ func promptAction(input io.Reader, cfg *RuntimeConfig, metadataCount int) (MenuA
 			nl()
 			t.KeyHintFU("exp, ex", "expire — sweep and remove TTL-expired files")
 			nl()
-			t.KeyHintFU("cl", "clean — remove .kdht chunk files only")
+			t.KeyHintFU("cl", "clean — remove .cache + .intents files")
 			nl()
-			t.KeyHintFU("dc, cleand", "deep clean — remove .kdht + metadata + cache")
+			t.KeyHintFU("dc, cleand", "deep clean — remove .kdht + metadata (+ storage root prompt)")
 			nl()
 			t.KeyHintFU("stat", "stats — storage + system info")
 			nl()
@@ -377,6 +377,24 @@ func selectFromLocalFSTree(t tui.TUI, reader *bufio.Reader, rootPath string, max
 		}
 		return node.Path, node.IsDir, nil
 	}
+}
+
+// promptNukeRoot asks whether to also wipe all entries in the storage root.
+// Default is No (empty input returns false).
+func promptNukeRoot(input io.Reader, cfg RuntimeConfig) (bool, error) {
+	nl := func() { logs.Printf("\n") }
+	reader := getBufferedReader(input)
+	cfg.TUI.InputLineFU("Also remove all entries in storage root? [y/N]", "", true)
+	nl()
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		if err == io.EOF {
+			return false, nil
+		}
+		return false, fmt.Errorf("read confirmation: %w", err)
+	}
+	choice := strings.ToLower(strings.TrimSpace(line))
+	return choice == "y" || choice == "yes", nil
 }
 
 // confirmDirectoryUpload asks the user to confirm a recursive directory store.

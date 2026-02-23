@@ -92,14 +92,18 @@ message ExpireResponse {
   int64 removed = 1;
 }
 
-// deep=true removes .kdht + metadata + cache; false removes .kdht only.
+// deep=false removes .cache + .intents; true removes data (.kdht) + metadata.
+// nuke_root (only with deep=true) additionally removes entries at storage root.
 message CleanRequest {
-  bool deep = 1;
+  bool deep      = 1;
+  bool nuke_root = 2;
 }
 message CleanResponse {
-  int64 removed_kdht     = 1;
-  int64 removed_metadata = 2;
-  int64 removed_cache    = 3;
+  int64 removed_kdht         = 1;
+  int64 removed_metadata     = 2;
+  int64 removed_cache        = 3;
+  int64 removed_intents      = 4;
+  int64 removed_storage_root = 5;
 }
 
 message StatsRequest {}

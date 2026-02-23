@@ -167,20 +167,20 @@ func TestCleanShallow(t *testing.T) {
 	if _, err := stream.CloseAndRecv(); err != nil {
 		t.Fatalf("upload: %v", err)
 	}
+	// Shallow clean removes .cache + .intents; .kdht and metadata are untouched.
 	resp, err := client.Clean(context.Background(), &pb.CleanRequest{Deep: false})
 	if err != nil {
 		t.Fatalf("clean: %v", err)
 	}
-	if resp.RemovedKdht < 1 {
-		t.Errorf("expected at least 1 kdht file removed, got %d", resp.RemovedKdht)
-	}
-	// Verify the List RPC still works after shallow clean.
-	// Metadata entries persist after shallow clean; only raw .kdht chunk files are removed.
+	_ = resp // cache/intents may be empty; just verify no error
+	// Chunk data and metadata persist after shallow clean.
 	listResp, err := client.List(context.Background(), &pb.ListRequest{})
 	if err != nil {
 		t.Fatalf("list after clean: %v", err)
 	}
-	_ = listResp // metadata entries persist after shallow clean; chunks are gone
+	if len(listResp.Files) < 1 {
+		t.Errorf("expected file to persist after shallow clean, got 0")
+	}
 }
 
 func TestCleanDeep(t *testing.T) {
@@ -191,7 +191,7 @@ func TestCleanDeep(t *testing.T) {
 	if _, err := stream.CloseAndRecv(); err != nil {
 		t.Fatalf("upload: %v", err)
 	}
-	resp, err := client.Clean(context.Background(), &pb.CleanRequest{Deep: true})
+	resp, err := client.Clean(context.Background(), &pb.CleanRequest{Deep: true, NukeRoot: false})
 	if err != nil {
 		t.Fatalf("deep clean: %v", err)
 	}

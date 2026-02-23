@@ -274,35 +274,36 @@ func (s *Server) Expire(_ context.Context, _ *pb.ExpireRequest) (*pb.ExpireRespo
 	return &pb.ExpireResponse{Removed: int64(removed)}, nil
 }
 
-// Clean removes stored data. If req.Deep is true, also removes metadata and cache.
+// Clean removes stored data.
+// deep=false: removes .cache and .intents files only.
+// deep=true: removes .kdht chunks and metadata; nuke_root also removes storage root entries.
 func (s *Server) Clean(_ context.Context, req *pb.CleanRequest) (*pb.CleanResponse, error) {
 	ks, err := s.managedStore()
 	if err != nil {
 		return nil, err
 	}
 	if req.Deep {
-		result, cleanErr := ks.DeepClean()
+		result, cleanErr := ks.DeepClean(req.NukeRoot)
 		if cleanErr != nil {
 			return nil, status.Errorf(codes.Internal, "deep clean: %v", cleanErr)
 		}
-		logs.Infof("Clean(deep) complete: kdht=%d meta=%d cache=%d", result.RemovedKDHT, result.RemovedMetadata, result.RemovedCache)
+		logs.Infof("Clean(deep) complete: kdht=%d meta=%d root=%d", result.RemovedKDHT, result.RemovedMetadata, result.RemovedStorageRoot)
 		return &pb.CleanResponse{
-			RemovedKdht:     int64(result.RemovedKDHT),
-			RemovedMetadata: int64(result.RemovedMetadata),
-			RemovedCache:    int64(result.RemovedCache),
+			RemovedKdht:        int64(result.RemovedKDHT),
+			RemovedMetadata:    int64(result.RemovedMetadata),
+			RemovedStorageRoot: int64(result.RemovedStorageRoot),
 		}, nil
 	}
-	// Shallow clean: .kdht only. Count before removal for the response.
-	kdhtPattern := filepath.Join(ks.StorageDir(), "data", "*.kdht")
-	kdhtFiles, globErr := filepath.Glob(kdhtPattern)
-	if globErr != nil {
-		return nil, status.Errorf(codes.Internal, "glob kdht: %v", globErr)
+	// Shallow clean: .cache + .intents only.
+	result, cleanErr := ks.CleanCache()
+	if cleanErr != nil {
+		return nil, status.Errorf(codes.Internal, "clean cache: %v", cleanErr)
 	}
-	if cleanErr := ks.CleanupKDHT(); cleanErr != nil {
-		return nil, status.Errorf(codes.Internal, "cleanup kdht: %v", cleanErr)
-	}
-	logs.Infof("Clean complete: removed_kdht=%d", len(kdhtFiles))
-	return &pb.CleanResponse{RemovedKdht: int64(len(kdhtFiles))}, nil
+	logs.Infof("Clean complete: cache=%d intents=%d", result.RemovedCache, result.RemovedIntents)
+	return &pb.CleanResponse{
+		RemovedCache:   int64(result.RemovedCache),
+		RemovedIntents: int64(result.RemovedIntents),
+	}, nil
 }
 
 // Stats returns byte-level storage usage for the server's storage root.

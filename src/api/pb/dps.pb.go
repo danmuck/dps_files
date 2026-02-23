@@ -958,10 +958,12 @@ func (x *ExpireResponse) GetRemoved() int64 {
 	return 0
 }
 
-// deep=true removes .kdht + metadata + cache; false removes .kdht only.
+// deep=false removes .cache + .intents; true removes data (.kdht) + metadata.
+// nuke_root (only with deep=true) additionally removes entries at storage root.
 type CleanRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Deep          bool                   `protobuf:"varint,1,opt,name=deep,proto3" json:"deep,omitempty"`
+	NukeRoot      bool                   `protobuf:"varint,2,opt,name=nuke_root,json=nukeRoot,proto3" json:"nuke_root,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1003,13 +1005,22 @@ func (x *CleanRequest) GetDeep() bool {
 	return false
 }
 
+func (x *CleanRequest) GetNukeRoot() bool {
+	if x != nil {
+		return x.NukeRoot
+	}
+	return false
+}
+
 type CleanResponse struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	RemovedKdht     int64                  `protobuf:"varint,1,opt,name=removed_kdht,json=removedKdht,proto3" json:"removed_kdht,omitempty"`
-	RemovedMetadata int64                  `protobuf:"varint,2,opt,name=removed_metadata,json=removedMetadata,proto3" json:"removed_metadata,omitempty"`
-	RemovedCache    int64                  `protobuf:"varint,3,opt,name=removed_cache,json=removedCache,proto3" json:"removed_cache,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	RemovedKdht        int64                  `protobuf:"varint,1,opt,name=removed_kdht,json=removedKdht,proto3" json:"removed_kdht,omitempty"`
+	RemovedMetadata    int64                  `protobuf:"varint,2,opt,name=removed_metadata,json=removedMetadata,proto3" json:"removed_metadata,omitempty"`
+	RemovedCache       int64                  `protobuf:"varint,3,opt,name=removed_cache,json=removedCache,proto3" json:"removed_cache,omitempty"`
+	RemovedIntents     int64                  `protobuf:"varint,4,opt,name=removed_intents,json=removedIntents,proto3" json:"removed_intents,omitempty"`
+	RemovedStorageRoot int64                  `protobuf:"varint,5,opt,name=removed_storage_root,json=removedStorageRoot,proto3" json:"removed_storage_root,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *CleanResponse) Reset() {
@@ -1059,6 +1070,20 @@ func (x *CleanResponse) GetRemovedMetadata() int64 {
 func (x *CleanResponse) GetRemovedCache() int64 {
 	if x != nil {
 		return x.RemovedCache
+	}
+	return 0
+}
+
+func (x *CleanResponse) GetRemovedIntents() int64 {
+	if x != nil {
+		return x.RemovedIntents
+	}
+	return 0
+}
+
+func (x *CleanResponse) GetRemovedStorageRoot() int64 {
+	if x != nil {
+		return x.RemovedStorageRoot
 	}
 	return 0
 }
@@ -1232,13 +1257,16 @@ const file_dps_proto_rawDesc = "" +
 	"\x06errors\x18\x01 \x03(\v2\x10.dps.VerifyErrorR\x06errors\"\x0f\n" +
 	"\rExpireRequest\"*\n" +
 	"\x0eExpireResponse\x12\x18\n" +
-	"\aremoved\x18\x01 \x01(\x03R\aremoved\"\"\n" +
+	"\aremoved\x18\x01 \x01(\x03R\aremoved\"?\n" +
 	"\fCleanRequest\x12\x12\n" +
-	"\x04deep\x18\x01 \x01(\bR\x04deep\"\x82\x01\n" +
+	"\x04deep\x18\x01 \x01(\bR\x04deep\x12\x1b\n" +
+	"\tnuke_root\x18\x02 \x01(\bR\bnukeRoot\"\xdd\x01\n" +
 	"\rCleanResponse\x12!\n" +
 	"\fremoved_kdht\x18\x01 \x01(\x03R\vremovedKdht\x12)\n" +
 	"\x10removed_metadata\x18\x02 \x01(\x03R\x0fremovedMetadata\x12#\n" +
-	"\rremoved_cache\x18\x03 \x01(\x03R\fremovedCache\"\x0e\n" +
+	"\rremoved_cache\x18\x03 \x01(\x03R\fremovedCache\x12'\n" +
+	"\x0fremoved_intents\x18\x04 \x01(\x03R\x0eremovedIntents\x120\n" +
+	"\x14removed_storage_root\x18\x05 \x01(\x03R\x12removedStorageRoot\"\x0e\n" +
 	"\fStatsRequest\"\xb6\x01\n" +
 	"\rStatsResponse\x12\x1d\n" +
 	"\n" +

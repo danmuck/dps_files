@@ -921,17 +921,63 @@ func (ks *KeyStore) StorageDir() string {
 	return ks.storageDir
 }
 
-// DeepCleanResult holds counts of files removed by DeepClean.
-type DeepCleanResult struct {
-	RemovedKDHT     int
-	RemovedMetadata int
-	RemovedCache    int
+// CacheCleanResult holds counts of files removed by CleanCache.
+type CacheCleanResult struct {
+	RemovedCache   int
+	RemovedIntents int
 }
 
-// DeepClean removes all .kdht chunks, all metadata .toml files, and all cache
-// entries. Holds the write lock for the entire operation. Resets in-memory
-// indexes. Returns counts of files actually removed from disk.
-func (ks *KeyStore) DeepClean() (DeepCleanResult, error) {
+// CleanCache removes all files in .cache/ and .intents/. Does not touch chunk
+// data or metadata. Safe to call without disrupting stored file integrity.
+func (ks *KeyStore) CleanCache() (CacheCleanResult, error) {
+	ks.lock.Lock()
+	defer ks.lock.Unlock()
+
+	var result CacheCleanResult
+
+	cacheDir := filepath.Join(ks.storageDir, ".cache")
+	cacheEntries, err := os.ReadDir(cacheDir)
+	if err != nil && !os.IsNotExist(err) {
+		return result, fmt.Errorf("read cache dir: %w", err)
+	}
+	for _, e := range cacheEntries {
+		if !e.IsDir() {
+			if removeErr := os.Remove(filepath.Join(cacheDir, e.Name())); removeErr != nil && !os.IsNotExist(removeErr) {
+				return result, fmt.Errorf("remove cache %s: %w", e.Name(), removeErr)
+			}
+			result.RemovedCache++
+		}
+	}
+
+	intentsDir := filepath.Join(ks.storageDir, ".intents")
+	intentEntries, err := os.ReadDir(intentsDir)
+	if err != nil && !os.IsNotExist(err) {
+		return result, fmt.Errorf("read intents dir: %w", err)
+	}
+	for _, e := range intentEntries {
+		if !e.IsDir() {
+			if removeErr := os.Remove(filepath.Join(intentsDir, e.Name())); removeErr != nil && !os.IsNotExist(removeErr) {
+				return result, fmt.Errorf("remove intent %s: %w", e.Name(), removeErr)
+			}
+			result.RemovedIntents++
+		}
+	}
+
+	return result, nil
+}
+
+// DeepCleanResult holds counts of files removed by DeepClean.
+type DeepCleanResult struct {
+	RemovedKDHT        int
+	RemovedMetadata    int
+	RemovedStorageRoot int
+}
+
+// DeepClean removes all .kdht chunks and all metadata .toml files. If
+// nukeRoot is true, it also removes every entry (file or directory) at the
+// storage root level. Holds the write lock for the entire operation. Resets
+// in-memory indexes. Returns counts of items actually removed from disk.
+func (ks *KeyStore) DeepClean(nukeRoot bool) (DeepCleanResult, error) {
 	ks.lock.Lock()
 	defer ks.lock.Unlock()
 
@@ -967,18 +1013,18 @@ func (ks *KeyStore) DeepClean() (DeepCleanResult, error) {
 		}
 	}
 
-	// Remove cache files.
-	cacheDir := filepath.Join(ks.storageDir, ".cache")
-	cacheEntries, err := os.ReadDir(cacheDir)
-	if err != nil && !os.IsNotExist(err) {
-		return result, fmt.Errorf("read cache dir: %w", err)
-	}
-	for _, e := range cacheEntries {
-		if !e.IsDir() {
-			if removeErr := os.Remove(filepath.Join(cacheDir, e.Name())); removeErr != nil && !os.IsNotExist(removeErr) {
-				return result, fmt.Errorf("remove cache %s: %w", e.Name(), removeErr)
+	// Optionally nuke all entries directly under storage root.
+	if nukeRoot {
+		rootEntries, readErr := os.ReadDir(ks.storageDir)
+		if readErr != nil && !os.IsNotExist(readErr) {
+			return result, fmt.Errorf("read storage root: %w", readErr)
+		}
+		for _, e := range rootEntries {
+			target := filepath.Join(ks.storageDir, e.Name())
+			if removeErr := os.RemoveAll(target); removeErr != nil && !os.IsNotExist(removeErr) {
+				return result, fmt.Errorf("remove storage root entry %s: %w", e.Name(), removeErr)
 			}
-			result.RemovedCache++
+			result.RemovedStorageRoot++
 		}
 	}
 
