@@ -87,13 +87,18 @@ func (s *Server) Upload(stream pb.DPSFiles_UploadServer) error {
 	}()
 
 	fid, storeErr := s.storage.StoreFromReader(name, pr, size)
+	// If StoreFromReader returned early (error or unexpected EOF), unblock the
+	// goroutine so it can exit and send on errCh.  Without this, a disk error
+	// or size mismatch leaves the goroutine blocked on pw.Write and <-errCh
+	// deadlocks, eventually forcing the gRPC transport to kill the connection.
+	_ = pr.CloseWithError(storeErr)
 	recvErr := <-errCh
 
 	if storeErr != nil {
 		logs.Errorf(storeErr, "Upload store failed: name=%q", name)
 		return status.Errorf(codes.Internal, "store failed")
 	}
-	if recvErr != nil {
+	if recvErr != nil && recvErr != io.ErrClosedPipe {
 		logs.Errorf(recvErr, "Upload receive failed: name=%q", name)
 		return status.Errorf(codes.Internal, "upload receive failed")
 	}

@@ -164,8 +164,11 @@ func (c *GRPCClient) DownloadByHash(hash [32]byte, outputPath string) (uint64, e
 	return written, nil
 }
 
-// Upload sends localPath to the server and returns the 32-byte SHA-256 hash.
-func (c *GRPCClient) Upload(localPath string) ([32]byte, error) {
+// Upload sends localPath to the server under the given name and returns the
+// 32-byte SHA-256 hash.  name is stored as the file's logical path on the
+// server; pass filepath.Base(localPath) for single-file uploads and the
+// relative path (e.g. "src/api/main.go") for directory uploads.
+func (c *GRPCClient) Upload(localPath, name string) ([32]byte, error) {
 	var hash [32]byte
 	info, err := os.Stat(localPath)
 	if err != nil {
@@ -190,7 +193,7 @@ func (c *GRPCClient) Upload(localPath string) ([32]byte, error) {
 		return hash, fmt.Errorf("open upload stream: %w", err)
 	}
 	if err := stream.Send(&pb.UploadChunk{
-		Name: filepath.Base(localPath),
+		Name: name,
 		Size: size,
 	}); err != nil {
 		return hash, fmt.Errorf("send metadata: %w", err)

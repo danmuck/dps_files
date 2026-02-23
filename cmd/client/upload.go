@@ -50,7 +50,7 @@ func executeRemoteUploadDir(client *GRPCClient, localPath, rootPath string) ([32
 				Size: subSize,
 			})
 		} else {
-			hash, err := client.Upload(childPath)
+			hash, err := client.Upload(childPath, relPath)
 			if err != nil {
 				return [32]byte{}, 0, fmt.Errorf("upload %s: %w", relPath, err)
 			}
@@ -133,7 +133,7 @@ func executeStoreTargets(cfg RuntimeConfig, client *GRPCClient, filePaths []stri
 
 		// Phase: upload
 		startPhase("upload", "upload file bytes to server")
-		hash, uploadErr := client.Upload(sourcePath)
+		hash, uploadErr := client.Upload(sourcePath, filepath.Base(sourcePath))
 		summary.Timer.End()
 
 		summary.Bytes = sourceSize
