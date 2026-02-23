@@ -16,6 +16,7 @@ import (
 
 var errMenuBack = errors.New("menu back")
 var errMenuExit = errors.New("menu exit")
+var errMenuRefresh = errors.New("menu refresh")
 
 func isInteractiveInput(r *os.File) bool {
 	info, err := r.Stat()
@@ -98,8 +99,14 @@ func promptAction(input io.Reader, cfg *RuntimeConfig, metadataCount int) (MenuA
 		choice := strings.ToLower(strings.TrimSpace(line))
 		switch choice {
 		case "server", "s", "m":
-			if err := handleServerSwitch(reader, cfg); err != nil && !errors.Is(err, errMenuBack) {
-				logs.Printf("Server switch: %v\n", err)
+			switchErr := handleServerSwitch(reader, cfg)
+			if switchErr == nil {
+				// Successfully switched — exit promptAction so the outer loop
+				// can reconnect and refresh metadataCount before re-entering menu.
+				return cfg.Action, "server switch", errMenuRefresh
+			}
+			if !errors.Is(switchErr, errMenuBack) {
+				logs.Printf("Server switch: %v\n", switchErr)
 			}
 			continue
 

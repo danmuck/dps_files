@@ -152,6 +152,10 @@ func runInteractiveSession(cfg RuntimeConfig, client *GRPCClient, input io.Reade
 			logs.Println("Exited keystore menu.")
 			return nil
 		}
+		if errors.Is(err, errMenuRefresh) {
+			// Server was switched — loop back to reconnect and refresh file count.
+			continue
+		}
 		if err != nil {
 			return fmt.Errorf("failed to select action: %w", err)
 		}
