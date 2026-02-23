@@ -24,11 +24,16 @@ func executeDownloadAction(cfg RuntimeConfig, client *GRPCClient, input io.Reade
 	}
 
 	t := cfg.TUI
+	reader := getBufferedReader(input)
+	t.InputLineFU("Tree options [-l N limit, Enter to skip]", "", true)
+	logs.Printf("\n")
+	optLine, _ := reader.ReadString('\n')
+	_, _, limit := parseFSFlags(strings.TrimSpace(optLine))
+
 	t.MenuTitleTC(&tui.TitleParams{Text: fmt.Sprintf("Stored files (%d)", len(entries))})
-	nodes := buildRemoteTreeNodes(entries)
+	nodes := buildRemoteTreeNodes(entries, limit)
 	tvEntries := t.TreeViewTC(&tui.TreeViewParams{Nodes: nodes, ShowIndex: true})
 
-	reader := getBufferedReader(input)
 	var selectedEntry RemoteFileEntry
 	for {
 		t.InputLineFU(fmt.Sprintf("Select file to download [0-%d] (or e to cancel)", len(tvEntries)-1), "", true)
@@ -50,7 +55,13 @@ func executeDownloadAction(cfg RuntimeConfig, client *GRPCClient, input io.Reade
 			logs.Printf("\n")
 			continue
 		}
-		selectedEntry = tvEntries[idx].Node.(remoteTreeNode).Entry
+		node := tvEntries[idx].Node.(remoteTreeNode)
+		if node.IsEllipsis {
+			t.StatusWarnFU("That entry is a placeholder — select a file or directory.")
+			logs.Printf("\n")
+			continue
+		}
+		selectedEntry = node.Entry
 		break
 	}
 

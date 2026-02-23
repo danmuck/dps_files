@@ -225,7 +225,7 @@ func executeActionOnce(cfg RuntimeConfig, client *GRPCClient, input io.Reader) e
 		}
 		return nil
 	case ActionVerify:
-		return executeVerifyAction(cfg, client)
+		return executeVerifyAction(cfg, client, input)
 	case ActionDelete:
 		return executeDeleteAction(cfg, client, input)
 	case ActionExpire:
@@ -264,7 +264,7 @@ func executeActionOnce(cfg RuntimeConfig, client *GRPCClient, input io.Reader) e
 
 		return executeStoreTargets(cfg, client, filePaths)
 	case ActionView:
-		if err := executeViewAction(cfg, client); err != nil {
+		if err := executeViewAction(cfg, client, input); err != nil {
 			return fmt.Errorf("view action failed: %w", err)
 		}
 		return nil

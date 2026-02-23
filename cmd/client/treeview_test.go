@@ -166,7 +166,7 @@ func TestRemoteTreeNodes_DirectoryBeforeOrphan(t *testing.T) {
 	dir := RemoteFileEntry{Name: "mydir", EntryType: "directory", Size: 2048, Hash: fmt.Sprintf("%x", makeHash(1))}
 	orphan := RemoteFileEntry{Name: "orphan.txt", Size: 512, Hash: fmt.Sprintf("%x", makeHash(2))}
 
-	nodes := buildRemoteTreeNodes([]RemoteFileEntry{orphan, dir})
+	nodes := buildRemoteTreeNodes([]RemoteFileEntry{orphan, dir}, 0)
 	entries := renderTree(nodes)
 
 	if len(entries) != 2 {
@@ -188,7 +188,7 @@ func TestRemoteTreeNodes_ChildGroupedUnderDirectory(t *testing.T) {
 	child := RemoteFileEntry{Name: "child.txt", Size: 1024, Hash: fmt.Sprintf("%x", makeHash(2)), ParentHash: dirHash}
 	orphan := RemoteFileEntry{Name: "orphan.txt", Size: 512, Hash: fmt.Sprintf("%x", makeHash(3))}
 
-	nodes := buildRemoteTreeNodes([]RemoteFileEntry{orphan, child, dir})
+	nodes := buildRemoteTreeNodes([]RemoteFileEntry{orphan, child, dir}, 0)
 	entries := renderTree(nodes)
 
 	if len(entries) != 3 {
@@ -213,7 +213,7 @@ func TestRemoteTreeNodes_ChildHasTreePrefix(t *testing.T) {
 	c1 := RemoteFileEntry{Name: "a", Size: 200, Hash: fmt.Sprintf("%x", makeHash(2)), ParentHash: dirHash}
 	c2 := RemoteFileEntry{Name: "b", Size: 100, Hash: fmt.Sprintf("%x", makeHash(3)), ParentHash: dirHash}
 
-	nodes := buildRemoteTreeNodes([]RemoteFileEntry{dir, c2, c1})
+	nodes := buildRemoteTreeNodes([]RemoteFileEntry{dir, c2, c1}, 0)
 	entries := renderTree(nodes)
 
 	if len(entries) != 3 {
@@ -233,7 +233,7 @@ func TestRemoteTreeNodes_SequentialIndices(t *testing.T) {
 	child := RemoteFileEntry{Name: "c", Size: 200, Hash: fmt.Sprintf("%x", makeHash(2)), ParentHash: dirHash}
 	orphan := RemoteFileEntry{Name: "f.txt", Size: 50, Hash: fmt.Sprintf("%x", makeHash(3))}
 
-	nodes := buildRemoteTreeNodes([]RemoteFileEntry{orphan, child, dir})
+	nodes := buildRemoteTreeNodes([]RemoteFileEntry{orphan, child, dir}, 0)
 	entries := renderTree(nodes)
 
 	for i, e := range entries {

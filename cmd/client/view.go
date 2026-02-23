@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -10,7 +11,7 @@ import (
 	logs "github.com/danmuck/smplog"
 )
 
-func executeViewAction(cfg RuntimeConfig, client *GRPCClient) error {
+func executeViewAction(cfg RuntimeConfig, client *GRPCClient, input io.Reader) error {
 	entries, err := client.List()
 	if err != nil {
 		return fmt.Errorf("list files: %w", err)
@@ -20,8 +21,14 @@ func executeViewAction(cfg RuntimeConfig, client *GRPCClient) error {
 		return nil
 	}
 	t := cfg.TUI
+	reader := getBufferedReader(input)
+	t.InputLineFU("Tree options [-l N limit, Enter to skip]", "", true)
+	logs.Printf("\n")
+	optLine, _ := reader.ReadString('\n')
+	_, _, limit := parseFSFlags(strings.TrimSpace(optLine))
+
 	t.MenuTitleTC(&tui.TitleParams{Text: fmt.Sprintf("Stored files (%d)", len(entries))})
-	nodes := buildRemoteTreeNodes(entries)
+	nodes := buildRemoteTreeNodes(entries, limit)
 	t.TreeViewTC(&tui.TreeViewParams{Nodes: nodes, ShowIndex: true})
 	return nil
 }

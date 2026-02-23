@@ -245,6 +245,37 @@ func promptRemoteAddress(reader *bufio.Reader, cfg *RuntimeConfig) (string, erro
 	return addr, nil
 }
 
+// parseFSFlags tokenises input, extracts -d N (depth) and -l N (per-dir limit),
+// and returns the remaining tokens joined as the path.
+// Defaults: depth=5, limit=0 (unlimited).
+func parseFSFlags(input string) (path string, depth, limit int) {
+	depth = 5
+	tokens := strings.Fields(input)
+	var pathTokens []string
+	for i := 0; i < len(tokens); i++ {
+		switch tokens[i] {
+		case "-d":
+			if i+1 < len(tokens) {
+				if n, err := strconv.Atoi(tokens[i+1]); err == nil && n >= 0 {
+					depth = n
+				}
+				i++
+			}
+		case "-l":
+			if i+1 < len(tokens) {
+				if n, err := strconv.Atoi(tokens[i+1]); err == nil && n > 0 {
+					limit = n
+				}
+				i++
+			}
+		default:
+			pathTokens = append(pathTokens, tokens[i])
+		}
+	}
+	path = strings.Join(pathTokens, " ")
+	return path, depth, limit
+}
+
 // promptUploadPath handles the unified upload command.
 func promptUploadPath(input io.Reader, cfg RuntimeConfig) (path string, isDir bool, err error) {
 	t := cfg.TUI
@@ -252,7 +283,7 @@ func promptUploadPath(input io.Reader, cfg RuntimeConfig) (path string, isDir bo
 	reader := getBufferedReader(input)
 
 	for {
-		t.InputLineFU(fmt.Sprintf("Enter path [%s]", cfg.UploadDirectory), "", true)
+		t.InputLineFU(fmt.Sprintf("Enter path [%s]  (-d N depth, -l N limit)", cfg.UploadDirectory), "", true)
 		nl()
 		line, readErr := reader.ReadString('\n')
 		if readErr != nil {
@@ -267,8 +298,10 @@ func promptUploadPath(input io.Reader, cfg RuntimeConfig) (path string, isDir bo
 			return "", false, errMenuBack
 		}
 
-		if candidate != "" {
-			resolved := filepath.Clean(expandPath(candidate))
+		rawPath, depth, limit := parseFSFlags(candidate)
+
+		if rawPath != "" {
+			resolved := filepath.Clean(expandPath(rawPath))
 			info, statErr := os.Stat(resolved)
 			if statErr != nil {
 				logs.Printf("Path not found: %v. Try again or press Enter to browse.\n", statErr)
@@ -278,7 +311,7 @@ func promptUploadPath(input io.Reader, cfg RuntimeConfig) (path string, isDir bo
 				return resolved, false, nil
 			}
 			// Directory path entered: show tree and let user pick.
-			selectedPath, selectedIsDir, selErr := selectFromLocalFSTree(t, reader, resolved)
+			selectedPath, selectedIsDir, selErr := selectFromLocalFSTree(t, reader, resolved, depth, limit)
 			if errors.Is(selErr, errMenuBack) {
 				continue
 			}
@@ -287,7 +320,7 @@ func promptUploadPath(input io.Reader, cfg RuntimeConfig) (path string, isDir bo
 
 		// Empty input: browse cfg.UploadDirectory.
 		uploadDir := filepath.Clean(expandPath(cfg.UploadDirectory))
-		selectedPath, selectedIsDir, selErr := selectFromLocalFSTree(t, reader, uploadDir)
+		selectedPath, selectedIsDir, selErr := selectFromLocalFSTree(t, reader, uploadDir, depth, limit)
 		if errors.Is(selErr, errMenuBack) {
 			continue
 		}
@@ -297,8 +330,8 @@ func promptUploadPath(input io.Reader, cfg RuntimeConfig) (path string, isDir bo
 
 // selectFromLocalFSTree renders a tree view of the local filesystem at rootPath
 // and returns the selected path, whether it's a directory, and any error.
-func selectFromLocalFSTree(t tui.TUI, reader *bufio.Reader, rootPath string) (string, bool, error) {
-	nodes, err := buildLocalFSTreeNodes(rootPath)
+func selectFromLocalFSTree(t tui.TUI, reader *bufio.Reader, rootPath string, maxDepth, limit int) (string, bool, error) {
+	nodes, err := buildLocalFSTreeNodes(rootPath, maxDepth, limit)
 	if err != nil {
 		return "", false, fmt.Errorf("browse %s: %w", rootPath, err)
 	}
@@ -330,6 +363,11 @@ func selectFromLocalFSTree(t tui.TUI, reader *bufio.Reader, rootPath string) (st
 			continue
 		}
 		node := tvEntries[idx].Node.(localFSTreeNode)
+		if node.IsEllipsis {
+			logs.Printf("That entry is a placeholder — select a file or directory.\n")
+			logs.Printf("\n")
+			continue
+		}
 		return node.Path, node.IsDir, nil
 	}
 }
